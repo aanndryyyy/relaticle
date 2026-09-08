@@ -39,7 +39,8 @@ final class UpdateProfileInformation extends BaseLivewireComponent
 
     public function mount(): void
     {
-        $data = $this->authUser()->only(['name', 'email', 'timezone', 'locale']);
+        $data = $this->authUser()->only(['name', 'email', 'timezone']);
+        $data['locale'] = $this->authUser()->chatLocale();
         $data['email'] = $this->confirmedEmailTarget() ?? $data['email'];
 
         $this->form->fill($data);
@@ -113,7 +114,8 @@ final class UpdateProfileInformation extends BaseLivewireComponent
                             ->helperText(__('profile.form.locale.helper_text'))
                             ->placeholder(__('profile.form.locale.placeholder'))
                             ->options(ChatLocales::options())
-                            ->native(false),
+                            ->native(false)
+                            ->selectablePlaceholder(false),
                         Actions::make([
                             Action::make('save')
                                 ->label(__('profile.actions.save'))
@@ -184,7 +186,8 @@ final class UpdateProfileInformation extends BaseLivewireComponent
         }
 
         $this->form->fill([
-            ...$this->authUser()->only(['name', 'email', 'timezone', 'locale']),
+            ...$this->authUser()->only(['name', 'email', 'timezone']),
+            'locale' => $this->authUser()->chatLocale(),
             'profile_photo_path' => null,
         ]);
 
