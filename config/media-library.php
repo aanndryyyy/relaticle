@@ -1,8 +1,8 @@
 <?php
 
 declare(strict_types=1);
+use App\Support\Media\MediaUrlGenerator;
 use App\Support\Media\UploadPathGenerator;
-use App\Support\SameOriginUrlGenerator;
 use Spatie\ImageOptimizer\Optimizers\Avifenc;
 use Spatie\ImageOptimizer\Optimizers\Cwebp;
 use Spatie\ImageOptimizer\Optimizers\Gifsicle;
@@ -128,7 +128,7 @@ return [
      * When urls to files get generated, this class will be called. Use the default
      * if your files are stored locally above the site root or on s3.
      */
-    'url_generator' => SameOriginUrlGenerator::class,
+    'url_generator' => MediaUrlGenerator::class,
 
     /*
      * Moves media on updating to keep path consistent. Enable it only with a custom

@@ -113,10 +113,6 @@ arch('avoid mutation')
         // extension point; PHP forbids a readonly class extending a
         // non-readonly one.
         'App\Http\Controllers\Billing\StripeWebhookController',
-        // Media library resolves this class itself, so it must extend the
-        // generator it replaces; PHP forbids a readonly class extending a
-        // non-readonly one.
-        'App\Support\SameOriginUrlGenerator',
         'App\Http\Requests',
         'App\Http\Resources',
         'App\Jobs',
@@ -170,9 +166,6 @@ arch('avoid inheritance')
         // Overrides Cashier's subscription-created handler so an abandoned
         // checkout does not consume the workspace's generic trial.
         'App\Http\Controllers\Billing\StripeWebhookController',
-        // Overrides the media library's URL generator, the documented seam for
-        // rewriting a media URL, so it must extend the default it replaces.
-        'App\Support\SameOriginUrlGenerator',
         'App\Http\Requests',
         'App\Http\Resources',
         'App\Jobs',
