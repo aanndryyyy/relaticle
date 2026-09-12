@@ -25,11 +25,11 @@ final readonly class CustomFieldsController
         /** @var User $user */
         $user = $request->user();
 
-        $teamId = $user->currentTeam->getKey();
+        $workspaceId = $user->currentWorkspace->getKey();
 
         $query = CustomField::query()
             ->withoutGlobalScopes()
-            ->where('tenant_id', $teamId)
+            ->where('tenant_id', $workspaceId)
             ->active()
             ->with(['options' => fn (Relation $q): Relation => $q->withoutGlobalScopes()]);
 

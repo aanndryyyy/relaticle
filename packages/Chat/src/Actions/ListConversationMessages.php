@@ -77,7 +77,7 @@ final readonly class ListConversationMessages
             : DB::table('pending_actions')
                 ->whereIn('id', $pendingIds)
                 ->where('user_id', $user->getKey())
-                ->where('team_id', $user->current_team_id)
+                ->where('workspace_id', $user->current_workspace_id)
                 ->get(['id', 'status', 'entity_type', 'turn_id', 'result_data', 'expires_at'])
                 ->keyBy('id')
                 ->map(fn (stdClass $row): array => [

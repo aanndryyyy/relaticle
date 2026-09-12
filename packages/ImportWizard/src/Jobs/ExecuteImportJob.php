@@ -88,7 +88,7 @@ final class ExecuteImportJob implements ShouldQueue
 
     public function __construct(
         private readonly string $importId,
-        private readonly string $teamId,
+        private readonly string $workspaceId,
     ) {
         $this->onQueue('imports');
     }
@@ -103,7 +103,7 @@ final class ExecuteImportJob implements ShouldQueue
     {
         $import = Import::query()->findOrFail($this->importId);
 
-        if ($import->team_id !== $this->teamId) {
+        if ($import->workspace_id !== $this->workspaceId) {
             return;
         }
 
@@ -139,7 +139,7 @@ final class ExecuteImportJob implements ShouldQueue
             : null;
 
         $context = [
-            'team_id' => $this->teamId,
+            'workspace_id' => $this->workspaceId,
             'creator_id' => $import->user_id,
         ];
 
@@ -282,7 +282,7 @@ final class ExecuteImportJob implements ShouldQueue
                 $prepared = array_intersect_key($prepared, $allowedKeys);
 
                 if (! $isCreate) {
-                    unset($prepared['team_id'], $prepared['creator_id'], $prepared['creation_source']);
+                    unset($prepared['workspace_id'], $prepared['creator_id'], $prepared['creation_source']);
                     $prepared = array_filter($prepared, filled(...));
                 }
 
@@ -335,7 +335,7 @@ final class ExecuteImportJob implements ShouldQueue
         return CustomField::query()
             ->withoutGlobalScopes()
             ->with(['options' => fn (Relation $q): Relation => $q->withoutGlobalScopes()])
-            ->where('tenant_id', $this->teamId)
+            ->where('tenant_id', $this->workspaceId)
             ->where('entity_type', $importer->entityName())
             ->where('type', '!=', 'record')
             ->active()
@@ -392,7 +392,7 @@ final class ExecuteImportJob implements ShouldQueue
                 'entity_type' => $record->getMorphClass(),
                 'entity_id' => $record->getKey(),
                 'custom_field_id' => $cf->getKey(),
-                $tenantKey => $this->teamId,
+                $tenantKey => $this->workspaceId,
                 'string_value' => null,
                 'text_value' => null,
                 'integer_value' => null,
@@ -443,7 +443,7 @@ final class ExecuteImportJob implements ShouldQueue
                 ->where('entity_type', $entityType)
                 ->where('entity_id', $entityId)
                 ->where('custom_field_id', $cfId)
-                ->where($tenantKey, $this->teamId)
+                ->where($tenantKey, $this->workspaceId)
                 ->value('json_value');
 
             if ($dbRow !== null) {
@@ -554,7 +554,7 @@ final class ExecuteImportJob implements ShouldQueue
         $modelClass = $importer->modelClass();
 
         return $modelClass::query()
-            ->where('team_id', $this->teamId)
+            ->where('workspace_id', $this->workspaceId)
             ->whereIn((new $modelClass)->getKeyName(), $updateIds)
             ->get()
             ->keyBy(fn (Model $model): string => (string) $model->getKey())
@@ -593,7 +593,7 @@ final class ExecuteImportJob implements ShouldQueue
         $rows = collect($this->failedRows)->map(fn (array $row): array => [
             'id' => (string) Str::ulid(),
             'import_id' => $import->id,
-            'team_id' => $this->teamId,
+            'workspace_id' => $this->workspaceId,
             'data' => json_encode($row['data'] ?? ['row_number' => $row['row']]),
             'validation_error' => $row['error'],
             'created_at' => $now,
@@ -799,7 +799,7 @@ final class ExecuteImportJob implements ShouldQueue
         $keys = collect($importer->allFields())
             ->reject(fn (ImportField $field): bool => $field->key === 'id')
             ->pluck('key')
-            ->merge(['team_id', 'creator_id', 'creation_source'])
+            ->merge(['workspace_id', 'creator_id', 'creation_source'])
             ->merge(
                 collect($importer->entityLinks())
                     ->pluck('foreignKey')
@@ -820,7 +820,7 @@ final class ExecuteImportJob implements ShouldQueue
         $modelClass = $importer->modelClass();
 
         return $modelClass::query()
-            ->where('team_id', $this->teamId)
+            ->where('workspace_id', $this->workspaceId)
             ->find($matchedId);
     }
 
@@ -988,7 +988,7 @@ final class ExecuteImportJob implements ShouldQueue
         $record = new $link->targetModelClass;
         $record->forceFill([
             'name' => $creationName,
-            'team_id' => $context['team_id'],
+            'workspace_id' => $context['workspace_id'],
             'creator_id' => $context['creator_id'],
             'creation_source' => CreationSource::IMPORT,
         ]);
@@ -1033,7 +1033,7 @@ final class ExecuteImportJob implements ShouldQueue
 
         $cf = CustomField::query()
             ->withoutGlobalScopes()
-            ->where('tenant_id', $context['team_id'])
+            ->where('tenant_id', $context['workspace_id'])
             ->where('entity_type', $link->targetEntity)
             ->where('code', $fieldCode)
             ->first();
@@ -1054,7 +1054,7 @@ final class ExecuteImportJob implements ShouldQueue
             'entity_type' => $record->getMorphClass(),
             'entity_id' => $record->getKey(),
             'custom_field_id' => $cf->getKey(),
-            $tenantKey => $context['team_id'],
+            $tenantKey => $context['workspace_id'],
             'string_value' => null,
             'text_value' => null,
             'integer_value' => null,
@@ -1079,7 +1079,7 @@ final class ExecuteImportJob implements ShouldQueue
         string $dedupKey,
     ): ?string {
         $record = $link->targetModelClass::query()
-            ->where('team_id', $context['team_id'])
+            ->where('workspace_id', $context['workspace_id'])
             ->where('name', $name)
             ->first();
 

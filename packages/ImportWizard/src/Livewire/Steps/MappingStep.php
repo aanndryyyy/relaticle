@@ -244,7 +244,7 @@ final class MappingStep extends Component implements HasActions, HasForms
         $headers = $this->headers();
         $inferencer = new DataTypeInferencer(
             entityName: $this->entityType->value,
-            teamId: $this->import()->team_id,
+            workspaceId: $this->import()->workspace_id,
         );
         $allFields = $this->allFields();
 

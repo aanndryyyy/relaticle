@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
-use App\Actions\Chat\SeedTeamCreditBalance;
+use App\Actions\Chat\SeedWorkspaceCreditBalance;
 use App\Actions\Company\CreateCompany;
 use App\Actions\CustomFields\CreateCustomField;
 use App\Actions\CustomFields\UpdateCustomField;
@@ -23,8 +23,8 @@ use App\Models\Note;
 use App\Models\Opportunity;
 use App\Models\People;
 use App\Models\Task;
-use App\Models\Team;
 use App\Models\User;
+use App\Models\Workspace;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
@@ -51,9 +51,9 @@ final class ResetDemoAccountCommand extends Command
 
     public const string EMAIL = 'demo@relaticle.com';
 
-    public const string TEAM_NAME = 'Relaticle Reviewer Workspace';
+    public const string WORKSPACE_NAME = 'Relaticle Reviewer Workspace';
 
-    public const string TEAM_SLUG = 'relaticle-reviewer-workspace';
+    public const string WORKSPACE_SLUG = 'relaticle-reviewer-workspace';
 
     public const string INACTIVE_FIELD_CODE = 'reviewer_archived_segment';
 
@@ -67,7 +67,7 @@ final class ResetDemoAccountCommand extends Command
         private readonly CreatePeople $createPeople,
         private readonly CreateTask $createTask,
         private readonly OnboardSeedManager $onboardSeedManager,
-        private readonly SeedTeamCreditBalance $seedTeamCreditBalance,
+        private readonly SeedWorkspaceCreditBalance $seedWorkspaceCreditBalance,
         private readonly UpdateCustomField $updateCustomField,
         private readonly UpdateOpportunity $updateOpportunity,
         private readonly UpdateTask $updateTask,
@@ -91,48 +91,48 @@ final class ResetDemoAccountCommand extends Command
         }
 
         $user = $this->reviewer($existing, $password);
-        $team = $user->ownedTeams()->where('personal_team', true)->first();
+        $workspace = $user->ownedWorkspaces()->where('personal_workspace', true)->first();
 
-        throw_unless($team instanceof Team, RuntimeException::class, 'Demo user has no personal team; reviewer workspace setup failed.');
+        throw_unless($workspace instanceof Workspace, RuntimeException::class, 'Demo user has no personal workspace; reviewer workspace setup failed.');
 
-        $team->forceFill([
-            'name' => self::TEAM_NAME,
-            'slug' => $this->reviewerSlug($team),
+        $workspace->forceFill([
+            'name' => self::WORKSPACE_NAME,
+            'slug' => $this->reviewerSlug($workspace),
             'hosted_free_grandfathered_at' => now(),
             'trial_ends_at' => null,
             'scheduled_deletion_at' => null,
         ])->save();
 
-        $user->forceFill(['current_team_id' => $team->getKey()])->save();
-        $user->setRelation('currentTeam', $team);
+        $user->forceFill(['current_workspace_id' => $workspace->getKey()])->save();
+        $user->setRelation('currentWorkspace', $workspace);
 
         $previousTenantId = TenantContextService::getCurrentTenantId();
-        TenantContextService::setTenantId($team->getKey());
+        TenantContextService::setTenantId($workspace->getKey());
 
         // Records are created through the same actions the app uses, and those stamp
-        // team_id and creator_id from the authenticated user.
+        // workspace_id and creator_id from the authenticated user.
         Auth::setUser($user);
 
         $seededCompanies = new EloquentCollection;
 
         try {
-            DB::transaction(function () use ($user, $team, &$seededCompanies): void {
-                $this->resetReviewerWorkspace($team);
+            DB::transaction(function () use ($user, $workspace, &$seededCompanies): void {
+                $this->resetReviewerWorkspace($workspace);
 
                 throw_unless(
-                    $this->onboardSeedManager->generateFor($user, $team, 'sales'),
+                    $this->onboardSeedManager->generateFor($user, $workspace, 'sales'),
                     RuntimeException::class,
                     'Reviewer workspace fixtures could not be generated.',
                 );
 
-                $seededCompanies = Company::query()->where('team_id', $team->getKey())->get();
+                $seededCompanies = Company::query()->where('workspace_id', $workspace->getKey())->get();
 
-                $this->resetAiCredits($team);
-                $this->shapeOpportunities($user, $team);
-                $this->shapeTasks($user, $team);
-                $this->expandWorkspace($user, $team);
-                $this->ensureInactiveField($user, $team);
-                $this->recordCreationActivity($user, $team);
+                $this->resetAiCredits($workspace);
+                $this->shapeOpportunities($user, $workspace);
+                $this->shapeTasks($user, $workspace);
+                $this->expandWorkspace($user, $workspace);
+                $this->ensureInactiveField($user, $workspace);
+                $this->recordCreationActivity($user, $workspace);
             });
             $this->fetchCompanyLogos($seededCompanies);
         } finally {
@@ -140,7 +140,7 @@ final class ResetDemoAccountCommand extends Command
             TenantContextService::setTenantId($previousTenantId);
         }
 
-        $this->components->info(sprintf('Demo account %s is ready in workspace "%s" (%s).', self::EMAIL, $team->name, $team->slug));
+        $this->components->info(sprintf('Demo account %s is ready in workspace "%s" (%s).', self::EMAIL, $workspace->name, $workspace->slug));
         $this->components->twoColumnDetail('Password', $password === null ? 'unchanged' : 'updated');
 
         return self::SUCCESS;
@@ -180,7 +180,7 @@ final class ResetDemoAccountCommand extends Command
         }
 
         if (! $user instanceof User) {
-            return User::factory()->withPersonalTeam()->create([
+            return User::factory()->withPersonalWorkspace()->create([
                 'email' => self::EMAIL,
                 ...$attributes,
             ]);
@@ -192,75 +192,75 @@ final class ResetDemoAccountCommand extends Command
     }
 
     /**
-     * Team slugs are deliberately frozen after creation (`doNotGenerateSlugsOnUpdate`),
-     * so renaming the personal team to TEAM_NAME leaves it on the factory-derived slug
+     * Workspace slugs are deliberately frozen after creation (`doNotGenerateSlugsOnUpdate`),
+     * so renaming the personal workspace to WORKSPACE_NAME leaves it on the factory-derived slug
      * the account was created with. Reviewers read this slug in every record URL the
      * search and fetch tools return, so claim the readable one when it is available and
-     * keep the existing slug when another team already holds it.
+     * keep the existing slug when another workspace already holds it.
      */
-    private function reviewerSlug(Team $team): string
+    private function reviewerSlug(Workspace $workspace): string
     {
-        if ($team->slug === self::TEAM_SLUG) {
-            return self::TEAM_SLUG;
+        if ($workspace->slug === self::WORKSPACE_SLUG) {
+            return self::WORKSPACE_SLUG;
         }
 
-        $taken = Team::query()
-            ->where('slug', self::TEAM_SLUG)
-            ->whereKeyNot($team->getKey())
+        $taken = Workspace::query()
+            ->where('slug', self::WORKSPACE_SLUG)
+            ->whereKeyNot($workspace->getKey())
             ->exists();
 
-        return $taken ? $team->slug : self::TEAM_SLUG;
+        return $taken ? $workspace->slug : self::WORKSPACE_SLUG;
     }
 
     // Child rows are deleted explicitly rather than left to `on delete cascade`,
     // because production is missing several of the foreign keys this schema declares.
-    private function resetReviewerWorkspace(Team $team): void
+    private function resetReviewerWorkspace(Workspace $workspace): void
     {
-        $teamId = $team->getKey();
-        $taskIds = Task::query()->withTrashed()->where('team_id', $teamId)->pluck('id');
-        $noteIds = Note::query()->withTrashed()->where('team_id', $teamId)->pluck('id');
-        $conversationIds = DB::table('agent_conversations')->where('team_id', $teamId)->pluck('id');
+        $workspaceId = $workspace->getKey();
+        $taskIds = Task::query()->withTrashed()->where('workspace_id', $workspaceId)->pluck('id');
+        $noteIds = Note::query()->withTrashed()->where('workspace_id', $workspaceId)->pluck('id');
+        $conversationIds = DB::table('agent_conversations')->where('workspace_id', $workspaceId)->pluck('id');
 
         DB::table('taskables')->whereIn('task_id', $taskIds)->delete();
         DB::table('task_user')->whereIn('task_id', $taskIds)->delete();
         DB::table('noteables')->whereIn('note_id', $noteIds)->delete();
-        DB::table('custom_field_values')->where('tenant_id', $teamId)->delete();
-        DB::table('chat_message_feedback')->where('team_id', $teamId)->delete();
-        DB::table('pending_actions')->where('team_id', $teamId)->delete();
+        DB::table('custom_field_values')->where('tenant_id', $workspaceId)->delete();
+        DB::table('chat_message_feedback')->where('workspace_id', $workspaceId)->delete();
+        DB::table('pending_actions')->where('workspace_id', $workspaceId)->delete();
         DB::table('agent_conversation_messages')->whereIn('conversation_id', $conversationIds)->delete();
-        DB::table('agent_conversations')->where('team_id', $teamId)->delete();
-        DB::table('failed_import_rows')->where('team_id', $teamId)->delete();
-        DB::table('imports')->where('team_id', $teamId)->delete();
-        DB::table('exports')->where('team_id', $teamId)->delete();
-        DB::table('team_invitations')->where('team_id', $teamId)->delete();
-        Activity::query()->withoutGlobalScopes()->where('team_id', $teamId)->delete();
+        DB::table('agent_conversations')->where('workspace_id', $workspaceId)->delete();
+        DB::table('failed_import_rows')->where('workspace_id', $workspaceId)->delete();
+        DB::table('imports')->where('workspace_id', $workspaceId)->delete();
+        DB::table('exports')->where('workspace_id', $workspaceId)->delete();
+        DB::table('workspace_invitations')->where('workspace_id', $workspaceId)->delete();
+        Activity::query()->withoutGlobalScopes()->where('workspace_id', $workspaceId)->delete();
 
         Company::query()
-            ->where('team_id', $teamId)
+            ->where('workspace_id', $workspaceId)
             ->each(function (Company $company): void {
                 $company->clearMediaCollection(Company::LOGO_MEDIA_COLLECTION);
             });
 
-        Model::withoutEvents(function () use ($teamId): void {
-            Note::query()->withTrashed()->where('team_id', $teamId)->forceDelete();
-            Task::query()->withTrashed()->where('team_id', $teamId)->forceDelete();
-            Opportunity::query()->withTrashed()->where('team_id', $teamId)->forceDelete();
-            People::query()->withTrashed()->where('team_id', $teamId)->forceDelete();
-            Company::query()->withTrashed()->where('team_id', $teamId)->forceDelete();
+        Model::withoutEvents(function () use ($workspaceId): void {
+            Note::query()->withTrashed()->where('workspace_id', $workspaceId)->forceDelete();
+            Task::query()->withTrashed()->where('workspace_id', $workspaceId)->forceDelete();
+            Opportunity::query()->withTrashed()->where('workspace_id', $workspaceId)->forceDelete();
+            People::query()->withTrashed()->where('workspace_id', $workspaceId)->forceDelete();
+            Company::query()->withTrashed()->where('workspace_id', $workspaceId)->forceDelete();
         });
     }
 
-    private function resetAiCredits(Team $team): void
+    private function resetAiCredits(Workspace $workspace): void
     {
-        DB::table('ai_credit_transactions')->where('team_id', $team->getKey())->delete();
-        DB::table('ai_credit_balances')->where('team_id', $team->getKey())->delete();
+        DB::table('ai_credit_transactions')->where('workspace_id', $workspace->getKey())->delete();
+        DB::table('ai_credit_balances')->where('workspace_id', $workspace->getKey())->delete();
 
-        $this->seedTeamCreditBalance->execute($team);
+        $this->seedWorkspaceCreditBalance->execute($workspace);
     }
 
-    private function shapeOpportunities(User $user, Team $team): void
+    private function shapeOpportunities(User $user, Workspace $workspace): void
     {
-        $stageField = $this->field($team, 'opportunity', 'stage');
+        $stageField = $this->field($workspace, 'opportunity', 'stage');
         $stageIds = $stageField->options()
             ->withoutGlobalScopes()
             ->pluck('id', 'name');
@@ -275,11 +275,11 @@ final class ResetDemoAccountCommand extends Command
 
         foreach ($specifications as $name => $specification) {
             $opportunity = Opportunity::query()
-                ->where('team_id', $team->getKey())
+                ->where('workspace_id', $workspace->getKey())
                 ->where('name', $name)
                 ->firstOrFail();
             $person = People::query()
-                ->where('team_id', $team->getKey())
+                ->where('workspace_id', $workspace->getKey())
                 ->where('name', $specification['person'])
                 ->firstOrFail();
 
@@ -292,9 +292,9 @@ final class ResetDemoAccountCommand extends Command
         }
     }
 
-    private function shapeTasks(User $user, Team $team): void
+    private function shapeTasks(User $user, Workspace $workspace): void
     {
-        $statusField = $this->field($team, 'task', 'status');
+        $statusField = $this->field($workspace, 'task', 'status');
         $statusIds = $statusField->options()
             ->withoutGlobalScopes()
             ->pluck('id', 'name');
@@ -337,19 +337,19 @@ final class ResetDemoAccountCommand extends Command
 
         foreach ($specifications as $title => $specification) {
             $task = Task::query()
-                ->where('team_id', $team->getKey())
+                ->where('workspace_id', $workspace->getKey())
                 ->where('title', $title)
                 ->firstOrFail();
             $company = Company::query()
-                ->where('team_id', $team->getKey())
+                ->where('workspace_id', $workspace->getKey())
                 ->where('name', $specification['company'])
                 ->firstOrFail();
             $person = People::query()
-                ->where('team_id', $team->getKey())
+                ->where('workspace_id', $workspace->getKey())
                 ->where('name', $specification['person'])
                 ->firstOrFail();
             $opportunity = Opportunity::query()
-                ->where('team_id', $team->getKey())
+                ->where('workspace_id', $workspace->getKey())
                 ->where('name', $specification['opportunity'])
                 ->firstOrFail();
 
@@ -368,13 +368,13 @@ final class ResetDemoAccountCommand extends Command
 
     // The onboarding fixture set is too small for reviewers to exercise pagination,
     // filters and aggregation, so the pipeline is deepened on top of it.
-    private function expandWorkspace(User $user, Team $team): void
+    private function expandWorkspace(User $user, Workspace $workspace): void
     {
         $companies = $this->createCompanies($user);
         $people = $this->createPeople($user, $companies);
-        $opportunities = $this->createOpportunities($user, $team, $companies, $people);
+        $opportunities = $this->createOpportunities($user, $workspace, $companies, $people);
 
-        $this->createTasks($user, $team, $companies, $people, $opportunities);
+        $this->createTasks($user, $workspace, $companies, $people, $opportunities);
         $this->createNotes($user, $companies, $people, $opportunities);
     }
 
@@ -431,9 +431,9 @@ final class ResetDemoAccountCommand extends Command
      * @param  array<string, People>  $people
      * @return array<string, Opportunity>
      */
-    private function createOpportunities(User $user, Team $team, array $companies, array $people): array
+    private function createOpportunities(User $user, Workspace $workspace, array $companies, array $people): array
     {
-        $stageIds = $this->field($team, 'opportunity', 'stage')
+        $stageIds = $this->field($workspace, 'opportunity', 'stage')
             ->options()
             ->withoutGlobalScopes()
             ->pluck('id', 'name');
@@ -461,13 +461,13 @@ final class ResetDemoAccountCommand extends Command
      * @param  array<string, People>  $people
      * @param  array<string, Opportunity>  $opportunities
      */
-    private function createTasks(User $user, Team $team, array $companies, array $people, array $opportunities): void
+    private function createTasks(User $user, Workspace $workspace, array $companies, array $people, array $opportunities): void
     {
-        $statusIds = $this->field($team, 'task', 'status')
+        $statusIds = $this->field($workspace, 'task', 'status')
             ->options()
             ->withoutGlobalScopes()
             ->pluck('id', 'name');
-        $priorityIds = $this->field($team, 'task', 'priority')
+        $priorityIds = $this->field($workspace, 'task', 'priority')
             ->options()
             ->withoutGlobalScopes()
             ->pluck('id', 'name');
@@ -604,7 +604,7 @@ final class ResetDemoAccountCommand extends Command
     {
         return [
             'Send Stripe billing quote' => ['company' => 'Stripe', 'contact' => 'Marcus Webb', 'opportunity' => 'Stripe Billing Rollout', 'status' => 'In progress', 'priority' => 'High', 'due_in_days' => -3, 'assigned' => true, 'description' => 'Finalise usage tiers and send the signed quote for the billing rollout.'],
-            'Chase Shopify security review' => ['company' => 'Shopify', 'contact' => 'Rachel Osei', 'opportunity' => 'Shopify Merchant Analytics', 'status' => 'To do', 'priority' => 'High', 'due_in_days' => -1, 'assigned' => true, 'description' => 'Security team still owes us the completed questionnaire before procurement starts.'],
+            'Chase Shopify security review' => ['company' => 'Shopify', 'contact' => 'Rachel Osei', 'opportunity' => 'Shopify Merchant Analytics', 'status' => 'To do', 'priority' => 'High', 'due_in_days' => -1, 'assigned' => true, 'description' => 'Security workspace still owes us the completed questionnaire before procurement starts.'],
             'Collect Datadog usage baseline' => ['company' => 'Datadog', 'contact' => 'Sofia Grimaldi', 'opportunity' => 'Datadog Monitoring Bundle', 'status' => 'To do', 'priority' => 'Medium', 'due_in_days' => -4, 'assigned' => false, 'description' => 'Pull last quarter of host counts so the bundle is sized against real usage.'],
             'Prep Slack Enterprise Grid demo' => ['company' => 'Slack', 'contact' => 'Nina Alvarez', 'opportunity' => 'Slack Enterprise Grid', 'status' => 'To do', 'priority' => 'High', 'due_in_days' => 1, 'assigned' => true, 'description' => 'Tailor the demo around shared channels and their compliance requirements.'],
             'Draft Linear onboarding plan' => ['company' => 'Linear', 'contact' => 'Elena Duarte', 'opportunity' => 'Linear Workflow Sync', 'status' => 'In progress', 'priority' => 'Medium', 'due_in_days' => 3, 'assigned' => true, 'description' => 'Two-week rollout covering workflow mapping and admin training.'],
@@ -617,7 +617,7 @@ final class ResetDemoAccountCommand extends Command
             'Send Amplitude case study' => ['company' => 'Amplitude', 'contact' => 'Helena Roth', 'opportunity' => 'Amplitude Product Insights', 'status' => 'To do', 'priority' => 'Low', 'due_in_days' => 12, 'assigned' => false, 'description' => 'Share the product analytics case study she asked for on the intro call.'],
             'Confirm Retool sandbox access' => ['company' => 'Retool', 'contact' => 'Hugo Marchand', 'opportunity' => 'Retool Internal Tools', 'status' => 'In progress', 'priority' => 'Medium', 'due_in_days' => 4, 'assigned' => true, 'description' => 'Their architect needs sandbox credentials before the technical review.'],
             'Follow up with Loom on renewal' => ['company' => 'Loom', 'contact' => 'Mei Tanaka', 'opportunity' => '', 'status' => 'To do', 'priority' => 'Medium', 'due_in_days' => 9, 'assigned' => true, 'description' => 'Renewal conversation opens next month; confirm the seat count first.'],
-            'Introduce Airtable to the data team' => ['company' => 'Airtable', 'contact' => 'Gabriel Ruiz', 'opportunity' => '', 'status' => 'To do', 'priority' => 'Low', 'due_in_days' => 15, 'assigned' => false, 'description' => 'Warm introduction between their data platform manager and our engineers.'],
+            'Introduce Airtable to the data workspace' => ['company' => 'Airtable', 'contact' => 'Gabriel Ruiz', 'opportunity' => '', 'status' => 'To do', 'priority' => 'Low', 'due_in_days' => 15, 'assigned' => false, 'description' => 'Warm introduction between their data platform manager and our engineers.'],
             'Recap Webflow platform review' => ['company' => 'Webflow', 'contact' => 'Isaac Mbeki', 'opportunity' => '', 'status' => 'Done', 'priority' => 'Low', 'due_in_days' => -8, 'assigned' => true, 'description' => 'Platform review went well; they will revisit budget next quarter.'],
         ];
     }
@@ -634,15 +634,15 @@ final class ResetDemoAccountCommand extends Command
             'Ramp rollout retrospective' => ['company' => 'Ramp', 'contact' => 'Owen Bradshaw', 'opportunity' => 'Ramp Spend Controls', 'body' => 'Spend controls went live on schedule. Finance ops asked for a quarterly check-in and flagged interest in the approvals module.'],
             'Miro deal loss debrief' => ['company' => 'Miro', 'contact' => 'Anton Volkov', 'opportunity' => 'Miro Workshop Licences', 'body' => 'Lost on budget, not on product. Workshop licences were cut in their planning cycle; revisit in the next fiscal year.'],
             'Zapier integration scope' => ['company' => 'Zapier', 'contact' => 'Fiona Doyle', 'opportunity' => 'Zapier Automation Tier', 'body' => 'Two-way sync for contacts and deals, with retries handled on their side. Legal is reviewing the data processing addendum.'],
-            'Amplitude analytics goals' => ['company' => 'Amplitude', 'contact' => 'Helena Roth', 'opportunity' => 'Amplitude Product Insights', 'body' => 'They want activation and retention dashboards in the first month. Product analytics team of six, expanding next quarter.'],
+            'Amplitude analytics goals' => ['company' => 'Amplitude', 'contact' => 'Helena Roth', 'opportunity' => 'Amplitude Product Insights', 'body' => 'They want activation and retention dashboards in the first month. Product analytics workspace of six, expanding next quarter.'],
         ];
     }
 
-    private function ensureInactiveField(User $user, Team $team): void
+    private function ensureInactiveField(User $user, Workspace $workspace): void
     {
         $field = CustomField::query()
             ->withoutGlobalScopes()
-            ->where('tenant_id', $team->getKey())
+            ->where('tenant_id', $workspace->getKey())
             ->where('entity_type', 'company')
             ->where('code', self::INACTIVE_FIELD_CODE)
             ->first();
@@ -662,10 +662,10 @@ final class ResetDemoAccountCommand extends Command
         ]);
     }
 
-    private function recordCreationActivity(User $user, Team $team): void
+    private function recordCreationActivity(User $user, Workspace $workspace): void
     {
         $companies = Company::query()
-            ->where('team_id', $team->getKey())
+            ->where('workspace_id', $workspace->getKey())
             ->orderBy('name')
             ->get();
 
@@ -679,11 +679,11 @@ final class ResetDemoAccountCommand extends Command
         }
     }
 
-    private function field(Team $team, string $entityType, string $code): CustomField
+    private function field(Workspace $workspace, string $entityType, string $code): CustomField
     {
         $field = CustomField::query()
             ->withoutGlobalScopes()
-            ->where('tenant_id', $team->getKey())
+            ->where('tenant_id', $workspace->getKey())
             ->where('entity_type', $entityType)
             ->where('code', $code)
             ->with(['options' => fn (Relation $query): Relation => $query->withoutGlobalScopes()])
