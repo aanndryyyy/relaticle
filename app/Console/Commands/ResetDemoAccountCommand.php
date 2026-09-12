@@ -687,7 +687,7 @@ final class ResetDemoAccountCommand extends Command
             ->where('entity_type', $entityType)
             ->where('code', $code)
             ->with(['options' => fn (Relation $query): Relation => $query->withoutGlobalScopes()])
-            ->firstOrFail();
+            ->first();
 
         throw_unless($field instanceof CustomField, RuntimeException::class, "Custom field {$entityType}.{$code} is missing from the reviewer workspace.");
 

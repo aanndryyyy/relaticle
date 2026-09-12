@@ -122,7 +122,7 @@ final class TeamMembers extends BaseLivewireComponent implements Tables\Contract
     }
 
     /**
-     * @return Collection<string, array<string, mixed>>|LengthAwarePaginator<int, array<string, mixed>>
+     * @return Collection<string, array<string, mixed>>|LengthAwarePaginator<string, array<string, mixed>>
      */
     private function roster(?string $search, int|string $page, int|string $recordsPerPage): Collection|LengthAwarePaginator
     {

@@ -219,7 +219,7 @@ final class ValidateColumnJob implements ShouldQueue
         }
 
         $importer = $import->getImporter();
-        $this->column->importField = $importer->allFields()->get($this->column->target);
+        $this->column->importField = $importer->allFields()->getByKey($this->column->target);
     }
 
     /**

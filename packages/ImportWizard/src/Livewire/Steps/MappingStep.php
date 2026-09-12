@@ -131,7 +131,7 @@ final class MappingStep extends Component implements HasActions, HasForms
             return null;
         }
 
-        return $this->allFields()->get($mapping->target);
+        return $this->allFields()->getByKey($mapping->target);
     }
 
     /** @return array{linkKey: string, link: EntityLink, matcherKey: string}|null */

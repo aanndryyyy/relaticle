@@ -147,7 +147,7 @@ final class Import extends Model
         return ColumnData::collect($raw, Collection::class)
             ->each(function (ColumnData $col) use ($fields, $entityLinks): void {
                 if ($col->isFieldMapping()) {
-                    $col->importField = $fields->get($col->target);
+                    $col->importField = $fields->getByKey($col->target);
                 } else {
                     $col->entityLinkField = $entityLinks->get($col->entityLink);
                 }

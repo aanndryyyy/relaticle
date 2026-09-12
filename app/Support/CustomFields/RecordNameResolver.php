@@ -19,7 +19,10 @@ final readonly class RecordNameResolver
 
     public function __construct()
     {
-        $this->names = new Collection;
+        /** @var Collection<string, ?string> $names */
+        $names = new Collection;
+
+        $this->names = $names;
     }
 
     /** @param  iterable<Model>  $models */

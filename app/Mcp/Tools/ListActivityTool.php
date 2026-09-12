@@ -89,9 +89,11 @@ final class ListActivityTool extends Tool
         $days = (int) ($validated['days'] ?? 7);
         $page = (int) ($validated['page'] ?? 1);
 
-        $entities = $recordType instanceof CrmEntity ? [$recordType] : CrmEntity::cases();
+        foreach (CrmEntity::cases() as $entity) {
+            if ($recordType instanceof CrmEntity && $entity !== $recordType) {
+                continue;
+            }
 
-        foreach ($entities as $entity) {
             if ($user->cannot('viewAny', $entity->model())) {
                 return Response::error('You do not have permission to view CRM activity.');
             }
