@@ -19,7 +19,7 @@ final class EditTeam extends EditTenantProfile
 
     protected string $view = 'filament.pages.edit-team';
 
-    protected static ?string $slug = 'team';
+    protected static ?string $slug = 'workspace';
 
     protected static ?int $navigationSort = 2;
 

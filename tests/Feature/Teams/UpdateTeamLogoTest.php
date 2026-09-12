@@ -6,12 +6,15 @@ use App\Filament\Pages\EditTeam;
 use App\Livewire\App\Teams\UpdateTeamLogo;
 use App\Models\Team;
 use App\Models\User;
+use App\Support\SameOriginUrlGenerator;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\SpatieMediaLibraryFileUpload;
+use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 
-mutates(UpdateTeamLogo::class);
+mutates(UpdateTeamLogo::class, SameOriginUrlGenerator::class);
 
 beforeEach(function (): void {
     Storage::fake('public');
@@ -126,6 +129,30 @@ it('replaces the workspace initials avatar with the logo url', function (): void
 
 it('falls back to the generated initials avatar without a logo', function (): void {
     expect($this->team->getFilamentAvatarUrl())->toContain('data:image/svg+xml');
+});
+
+it('previews a stored logo from the requesting host so the panel subdomain can fetch it', function (): void {
+    config(['app.url' => 'https://relaticle.test']);
+    Storage::fake('public', ['url' => 'https://relaticle.test/storage']);
+
+    $this->team
+        ->addMedia(UploadedFile::fake()->image('logo.png', 120, 120))
+        ->toMediaCollection(Team::LOGO_MEDIA_COLLECTION);
+
+    app()->instance('request', Request::create('https://app.relaticle.test/'));
+
+    $logo = Livewire::test(UpdateTeamLogo::class, ['team' => $this->team])
+        ->instance()
+        ->getSchema('form')
+        ->getComponent('logo');
+
+    expect($logo)->toBeInstanceOf(SpatieMediaLibraryFileUpload::class);
+
+    /** @var SpatieMediaLibraryFileUpload $logo */
+    $urls = array_column($logo->getUploadedFiles() ?? [], 'url');
+
+    expect($urls)->toHaveCount(1)
+        ->and($urls[0])->toStartWith('https://app.relaticle.test/storage/');
 });
 
 it('refuses a logo change from a member who does not own the workspace', function (): void {

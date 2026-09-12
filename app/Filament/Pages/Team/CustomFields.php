@@ -21,7 +21,7 @@ final class CustomFields extends CustomFieldsManagementPage
 
     public static function getSlug(?Panel $panel = null): string
     {
-        return 'team/custom-fields';
+        return 'workspace/custom-fields';
     }
 
     public function getSubheading(): ?string

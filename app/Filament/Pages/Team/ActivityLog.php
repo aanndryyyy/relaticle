@@ -72,7 +72,7 @@ final class ActivityLog extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedClock;
 
-    protected static ?string $slug = 'team/activity';
+    protected static ?string $slug = 'workspace/activity';
 
     protected string $view = 'filament.pages.team.activity-log';
 

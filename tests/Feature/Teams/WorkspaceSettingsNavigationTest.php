@@ -64,11 +64,11 @@ test('every workspace settings page renders the same tab strip', function (): vo
     }
 });
 
-test('the custom fields tab lives under the team url and the standalone route is gone', function (): void {
-    expect(CustomFields::getSlug())->toBe('team/custom-fields')
-        ->and(Members::getSlug())->toBe('team/members')
+test('the custom fields tab lives under the workspace url and the standalone route is gone', function (): void {
+    expect(CustomFields::getSlug())->toBe('workspace/custom-fields')
+        ->and(Members::getSlug())->toBe('workspace/members')
         ->and(Route::has('filament.app.pages.custom-fields'))->toBeFalse()
-        ->and(Route::has('filament.app.pages.team.custom-fields'))->toBeTrue();
+        ->and(Route::has('filament.app.pages.workspace.custom-fields'))->toBeTrue();
 });
 
 test('billing keeps its own url so the paywall allowlist keeps matching', function (): void {

@@ -25,7 +25,7 @@ final class Members extends Page
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUsers;
 
-    protected static ?string $slug = 'team/members';
+    protected static ?string $slug = 'workspace/members';
 
     protected string $view = 'filament.pages.team.members';
 
