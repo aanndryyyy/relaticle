@@ -84,8 +84,6 @@ final readonly class StoreAgentUpload
 
         throw_unless($response->successful(), UploadException::unreachable());
 
-        throw_if((int) filesize($temp) > UploadAllowlist::maxBytes(), UploadException::tooLarge(UploadAllowlist::maxBytes()));
-
         $name = basename((string) parse_url($url, PHP_URL_PATH));
 
         return $name === '' ? 'download' : $name;

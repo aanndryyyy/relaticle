@@ -179,6 +179,16 @@ describe('signed put receiver', function (): void {
         TemporaryUploads::disk()->assertMissing(TemporaryUploads::path($name));
     });
 
+    it('rejects a body larger than the content length it declared', function (): void {
+        $name = TemporaryUploads::newName('deck.pdf', (string) $this->workspace->getKey());
+        $url = URL::temporarySignedRoute('mcp.uploads.receive', now()->addMinutes(5), ['upload' => $name]);
+
+        $this->call('PUT', $url, [], [], [], ['CONTENT_LENGTH' => '1'], str_repeat('x', 10 * 1024 * 1024 + 1))
+            ->assertStatus(413);
+
+        TemporaryUploads::disk()->assertMissing(TemporaryUploads::path($name));
+    });
+
     it('rejects a malformed upload name', function (): void {
         $url = URL::temporarySignedRoute('mcp.uploads.receive', now()->addMinutes(5), ['upload' => 'nope.pdf']);
 

@@ -15,6 +15,8 @@ use App\Support\Media\MediaPaths;
 use App\Support\Media\UploadAllowlist;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\FileUpload;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 use Livewire\Component;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
@@ -98,14 +100,13 @@ final readonly class FileUploadComponent extends AbstractFormComponent
             return false;
         }
 
-        $allowed = true;
+        $record = $component->getRecord();
+        $entityId = $record instanceof Model ? (string) $record->getKey() : null;
 
-        new StoredUploadPath((string) $workspace->getKey(), $customField->entity_type, $customField, $component->getRecord()?->getKey())
-            ->validate($component->getStatePath(), $file, function () use (&$allowed): void {
-                $allowed = false;
-            });
-
-        return $allowed;
+        return Validator::make(
+            ['file' => $file],
+            ['file' => [new StoredUploadPath((string) $workspace->getKey(), $customField->entity_type, $customField, $entityId)]],
+        )->passes();
     }
 
     private function workspace(): ?Workspace
