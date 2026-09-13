@@ -101,12 +101,12 @@ For tasks with people relationships:
 
 ```yaml
 # resources/fixtures/tasks/meeting.yaml
-title: Workspace Meeting
+title: Team Meeting
 assigned_people:
     - person_key1
     - person_key2
 custom_fields:
-    description: Weekly workspace meeting
+    description: Weekly team meeting
     due_date: '{{ +2d }}'
     status: To do
     priority: High
