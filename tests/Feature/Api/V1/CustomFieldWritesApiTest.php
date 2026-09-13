@@ -302,3 +302,50 @@ describe('file-upload values over rest', function (): void {
             ->and($large)->toBe($small);
     });
 });
+
+describe('rich editor images over rest', function (): void {
+    beforeEach(function (): void {
+        Storage::fake('public');
+        $this->body = CustomField::query()
+            ->where('tenant_id', $this->workspace->getKey())
+            ->where('entity_type', 'note')
+            ->where('code', 'body')
+            ->firstOrFail();
+    });
+
+    it('rewrites image sources from the media row on read', function (): void {
+        $media = $this->workspace->addMediaFromString(onePixelPng())->usingFileName('a.png')
+            ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
+            ->toMediaCollection(MediaCollection::PendingUploads->value);
+
+        $id = $this->postJson('/api/v1/notes', ['title' => 'Rest image', 'custom_fields' => ['body' => "<p><img src=\"stale\" alt=\"a\" data-id=\"{$media->uuid}\"></p>"]])
+            ->assertCreated()
+            ->json('data.id');
+
+        $this->getJson("/api/v1/notes/{$id}")
+            ->assertOk()
+            ->assertJsonPath('data.attributes.custom_fields.body', '<p><img src="'.e($media->refresh()->getUrl()).'" alt="a" data-id="'.$media->uuid.'"></p>');
+    });
+
+    it('lists notes with images through one media query per workspace', function (): void {
+        foreach (range(1, 3) as $index) {
+            $media = $this->workspace->addMediaFromString(onePixelPng())->usingFileName("{$index}.png")
+                ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
+                ->toMediaCollection(MediaCollection::PendingUploads->value);
+            $this->postJson('/api/v1/notes', ['title' => "Listed {$index}", 'custom_fields' => ['body' => "<p><img src=\"stale\" data-id=\"{$media->uuid}\"></p>"]])
+                ->assertCreated();
+        }
+
+        app()->forgetScopedInstances();
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        $response = $this->getJson('/api/v1/notes')->assertOk();
+
+        $mediaQueries = collect(DB::getQueryLog())->filter(fn (array $query): bool => str_contains($query['query'], 'from "media"'));
+
+        expect($mediaQueries)->toHaveCount(1)
+            ->and($response->json('data'))->toHaveCount(3)
+            ->and(collect($response->json('data'))->pluck('attributes.custom_fields.body')->implode(''))->not->toContain('stale');
+    });
+});

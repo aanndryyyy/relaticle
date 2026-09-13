@@ -23,6 +23,16 @@ model (`App\Enums\MediaCollection`). Two exemptions: import CSVs under
   the record when a saved custom-field value references it. For `file-upload`
   values a file another record or field already owns fails validation at that
   save; a rich-editor image another record owns is left where it is.
+- Rich-editor images go through `App\Support\Media\RichContentAttachments`,
+  the Filament `FileAttachmentProvider` behind `RichEditorFieldType` and
+  `RichContentEntry`. `data-id` is the Media `uuid`; reads (`FormatsCustomFields`,
+  the record page) rewrite `src` from the row, and `CustomFieldInput::richText()`
+  tags an untagged `<img>` whose URL names an owned upload so the claim finds it.
+  A bare-filename `data-id` is a legacy Filament upload on the public disk;
+  `media:backfill-rich-editor-attachments --force` moves those onto their records.
+- The `file-upload` custom field type ships disabled in `config/custom-fields.php`.
+  Its media-backed implementation stays registered so enabling it is a config
+  change; tests that need the type call `enableFileUploadFieldType()`.
 - Never call `Media::move()`. It copies and deletes, changing `uuid` and path.
   Ownership changes are attribute writes on the existing row.
 - `logo` collections stay on the public disk. Everything else follows

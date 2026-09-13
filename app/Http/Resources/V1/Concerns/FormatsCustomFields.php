@@ -7,6 +7,7 @@ namespace App\Http\Resources\V1\Concerns;
 use App\Enums\CustomFieldType;
 use App\Support\CustomFields\RecordNameResolver;
 use App\Support\Media\MediaPaths;
+use App\Support\Media\RichContentAttachments;
 use Illuminate\Contracts\Pagination\Paginator;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -54,6 +55,10 @@ trait FormatsCustomFields
 
         if ($customField->type === CustomFieldType::FILE_UPLOAD->value) {
             return $this->resolveFileValue($fieldValue, $rawValue);
+        }
+
+        if ($customField->type === CustomFieldType::RICH_EDITOR->value && is_string($rawValue)) {
+            return RichContentAttachments::forWorkspace((string) $fieldValue->getAttribute('tenant_id'))->rewriteImageSources($rawValue);
         }
 
         if (! $customField->typeData->dataType->isChoiceField()) {

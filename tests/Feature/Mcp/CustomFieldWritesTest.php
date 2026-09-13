@@ -708,3 +708,64 @@ describe('file-upload values', function (): void {
     });
 
 });
+
+describe('rich editor images', function (): void {
+    beforeEach(function (): void {
+        Storage::fake('public');
+        $this->body = CustomField::query()
+            ->where('tenant_id', $this->workspace->getKey())
+            ->where('entity_type', 'note')
+            ->where('code', 'body')
+            ->firstOrFail();
+    });
+
+    it('claims an image an agent embedded by markdown from an upload-file url', function (): void {
+        RelaticleServer::actingAs($this->user)
+            ->tool(UploadFileTool::class, ['base64' => base64_encode(onePixelPng()), 'filename' => 'shot.png'])
+            ->assertOk();
+        $media = Media::query()->latest('id')->firstOrFail();
+
+        RelaticleServer::actingAs($this->user)
+            ->tool(CreateNoteTool::class, ['title' => 'Md image', 'custom_fields' => ['body' => "Look:\n\n![shot]({$media->getUrl()})"]])
+            ->assertOk();
+
+        $note = Note::query()->where('title', 'Md image')->firstOrFail();
+
+        expect($media->refresh()->model_id)->toBe($note->getKey())
+            ->and($media->collection_name)->toBe(MediaCollection::forCustomField('body'))
+            ->and((string) $note->getCustomFieldValue($this->body))->toContain("data-id=\"{$media->uuid}\"");
+    });
+
+    it('leaves an image another workspace owns untagged and unclaimed', function (): void {
+        $stranger = User::factory()->withPersonalWorkspace()->create()->personalWorkspace();
+        $foreign = $stranger->addMediaFromString(onePixelPng())->usingFileName('theirs.png')
+            ->withCustomProperties(['workspace_id' => $stranger->getKey()])
+            ->toMediaCollection(MediaCollection::PendingUploads->value);
+
+        RelaticleServer::actingAs($this->user)
+            ->tool(CreateNoteTool::class, ['title' => 'Foreign image', 'custom_fields' => ['body' => "![theirs]({$foreign->getUrl()})"]])
+            ->assertOk();
+
+        $note = Note::query()->where('title', 'Foreign image')->firstOrFail();
+
+        expect((string) $note->getCustomFieldValue($this->body))->not->toContain('data-id=')
+            ->and($foreign->refresh()->collection_name)->toBe(MediaCollection::PendingUploads->value);
+    });
+
+    it('rewrites rich editor image sources on read', function (): void {
+        $media = $this->workspace->addMediaFromString(onePixelPng())->usingFileName('a.png')
+            ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
+            ->toMediaCollection(MediaCollection::PendingUploads->value);
+
+        RelaticleServer::actingAs($this->user)
+            ->tool(CreateNoteTool::class, ['title' => 'Img', 'custom_fields' => ['body' => "<p><img src=\"stale\" data-id=\"{$media->uuid}\"></p>"]])
+            ->assertOk();
+        $note = Note::query()->where('title', 'Img')->firstOrFail();
+
+        RelaticleServer::actingAs($this->user)
+            ->tool(GetNoteTool::class, ['id' => $note->getKey()])
+            ->assertOk()
+            ->assertSee($media->refresh()->getUrl())
+            ->assertDontSee('stale');
+    });
+});

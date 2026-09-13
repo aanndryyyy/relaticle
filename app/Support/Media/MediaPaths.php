@@ -7,29 +7,23 @@ namespace App\Support\Media;
 use App\Enums\CustomFieldType;
 use App\Models\CustomFieldValue;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Collection;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
-final readonly class MediaPaths
+final class MediaPaths
 {
     private const string PATH_PATTERN = '#^uploads/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/[^/]+$#';
 
-    /** @var Collection<string, Media|null> */
-    private Collection $byPath;
+    /** @var array<string, Media|null> */
+    private array $byPath = [];
 
-    /** @var Collection<string, Media|null> */
-    private Collection $byUuid;
-
-    public function __construct()
-    {
-        $this->byPath = new Collection;
-        $this->byUuid = new Collection;
-    }
+    /** @var array<string, Media|null> */
+    private array $byUuid = [];
 
     /** @param iterable<Model> $models */
     public function prime(iterable $models): void
     {
-        $wanted = [];
+        $paths = [];
+        $uuids = [];
 
         foreach ($models as $model) {
             if (! $model->relationLoaded('customFieldValues')) {
@@ -41,44 +35,67 @@ final readonly class MediaPaths
                     continue;
                 }
 
+                $value = $fieldValue->getValue();
+
+                if (! is_string($value)) {
+                    continue;
+                }
+
+                $workspaceId = (string) $fieldValue->getAttribute('tenant_id');
+
+                if ($fieldValue->customField->type === CustomFieldType::RICH_EDITOR->value) {
+                    $uuids[$workspaceId] = [...($uuids[$workspaceId] ?? []), ...$this->imageUuids($value)];
+
+                    continue;
+                }
+
                 if ($fieldValue->customField->type !== CustomFieldType::FILE_UPLOAD->value) {
                     continue;
                 }
 
-                $path = $fieldValue->getValue();
-                $uuid = is_string($path) ? $this->uuidFromPath($path) : null;
+                $uuid = $this->uuidFromPath($value);
 
                 if ($uuid !== null) {
-                    $wanted[(string) $fieldValue->getAttribute('tenant_id')][$path] = $uuid;
+                    $paths[$workspaceId][$value] = $uuid;
+                    $uuids[$workspaceId][] = $uuid;
                 }
             }
         }
 
-        foreach ($wanted as $workspaceId => $paths) {
-            $missing = array_filter(
-                $paths,
-                fn (string $uuid, string $path): bool => ! $this->byPath->has($this->pathKey($workspaceId, $path)),
-                ARRAY_FILTER_USE_BOTH,
-            );
+        foreach ($uuids as $workspaceId => $wanted) {
+            $missing = array_values(array_unique(array_filter(
+                $wanted,
+                fn (string $uuid): bool => ! array_key_exists($this->uuidKey($workspaceId, $uuid), $this->byUuid),
+            )));
 
-            if ($missing === []) {
-                continue;
+            if ($missing !== []) {
+                $found = Media::query()
+                    ->where('custom_properties->workspace_id', $workspaceId)
+                    ->whereIn('uuid', $missing)
+                    ->get()
+                    ->keyBy('uuid');
+
+                foreach ($missing as $uuid) {
+                    $this->byUuid[$this->uuidKey($workspaceId, $uuid)] = $found->get($uuid);
+                }
             }
 
-            $found = Media::query()
-                ->where('custom_properties->workspace_id', $workspaceId)
-                ->whereIn('uuid', array_values($missing))
-                ->get()
-                ->keyBy('uuid');
+            foreach ($paths[$workspaceId] ?? [] as $path => $uuid) {
+                $media = $this->byUuid[$this->uuidKey($workspaceId, $uuid)];
 
-            foreach ($missing as $path => $uuid) {
-                $media = $found->get($uuid);
-                $media = $media instanceof Media && $media->getPathRelativeToRoot() === $path ? $media : null;
-
-                $this->byPath->put($this->pathKey($workspaceId, $path), $media);
-                $this->byUuid->put($this->uuidKey($workspaceId, $uuid), $media);
+                $this->byPath[$this->pathKey($workspaceId, $path)] = $media instanceof Media && $media->getPathRelativeToRoot() === $path
+                    ? $media
+                    : null;
             }
         }
+    }
+
+    /** @return list<string> */
+    public function imageUuids(string $html): array
+    {
+        preg_match_all('/data-id="([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/', $html, $matches);
+
+        return array_values(array_unique($matches[1]));
     }
 
     public function uuidFromPath(string $path): ?string
@@ -90,14 +107,14 @@ final readonly class MediaPaths
     {
         $key = $this->pathKey($workspaceId, $path);
 
-        if ($this->byPath->has($key)) {
-            return $this->byPath->get($key);
+        if (array_key_exists($key, $this->byPath)) {
+            return $this->byPath[$key];
         }
 
         $uuid = $this->uuidFromPath($path);
 
         if ($uuid === null) {
-            $this->byPath->put($key, null);
+            $this->byPath[$key] = null;
 
             return null;
         }
@@ -105,12 +122,12 @@ final readonly class MediaPaths
         $media = $this->findByUuid($workspaceId, $uuid);
 
         if (! $media instanceof Media || $media->getPathRelativeToRoot() !== $path) {
-            $this->byPath->put($key, null);
+            $this->byPath[$key] = null;
 
             return null;
         }
 
-        $this->byPath->put($key, $media);
+        $this->byPath[$key] = $media;
 
         return $media;
     }
@@ -119,8 +136,8 @@ final readonly class MediaPaths
     {
         $key = $this->uuidKey($workspaceId, $uuid);
 
-        if ($this->byUuid->has($key)) {
-            return $this->byUuid->get($key);
+        if (array_key_exists($key, $this->byUuid)) {
+            return $this->byUuid[$key];
         }
 
         $media = Media::query()
@@ -128,7 +145,7 @@ final readonly class MediaPaths
             ->where('custom_properties->workspace_id', $workspaceId)
             ->first();
 
-        $this->byUuid->put($key, $media);
+        $this->byUuid[$key] = $media;
 
         return $media;
     }

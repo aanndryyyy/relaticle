@@ -8,8 +8,12 @@ use App\Enums\CrmEntity;
 use App\Enums\CustomFields\NoteField;
 use App\Enums\CustomFields\TaskField;
 use App\Filament\RichEditor\SlashMenuPlugin;
+use App\Support\Media\RichContentAttachments;
+use App\Support\Media\UploadAllowlist;
+use Filament\Facades\Filament;
 use Filament\Forms\Components\RichEditor;
 use Filament\Forms\Components\RichEditor\ToolbarButtonGroup;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Relaticle\CustomFields\FieldTypeSystem\BaseFieldType;
 use Relaticle\CustomFields\FieldTypeSystem\Definitions\RichEditorFieldType as PackageRichEditorFieldType;
 use Relaticle\CustomFields\FieldTypeSystem\FieldSchema;
@@ -37,6 +41,9 @@ final class RichEditorFieldType extends BaseFieldType
                 // Filament decides attachments by whether `attachFiles` sits in the toolbar,
                 // and there is no toolbar: without this, an uploaded image saves as null.
                 ->fileAttachments(true)
+                ->fileAttachmentsMaxSize((int) (UploadAllowlist::maxBytes() / 1024))
+                ->saveUploadedFileAttachmentUsing(fn (TemporaryUploadedFile $file): string => $this->attachments()->saveUploadedFileAttachment($file))
+                ->getFileAttachmentUrlUsing(fn (mixed $file): ?string => $this->attachments()->getFileAttachmentUrl($file))
                 // The defaults carry the table controls, unreachable otherwise without a toolbar.
                 ->floatingToolbars(function (RichEditor $component): array {
                     $tools = $component->getTools();
@@ -54,7 +61,13 @@ final class RichEditorFieldType extends BaseFieldType
                 ->extraAttributes(fn (RichEditor $component): array => [
                     ...SlashMenuPlugin::attributes($component),
                     ...($this->isDocument($customField) ? ['class' => 'fi-fo-rich-editor-seamless'] : []),
-                ]));
+                ]))
+            ->infolistEntry(RichContentEntry::class);
+    }
+
+    private function attachments(): RichContentAttachments
+    {
+        return RichContentAttachments::forWorkspace((string) Filament::getTenant()?->getKey());
     }
 
     /** @return list<string | ToolbarButtonGroup> */

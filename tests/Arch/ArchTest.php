@@ -129,6 +129,9 @@ arch('avoid mutation')
         // Request-scoped batch_uuid holder, mutable by design (lazily caches the
         // per-request id), like a value cache rather than a service.
         'App\Support\ActivityLog\RequestActivityBatch',
+        // Request-scoped media lookup cache, same shape: filled as list endpoints
+        // prime it, reset per request via the scoped container binding.
+        'App\Support\Media\MediaPaths',
         // Request/job-scoped creation-source cache, same shape as
         // RequestActivityBatch above: mutable by design, reset per request/job
         // via the scoped container binding in AppServiceProvider.

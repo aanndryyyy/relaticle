@@ -107,12 +107,6 @@ final readonly class UploadClaims
     /** @return list<string> */
     private function imageUuids(mixed $value): array
     {
-        if (! is_string($value)) {
-            return [];
-        }
-
-        preg_match_all('/data-id="([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/', $value, $matches);
-
-        return array_values(array_unique($matches[1]));
+        return is_string($value) ? $this->paths->imageUuids($value) : [];
     }
 }
