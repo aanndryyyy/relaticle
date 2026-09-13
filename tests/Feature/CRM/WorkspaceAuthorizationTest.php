@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Enums\WorkspaceRole;
 use App\Models\Company;
+use App\Models\Note;
 use App\Models\Opportunity;
 use App\Models\People;
 use App\Models\Task;
@@ -14,12 +15,15 @@ use App\Policies\NotePolicy;
 use App\Policies\OpportunityPolicy;
 use App\Policies\PeoplePolicy;
 use App\Policies\TaskPolicy;
+use Filament\Facades\Filament;
 
 mutates(CompanyPolicy::class, NotePolicy::class, OpportunityPolicy::class, PeoplePolicy::class, TaskPolicy::class, User::class);
 
 it('authorizes :dataset by workspace membership and role', function (string $model): void {
     $owner = User::factory()->withWorkspace()->create();
     $workspace = $owner->currentWorkspace;
+    $this->actingAs($owner);
+    Filament::setTenant($workspace);
 
     $admin = User::factory()->create();
     $workspace->users()->attach($admin, ['role' => WorkspaceRole::Admin->value]);
@@ -67,9 +71,19 @@ it('authorizes :dataset by workspace membership and role', function (string $mod
         'outsider.forceDelete' => false,
     ]);
 })->with([
+    'companies' => Company::class,
+    'notes' => Note::class,
+    'opportunities' => Opportunity::class,
     'people' => People::class,
     'tasks' => Task::class,
 ]);
+
+it('holds no role on a missing workspace', function (): void {
+    $owner = User::factory()->withWorkspace()->create();
+
+    expect($owner->hasWorkspaceRole(null, WorkspaceRole::Admin->value))->toBeFalse()
+        ->and($owner->workspaceRole(null))->toBeNull();
+});
 
 it('treats a membership carrying no role as not privileged', function (): void {
     $owner = User::factory()->withWorkspace()->create();

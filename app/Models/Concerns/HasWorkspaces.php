@@ -123,6 +123,10 @@ trait HasWorkspaces
 
     public function hasWorkspaceRole(?Model $workspace, string $role): bool
     {
+        if ($this->ownsWorkspace($workspace)) {
+            return true;
+        }
+
         return $this->workspaceRole($workspace)?->key === $role;
     }
 }
