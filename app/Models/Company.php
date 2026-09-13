@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\CreationSource;
+use App\Enums\MediaCollection;
 use App\Models\Concerns\BelongsToWorkspaceCreator;
 use App\Models\Concerns\HasCreator;
 use App\Models\Concerns\HasNotes;
@@ -60,7 +61,7 @@ final class Company extends Model implements HasAvatar, HasCustomFields, HasMedi
     use SoftDeletes;
     use UsesCustomFields;
 
-    public const string LOGO_MEDIA_COLLECTION = 'logo';
+    public const string LOGO_MEDIA_COLLECTION = MediaCollection::Logo->value;
 
     /**
      * @var array<string, mixed>

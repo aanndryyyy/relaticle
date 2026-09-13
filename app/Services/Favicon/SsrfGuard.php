@@ -73,11 +73,6 @@ final readonly class SsrfGuard
         ];
     }
 
-    /**
-     * A client for one-shot downloads that never follows a redirect and connects
-     * to the address resolved here, so a DNS answer cannot change between the
-     * check and the fetch (TOCTOU). https on 443 only.
-     */
     public static function pinnedClient(string $url): PendingRequest
     {
         $parts = parse_url($url);
@@ -98,6 +93,8 @@ final readonly class SsrfGuard
         $address = $addresses[0];
         $pinned = str_contains($address, ':') ? "[{$address}]" : $address;
 
+        // CURLOPT_RESOLVE pins the connection to the address checked above, so a
+        // DNS answer cannot change between the check and the fetch.
         return Http::withOptions([
             'allow_redirects' => false,
             'connect_timeout' => 10,

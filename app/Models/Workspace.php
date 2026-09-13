@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\BillingStatus;
+use App\Enums\MediaCollection;
 use App\Enums\OnboardingReferralSource;
 use App\Enums\OnboardingUseCase;
 use App\Enums\Plan;
@@ -88,7 +89,7 @@ final class Workspace extends Model implements HasAvatar, HasMedia, Onboardable
     use HasUlids;
     use InteractsWithMedia;
 
-    public const string LOGO_MEDIA_COLLECTION = 'logo';
+    public const string LOGO_MEDIA_COLLECTION = MediaCollection::Logo->value;
 
     // SVG is excluded on purpose: it carries script, and a workspace logo is the
     // one image members upload to the public disk on our own origin.
