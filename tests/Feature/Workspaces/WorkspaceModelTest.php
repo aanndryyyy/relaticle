@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Route;
 
@@ -296,4 +297,54 @@ test('reserved slugs cover all top-level route segments', function () {
     expect($missing->toArray())->toBeEmpty(
         'These route segments are missing from Workspace::RESERVED_SLUGS: '.$missing->implode(', ')
     );
+});
+
+test('a user with no current workspace falls back to their personal workspace', function (): void {
+    $user = User::factory()->withPersonalWorkspace()->create();
+    $personal = $user->personalWorkspace();
+
+    $user->forceFill(['current_workspace_id' => null])->save();
+
+    $reloaded = User::query()->findOrFail($user->getKey());
+
+    expect($reloaded->currentWorkspace?->getKey())->toBe($personal?->getKey())
+        ->and($reloaded->fresh()->current_workspace_id)->toBe($personal?->getKey());
+});
+
+test('a user cannot switch to a workspace they do not belong to', function (): void {
+    $user = User::factory()->withWorkspace()->create();
+    $own = $user->currentWorkspace;
+    $foreign = Workspace::factory()->create();
+
+    expect($user->switchWorkspace($foreign))->toBeFalse()
+        ->and($user->fresh()->current_workspace_id)->toBe($own->getKey())
+        ->and($user->switchWorkspace($own))->toBeTrue();
+});
+
+test('removing a member clears the workspace as their current one', function (): void {
+    $owner = User::factory()->withWorkspace()->create();
+    $workspace = $owner->currentWorkspace;
+    $member = User::factory()->withPersonalWorkspace()->create();
+    $workspace->users()->attach($member, ['role' => WorkspaceRole::Editor->value]);
+    $member->forceFill(['current_workspace_id' => $workspace->getKey()])->save();
+
+    $workspace->removeUser($member);
+
+    expect($member->fresh()->current_workspace_id)->toBeNull()
+        ->and($workspace->fresh()->users()->whereKey($member->getKey())->exists())->toBeFalse();
+});
+
+test('purging a workspace detaches its members and clears their current workspace', function (): void {
+    $owner = User::factory()->withWorkspace()->create();
+    $workspace = $owner->currentWorkspace;
+    $member = User::factory()->withPersonalWorkspace()->create();
+    $workspace->users()->attach($member, ['role' => WorkspaceRole::Editor->value]);
+    $member->forceFill(['current_workspace_id' => $workspace->getKey()])->save();
+
+    $workspace->purge();
+
+    expect(Workspace::query()->whereKey($workspace->getKey())->exists())->toBeFalse()
+        ->and($member->fresh()->current_workspace_id)->toBeNull()
+        ->and($owner->fresh()->current_workspace_id)->toBeNull()
+        ->and(DB::table('workspace_user')->where('workspace_id', $workspace->getKey())->count())->toBe(0);
 });
