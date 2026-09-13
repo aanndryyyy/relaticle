@@ -171,3 +171,18 @@ test('the tenant menu lists billing directly under workspace settings', function
     expect($items)->toBe(['profile', 'billing', 'register'])
         ->and($panel->getTenantMenuItems()['billing']->getSort())->toBeLessThan(0);
 });
+
+test('the legacy team urls redirect permanently to their workspace pages', function (?string $legacyPage, string $page): void {
+    $this->get(route('filament.app.team.redirect', ['tenant' => $this->workspace->slug, 'page' => $legacyPage]))
+        ->assertRedirect($page::getUrl(tenant: $this->workspace))
+        ->assertStatus(301);
+})->with([
+    'general' => [null, EditWorkspace::class],
+    'members' => ['members', Members::class],
+    'activity' => ['activity', ActivityLog::class],
+    'custom fields' => ['custom-fields', CustomFields::class],
+]);
+
+test('the legacy team url only redirects known pages', function (): void {
+    $this->get("/app/{$this->workspace->slug}/team/billing")->assertNotFound();
+});

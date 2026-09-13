@@ -18,7 +18,9 @@ use App\Filament\Pages\Billing;
 use App\Filament\Pages\CreateWorkspace;
 use App\Filament\Pages\Dashboard;
 use App\Filament\Pages\EditWorkspace;
+use App\Filament\Pages\Workspace\ActivityLog;
 use App\Filament\Pages\Workspace\CustomFields;
+use App\Filament\Pages\Workspace\Members;
 use App\Filament\Resources\OpportunityResource;
 use App\Filament\Resources\TaskResource;
 use App\Http\Controllers\SyncUserTimezoneController;
@@ -270,6 +272,15 @@ final class AppPanelProvider extends PanelProvider
                     ->name('tasks-board.redirect');
                 Route::get('/{tenant}/opportunities-board', fn (string $tenant) => redirect()->to(OpportunityResource::getUrl('board', ['tenant' => $tenant]), status: 301))
                     ->name('opportunities-board.redirect');
+
+                Route::get('/{tenant}/team/{page?}', fn (string $tenant, ?string $page = null) => redirect()->to(match ($page) {
+                    'members' => Members::getUrl(['tenant' => $tenant]),
+                    'activity' => ActivityLog::getUrl(['tenant' => $tenant]),
+                    'custom-fields' => CustomFields::getUrl(['tenant' => $tenant]),
+                    default => EditWorkspace::getUrl(['tenant' => $tenant]),
+                }, status: 301))
+                    ->where('page', 'members|activity|custom-fields')
+                    ->name('team.redirect');
             })
             ->breadcrumbs(false)
             ->sidebarCollapsibleOnDesktop()
