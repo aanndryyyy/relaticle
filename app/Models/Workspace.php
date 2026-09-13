@@ -63,6 +63,7 @@ use Spatie\Sluggable\SlugOptions;
  * @property CarbonImmutable|null $trial_ends_at
  * @property CarbonImmutable|null $pro_trial_used_at
  * @property CarbonImmutable|null $hosted_free_grandfathered_at
+ * @property CarbonImmutable|null $onboarding_opener_dismissed_at
  * @property string $invite_link_default_role
  * @property-read Membership|null $membership the `workspace_user` row, populated only when the workspace was
  *     loaded through `User::workspaces()`; null on a workspace reached any other way
@@ -100,6 +101,11 @@ final class Workspace extends Model implements HasAvatar, HasMedia, Onboardable
     public const array LOGO_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 
     public const int LOGO_MAX_KILOBYTES = 2048;
+
+    public const string CHAT_ATTACHMENTS_MEDIA_COLLECTION = 'chat-attachments';
+
+    /** @var list<string> */
+    public const array CHAT_ATTACHMENT_MIME_TYPES = ['text/csv', 'text/plain', 'application/csv'];
 
     public const string SLUG_REGEX = '/^[a-z0-9]+(?:-[a-z0-9]+)*$/';
 
@@ -201,6 +207,7 @@ final class Workspace extends Model implements HasAvatar, HasMedia, Onboardable
             'onboarding_context' => 'array',
             'onboarding_referral_source' => OnboardingReferralSource::class,
             'activation_checklist_dismissed_at' => 'datetime',
+            'onboarding_opener_dismissed_at' => 'datetime',
             'setup_nudge_sent_at' => 'datetime',
             'invite_link_token_expires_at' => 'datetime',
             'scheduled_deletion_at' => 'datetime',
@@ -403,6 +410,10 @@ final class Workspace extends Model implements HasAvatar, HasMedia, Onboardable
 
         $this->addMediaCollection(MediaCollection::PendingUploads->value)
             ->acceptsMimeTypes(UploadAllowlist::mimeTypes());
+
+        $this->addMediaCollection(self::CHAT_ATTACHMENTS_MEDIA_COLLECTION)
+            ->acceptsMimeTypes(self::CHAT_ATTACHMENT_MIME_TYPES)
+            ->useDisk('local');
     }
 
     /**
@@ -524,6 +535,14 @@ final class Workspace extends Model implements HasAvatar, HasMedia, Onboardable
     public function conversations(): HasMany
     {
         return $this->hasMany(AgentConversation::class);
+    }
+
+    /**
+     * @return HasOne<AgentConversation, $this>
+     */
+    public function setupConversation(): HasOne
+    {
+        return $this->hasOne(AgentConversation::class)->where('purpose', AgentConversation::PURPOSE_SETUP);
     }
 
     /**
