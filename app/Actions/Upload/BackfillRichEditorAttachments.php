@@ -28,7 +28,7 @@ final readonly class BackfillRichEditorAttachments
             ->withoutGlobalScopes()
             ->whereHas('customField', fn (Builder $query): Builder => $query->withoutGlobalScopes()->where('type', CustomFieldType::RICH_EDITOR->value))
             ->where('text_value', 'like', '%data-id=%')
-            ->with(['customField' => fn (Relation $query): Relation => $query->withoutGlobalScopes()])
+            ->with(['entity', 'customField' => fn (Relation $query): Relation => $query->withoutGlobalScopes()])
             ->get();
 
         foreach ($values as $value) {

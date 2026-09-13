@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Filament\CustomFields;
 
-use App\Filament\RichEditor\SlashMenuPlugin;
 use App\Support\Media\RichContentAttachments;
 use Filament\Forms\Components\RichEditor\RichContentRenderer;
 use Filament\Infolists\Components\TextEntry;
@@ -32,7 +31,6 @@ final class RichContentEntry extends AbstractInfolistEntry
         }
 
         return RichContentRenderer::make($value)
-            ->plugins([SlashMenuPlugin::make()])
             ->fileAttachmentProvider(RichContentAttachments::forWorkspace((string) $record->getAttribute('workspace_id')))
             ->toHtml();
     }
