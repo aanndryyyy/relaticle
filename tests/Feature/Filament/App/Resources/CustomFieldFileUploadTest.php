@@ -29,6 +29,7 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
 mutates(FileUploadFieldType::class, FileUploadComponent::class, FileEntry::class, FileColumn::class, DiscardPendingUpload::class);
 
 beforeEach(function (): void {
+    enableFileUploadFieldType();
     Storage::fake('public');
     Storage::fake('local');
     $this->user = User::factory()->withWorkspace()->create();
@@ -47,8 +48,11 @@ beforeEach(function (): void {
     ]);
 });
 
-it('offers the file-upload type', function (): void {
-    expect(CustomFieldsType::getFieldType('file-upload'))->not->toBeNull();
+it('ships the file-upload type disabled and resolves it once config enables it', function (): void {
+    $shipped = require base_path('config/custom-fields.php');
+
+    expect($shipped['field_type_configuration']->isFieldTypeAllowed('file-upload'))->toBeFalse()
+        ->and(CustomFieldsType::getFieldType('file-upload'))->not->toBeNull();
 });
 
 it('stores a panel upload as pending media and claims it when the note is created', function (): void {

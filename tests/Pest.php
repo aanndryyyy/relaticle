@@ -120,6 +120,11 @@ function onePixelPng(): string
     return (string) base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', true);
 }
 
+function enableFileUploadFieldType(): void
+{
+    config('custom-fields.field_type_configuration')->disabled(['markdown-editor']);
+}
+
 /** @param list<string> $addresses */
 function resolveHostsTo(array $addresses, int &$calls = 0): void
 {

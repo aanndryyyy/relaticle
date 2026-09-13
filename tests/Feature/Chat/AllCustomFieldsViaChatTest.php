@@ -38,6 +38,7 @@ use Relaticle\Chat\Tools\Task\UpdateTaskTool;
 mutates(StorePendingUpload::class, UploadClaims::class);
 
 beforeEach(function (): void {
+    enableFileUploadFieldType();
     Feature::define(OnboardSeed::class, false);
     $this->user = User::factory()->withPersonalWorkspace()->create();
     $this->workspace = $this->user->currentWorkspace;

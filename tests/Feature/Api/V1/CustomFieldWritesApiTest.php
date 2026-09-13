@@ -21,6 +21,7 @@ use Laravel\Sanctum\Sanctum;
 mutates(BaseCrmEntityRequest::class, StoredUploadPath::class, MediaPaths::class);
 
 beforeEach(function (): void {
+    enableFileUploadFieldType();
     $this->user = User::factory()->withPersonalWorkspace()->create();
     $this->workspace = $this->user->personalWorkspace();
     $this->status = CustomField::query()

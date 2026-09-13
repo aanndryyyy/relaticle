@@ -38,6 +38,7 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
 mutates(BaseCreateTool::class, BaseUpdateTool::class, CustomFieldInput::class, CustomFieldOptionMap::class, OwnedLookupRecords::class, StoredUploadPath::class, ValidCustomFields::class, RecordNameResolver::class, FormatsCustomFields::class);
 
 beforeEach(function (): void {
+    enableFileUploadFieldType();
     $this->user = User::factory()->withPersonalWorkspace()->create();
     $this->workspace = $this->user->personalWorkspace();
     $this->status = CustomField::query()

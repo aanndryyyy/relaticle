@@ -20,6 +20,7 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
 mutates(UploadClaims::class, CustomFieldValueObserver::class);
 
 beforeEach(function (): void {
+    enableFileUploadFieldType();
     Storage::fake('public');
     $this->user = User::factory()->withPersonalWorkspace()->create();
     $this->workspace = $this->user->personalWorkspace();

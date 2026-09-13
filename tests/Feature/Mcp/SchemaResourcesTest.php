@@ -32,6 +32,7 @@ mutates(
 );
 
 beforeEach(function (): void {
+    enableFileUploadFieldType();
     $this->user = User::factory()->withPersonalWorkspace()->create();
 });
 
