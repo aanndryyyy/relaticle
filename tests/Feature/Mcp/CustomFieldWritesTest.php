@@ -558,7 +558,7 @@ describe('file-upload values', function (): void {
     beforeEach(function (): void {
         Storage::fake('public');
         $this->contract = CustomField::factory()->create([
-            'tenant_id' => $this->team->getKey(),
+            'tenant_id' => $this->workspace->getKey(),
             'entity_type' => 'note',
             'code' => 'contract',
             'name' => 'Contract',
@@ -607,7 +607,7 @@ describe('file-upload values', function (): void {
         $note = Note::query()->where('title', 'Exact current value')->with('customFieldValues.customField.options')->firstOrFail();
         $other = $note->addMediaFromString(pdfBytes())
             ->usingFileName('other.pdf')
-            ->withCustomProperties(['team_id' => $this->team->getKey()])
+            ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
             ->toMediaCollection(MediaCollection::forCustomField('contract'));
 
         RelaticleServer::actingAs($this->user)
@@ -619,7 +619,7 @@ describe('file-upload values', function (): void {
     });
 
     it('rejects another workspace\'s upload', function (): void {
-        $stranger = User::factory()->withPersonalTeam()->create();
+        $stranger = User::factory()->withPersonalWorkspace()->create();
         $path = uploadedPath($stranger);
 
         RelaticleServer::actingAs($this->user)
@@ -669,7 +669,7 @@ describe('file-upload values', function (): void {
 
     it('refuses one upload for two fields in the same payload', function (): void {
         CustomField::factory()->create([
-            'tenant_id' => $this->team->getKey(),
+            'tenant_id' => $this->workspace->getKey(),
             'entity_type' => 'note',
             'code' => 'annex',
             'name' => 'Annex',
@@ -685,11 +685,11 @@ describe('file-upload values', function (): void {
             ->assertHasErrors();
 
         expect(Note::query()->where('title', 'Twice')->exists())->toBeFalse()
-            ->and(resolve(MediaPaths::class)->find($this->team->getKey(), $path)?->collection_name)->toBe(MediaCollection::PendingUploads->value);
+            ->and(resolve(MediaPaths::class)->find($this->workspace->getKey(), $path)?->collection_name)->toBe(MediaCollection::PendingUploads->value);
     });
 
     it('leaves a rich-editor image owned by another workspace untouched', function (): void {
-        $stranger = User::factory()->withPersonalTeam()->create();
+        $stranger = User::factory()->withPersonalWorkspace()->create();
         RelaticleServer::actingAs($stranger)
             ->tool(UploadFileTool::class, ['base64' => base64_encode(onePixelPng()), 'filename' => 'foreign.png'])
             ->assertOk();

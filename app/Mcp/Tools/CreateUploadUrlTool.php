@@ -8,8 +8,8 @@ use App\Exceptions\UploadException;
 use App\Mcp\Tools\Concerns\ChecksTokenAbility;
 use App\Mcp\Tools\Concerns\HasExplicitToolAnnotations;
 use App\Mcp\Tools\Concerns\LimitsUploads;
-use App\Models\Team;
 use App\Models\User;
+use App\Models\Workspace;
 use App\Support\Media\TemporaryUploads;
 use App\Support\Media\UploadAllowlist;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
@@ -66,15 +66,15 @@ final class CreateUploadUrlTool extends Tool
 
         $validated = $request->validate(['filename' => ['required', 'string', 'max:255']]);
 
-        /** @var Team $team */
-        $team = $user->currentTeam;
+        /** @var Workspace $workspace */
+        $workspace = $user->currentWorkspace;
 
-        if (($limited = $this->denyIfUploadLimitReached($team)) instanceof Response) {
+        if (($limited = $this->denyIfUploadLimitReached($workspace)) instanceof Response) {
             return $limited;
         }
 
         try {
-            $uploadId = TemporaryUploads::newName((string) $validated['filename'], (string) $team->getKey());
+            $uploadId = TemporaryUploads::newName((string) $validated['filename'], (string) $workspace->getKey());
         } catch (UploadException $exception) {
             return Response::error($exception->getMessage());
         }

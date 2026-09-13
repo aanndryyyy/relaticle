@@ -43,10 +43,10 @@ final readonly class UploadClaims
         }
 
         $collection = MediaCollection::forCustomField($field->code);
-        $teamId = (string) $value->getAttribute('tenant_id');
+        $workspaceId = (string) $value->getAttribute('tenant_id');
 
         Media::query()
-            ->where('custom_properties->team_id', $teamId)
+            ->where('custom_properties->workspace_id', $workspaceId)
             ->where('collection_name', MediaCollection::PendingUploads->value)
             ->whereIn('uuid', $referenced)
             ->update([
@@ -56,7 +56,7 @@ final readonly class UploadClaims
             ]);
 
         if ($field->type === CustomFieldType::FILE_UPLOAD->value) {
-            $this->assertClaimedByEntity($referenced, $teamId, $entity, $collection, $field);
+            $this->assertClaimedByEntity($referenced, $workspaceId, $entity, $collection, $field);
         }
 
         DB::afterCommit(function () use ($entity, $collection, $referenced): void {
@@ -69,14 +69,14 @@ final readonly class UploadClaims
     }
 
     /** @param list<string> $referenced */
-    private function assertClaimedByEntity(array $referenced, string $teamId, Model&HasMedia $entity, string $collection, CustomField $field): void
+    private function assertClaimedByEntity(array $referenced, string $workspaceId, Model&HasMedia $entity, string $collection, CustomField $field): void
     {
         if ($referenced === []) {
             return;
         }
 
         $ownedByEntity = Media::query()
-            ->where('custom_properties->team_id', $teamId)
+            ->where('custom_properties->workspace_id', $workspaceId)
             ->whereIn('uuid', $referenced)
             ->where('model_type', $entity->getMorphClass())
             ->where('model_id', $entity->getKey())

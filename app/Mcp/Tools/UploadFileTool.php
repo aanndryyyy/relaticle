@@ -9,8 +9,8 @@ use App\Exceptions\UploadException;
 use App\Mcp\Tools\Concerns\ChecksTokenAbility;
 use App\Mcp\Tools\Concerns\HasExplicitToolAnnotations;
 use App\Mcp\Tools\Concerns\LimitsUploads;
-use App\Models\Team;
 use App\Models\User;
+use App\Models\Workspace;
 use App\Support\Media\UploadAllowlist;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
@@ -78,16 +78,16 @@ final class UploadFileTool extends Tool
             'upload_id' => ['nullable', 'string', 'max:64'],
         ]);
 
-        /** @var Team $team */
-        $team = $user->currentTeam;
+        /** @var Workspace $workspace */
+        $workspace = $user->currentWorkspace;
 
-        if (($limited = $this->denyIfUploadLimitReached($team)) instanceof Response) {
+        if (($limited = $this->denyIfUploadLimitReached($workspace)) instanceof Response) {
             return $limited;
         }
 
         /** @var array{source_url?: ?string, base64?: ?string, filename?: ?string, upload_id?: ?string} $validated */
         try {
-            $media = resolve(StoreAgentUpload::class)->execute($user, $team, $validated);
+            $media = resolve(StoreAgentUpload::class)->execute($user, $workspace, $validated);
         } catch (UploadException $exception) {
             return Response::error($exception->getMessage());
         }

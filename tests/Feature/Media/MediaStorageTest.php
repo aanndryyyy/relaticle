@@ -18,8 +18,8 @@ mutates(StorePendingUpload::class, UploadPathGenerator::class);
 
 beforeEach(function (): void {
     Storage::fake('public');
-    $this->user = User::factory()->withPersonalTeam()->create();
-    $this->team = $this->user->personalTeam();
+    $this->user = User::factory()->withPersonalWorkspace()->create();
+    $this->workspace = $this->user->personalWorkspace();
 });
 
 function tempFileWith(string $bytes, string $extension): string
@@ -31,7 +31,7 @@ function tempFileWith(string $bytes, string $extension): string
 }
 
 it('keeps company logos on their existing id-keyed path', function (): void {
-    $company = Company::factory()->create(['team_id' => $this->team->getKey()]);
+    $company = Company::factory()->create(['workspace_id' => $this->workspace->getKey()]);
 
     $media = $company->addMediaFromString(onePixelPng())
         ->usingFileName('logo.png')
@@ -44,18 +44,18 @@ it('keeps company logos on their existing id-keyed path', function (): void {
 it('stores a pending upload under uploads/{uuid} with its provenance', function (): void {
     $media = resolve(StorePendingUpload::class)->execute(
         $this->user,
-        $this->team,
+        $this->workspace,
         tempFileWith(pdfBytes(), 'pdf'),
         'Contract v2.pdf',
         UploadSource::Panel,
     );
 
     expect($media->collection_name)->toBe(MediaCollection::PendingUploads->value)
-        ->and($media->model_id)->toBe($this->team->getKey())
+        ->and($media->model_id)->toBe($this->workspace->getKey())
         ->and($media->getPathRelativeToRoot())->toMatch('#^uploads/[0-9a-f-]{36}/[0-9A-Z]{26}\.pdf$#')
         ->and($media->mime_type)->toBe('application/pdf')
         ->and($media->name)->toBe('Contract v2')
-        ->and($media->getCustomProperty('team_id'))->toBe($this->team->getKey())
+        ->and($media->getCustomProperty('workspace_id'))->toBe($this->workspace->getKey())
         ->and($media->getCustomProperty('uploaded_by'))->toBe($this->user->getKey())
         ->and($media->getCustomProperty('source'))->toBe('panel')
         ->and($media->getCustomProperty('original_name'))->toBe('Contract v2.pdf');
@@ -66,7 +66,7 @@ it('stores a pending upload under uploads/{uuid} with its provenance', function 
 it('names the file by the sniffed type, not the claimed extension', function (): void {
     $media = resolve(StorePendingUpload::class)->execute(
         $this->user,
-        $this->team,
+        $this->workspace,
         tempFileWith(onePixelPng(), 'pdf'),
         'shot.pdf',
         UploadSource::Panel,
@@ -81,7 +81,7 @@ it('rejects a type outside the allowlist', function (): void {
 
     expect(fn (): Media => resolve(StorePendingUpload::class)->execute(
         $this->user,
-        $this->team,
+        $this->workspace,
         tempFileWith($svg, 'svg'),
         'evil.svg',
         UploadSource::Panel,
@@ -94,14 +94,14 @@ it('rejects a file over the 10 MB ceiling', function (): void {
     ftruncate($handle, 10 * 1024 * 1024 + 1);
     fclose($handle);
 
-    expect(fn (): Media => resolve(StorePendingUpload::class)->execute($this->user, $this->team, $path, 'big.pdf', UploadSource::Panel))
+    expect(fn (): Media => resolve(StorePendingUpload::class)->execute($this->user, $this->workspace, $path, 'big.pdf', UploadSource::Panel))
         ->toThrow(UploadException::class, __('uploads.errors.too_large', ['max' => 10]));
 });
 
 it('reports a missing source file as not found', function (): void {
     expect(fn (): Media => resolve(StorePendingUpload::class)->execute(
         $this->user,
-        $this->team,
+        $this->workspace,
         sys_get_temp_dir().'/does-not-exist-'.Str::random(8),
         'a.pdf',
         UploadSource::Panel,
@@ -109,11 +109,11 @@ it('reports a missing source file as not found', function (): void {
 });
 
 it('refuses to store for a team the user is not on', function (): void {
-    $stranger = User::factory()->withPersonalTeam()->create();
+    $stranger = User::factory()->withPersonalWorkspace()->create();
 
     expect(fn (): Media => resolve(StorePendingUpload::class)->execute(
         $stranger,
-        $this->team,
+        $this->workspace,
         tempFileWith(pdfBytes(), 'pdf'),
         'a.pdf',
         UploadSource::Panel,

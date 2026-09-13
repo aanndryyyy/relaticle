@@ -31,12 +31,12 @@ mutates(FileUploadFieldType::class, FileUploadComponent::class, FileEntry::class
 beforeEach(function (): void {
     Storage::fake('public');
     Storage::fake('local');
-    $this->user = User::factory()->withTeam()->create();
+    $this->user = User::factory()->withWorkspace()->create();
     $this->actingAs($this->user);
-    $this->team = $this->user->currentTeam;
-    Filament::setTenant($this->team);
+    $this->workspace = $this->user->currentWorkspace;
+    Filament::setTenant($this->workspace);
     $this->contract = CustomField::factory()->create([
-        'tenant_id' => $this->team->getKey(),
+        'tenant_id' => $this->workspace->getKey(),
         'entity_type' => 'note',
         'code' => 'contract',
         'name' => 'Contract',
@@ -97,10 +97,10 @@ it('clears a failed upload error after a successful retry', function (): void {
 });
 
 it('shows the original file name, not the storage name, as a link on the record', function (): void {
-    $note = Note::factory()->recycle([$this->user, $this->team])->create();
-    $media = $this->team->addMediaFromString(pdfBytes())
+    $note = Note::factory()->recycle([$this->user, $this->workspace])->create();
+    $media = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName('01ARZ3NDEKTSV4RRFFQ69G5FAV.pdf')
-        ->withCustomProperties(['team_id' => $this->team->getKey(), 'original_name' => 'Contract v2.pdf'])
+        ->withCustomProperties(['workspace_id' => $this->workspace->getKey(), 'original_name' => 'Contract v2.pdf'])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
     $note->saveCustomFieldValue($this->contract, $media->getPathRelativeToRoot());
 
@@ -111,7 +111,7 @@ it('shows the original file name, not the storage name, as a link on the record'
 
 it('shows the original file name through a real infolist entry', function (): void {
     $companyField = CustomField::factory()->create([
-        'tenant_id' => $this->team->getKey(),
+        'tenant_id' => $this->workspace->getKey(),
         'entity_type' => 'company',
         'code' => 'attachment',
         'name' => 'Attachment',
@@ -120,10 +120,10 @@ it('shows the original file name through a real infolist entry', function (): vo
         'active' => true,
         'system_defined' => false,
     ]);
-    $company = Company::factory()->recycle([$this->user, $this->team])->create();
-    $media = $this->team->addMediaFromString(pdfBytes())
+    $company = Company::factory()->recycle([$this->user, $this->workspace])->create();
+    $media = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName('01ARZ3NDEKTSV4RRFFQ69G5FAV.pdf')
-        ->withCustomProperties(['team_id' => $this->team->getKey(), 'original_name' => 'Master Agreement.pdf'])
+        ->withCustomProperties(['workspace_id' => $this->workspace->getKey(), 'original_name' => 'Master Agreement.pdf'])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
     $company->saveCustomFieldValue($companyField, $media->getPathRelativeToRoot());
 
@@ -134,10 +134,10 @@ it('shows the original file name through a real infolist entry', function (): vo
 });
 
 it('releases the file when it is removed from the form', function (): void {
-    $note = Note::factory()->recycle([$this->user, $this->team])->create();
-    $media = $this->team->addMediaFromString(pdfBytes())
+    $note = Note::factory()->recycle([$this->user, $this->workspace])->create();
+    $media = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName('01ARZ3NDEKTSV4RRFFQ69G5FAV.pdf')
-        ->withCustomProperties(['team_id' => $this->team->getKey()])
+        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
     $note->saveCustomFieldValue($this->contract, $media->getPathRelativeToRoot());
 
@@ -150,10 +150,10 @@ it('releases the file when it is removed from the form', function (): void {
 });
 
 it('resolves the original file name and url through getUploadedFileUsing', function (): void {
-    $note = Note::factory()->recycle([$this->user, $this->team])->create();
-    $media = $this->team->addMediaFromString(pdfBytes())
+    $note = Note::factory()->recycle([$this->user, $this->workspace])->create();
+    $media = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName('01ARZ3NDEKTSV4RRFFQ69G5FAV.pdf')
-        ->withCustomProperties(['team_id' => $this->team->getKey(), 'original_name' => 'Signed Contract.pdf'])
+        ->withCustomProperties(['workspace_id' => $this->workspace->getKey(), 'original_name' => 'Signed Contract.pdf'])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
     $note->saveCustomFieldValue($this->contract, $media->getPathRelativeToRoot());
 
@@ -173,32 +173,32 @@ it('resolves the original file name and url through getUploadedFileUsing', funct
 });
 
 it('deletes a pending upload but leaves a claimed one alone', function (): void {
-    $pending = $this->team->addMediaFromString(pdfBytes())
+    $pending = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName('pending.pdf')
-        ->withCustomProperties(['team_id' => $this->team->getKey()])
+        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
 
-    $note = Note::factory()->recycle([$this->user, $this->team])->create();
-    $claimed = $this->team->addMediaFromString(pdfBytes())
+    $note = Note::factory()->recycle([$this->user, $this->workspace])->create();
+    $claimed = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName('claimed.pdf')
-        ->withCustomProperties(['team_id' => $this->team->getKey()])
+        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
     $note->saveCustomFieldValue($this->contract, $claimed->getPathRelativeToRoot());
     $claimedPath = $claimed->refresh()->getPathRelativeToRoot();
 
-    resolve(DiscardPendingUpload::class)->execute($this->user, $this->team, $pending->getPathRelativeToRoot());
-    resolve(DiscardPendingUpload::class)->execute($this->user, $this->team, $claimedPath);
+    resolve(DiscardPendingUpload::class)->execute($this->user, $this->workspace, $pending->getPathRelativeToRoot());
+    resolve(DiscardPendingUpload::class)->execute($this->user, $this->workspace, $claimedPath);
 
     expect(Media::query()->find($pending->getKey()))->toBeNull()
         ->and(Media::query()->find($claimed->getKey()))->not->toBeNull();
 });
 
 it('rejects a pasted path claimed by another record on the same field', function (): void {
-    $noteA = Note::factory()->recycle([$this->user, $this->team])->create();
-    $noteB = Note::factory()->recycle([$this->user, $this->team])->create();
-    $media = $this->team->addMediaFromString(pdfBytes())
+    $noteA = Note::factory()->recycle([$this->user, $this->workspace])->create();
+    $noteB = Note::factory()->recycle([$this->user, $this->workspace])->create();
+    $media = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName('01ARZ3NDEKTSV4RRFFQ69G5FAV.pdf')
-        ->withCustomProperties(['team_id' => $this->team->getKey()])
+        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
     $noteA->saveCustomFieldValue($this->contract, $media->getPathRelativeToRoot());
     $claimedPath = $media->refresh()->getPathRelativeToRoot();
@@ -209,10 +209,10 @@ it('rejects a pasted path claimed by another record on the same field', function
 });
 
 it('allows re-saving a record with its own currently claimed path', function (): void {
-    $note = Note::factory()->recycle([$this->user, $this->team])->create();
-    $media = $this->team->addMediaFromString(pdfBytes())
+    $note = Note::factory()->recycle([$this->user, $this->workspace])->create();
+    $media = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName('01ARZ3NDEKTSV4RRFFQ69G5FAV.pdf')
-        ->withCustomProperties(['team_id' => $this->team->getKey()])
+        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
     $note->saveCustomFieldValue($this->contract, $media->getPathRelativeToRoot());
     $claimedPath = $media->refresh()->getPathRelativeToRoot();

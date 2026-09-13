@@ -23,8 +23,8 @@ mutates(StoreAgentUpload::class, ReceiveUploadController::class, TemporaryUpload
 beforeEach(function (): void {
     Storage::fake('public');
     Storage::fake('local');
-    $this->user = User::factory()->withPersonalTeam()->create();
-    $this->team = $this->user->personalTeam();
+    $this->user = User::factory()->withPersonalWorkspace()->create();
+    $this->workspace = $this->user->personalWorkspace();
 });
 
 describe('StoreAgentUpload', function (): void {
@@ -32,7 +32,7 @@ describe('StoreAgentUpload', function (): void {
         resolveHostsTo(['93.184.216.34']);
         Http::fake(['https://cdn.example.com/*' => Http::response(pdfBytes(), 200, ['Content-Type' => 'application/pdf'])]);
 
-        $media = resolve(StoreAgentUpload::class)->execute($this->user, $this->team, ['source_url' => 'https://cdn.example.com/brief.pdf']);
+        $media = resolve(StoreAgentUpload::class)->execute($this->user, $this->workspace, ['source_url' => 'https://cdn.example.com/brief.pdf']);
 
         expect($media->collection_name)->toBe(MediaCollection::PendingUploads->value)
             ->and($media->mime_type)->toBe('application/pdf')
@@ -44,12 +44,12 @@ describe('StoreAgentUpload', function (): void {
         resolveHostsTo(['93.184.216.34']);
         Http::fake(['https://cdn.example.com/*' => Http::response('', 404)]);
 
-        expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->team, ['source_url' => 'https://cdn.example.com/missing.pdf']))
+        expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->workspace, ['source_url' => 'https://cdn.example.com/missing.pdf']))
             ->toThrow(UploadException::class, __('uploads.errors.unreachable'));
     });
 
     it('reports a url the guard refuses', function (): void {
-        expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->team, ['source_url' => 'http://169.254.169.254/latest']))
+        expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->workspace, ['source_url' => 'http://169.254.169.254/latest']))
             ->toThrow(UploadException::class, __('uploads.errors.url_not_allowed'));
     });
 
@@ -57,12 +57,12 @@ describe('StoreAgentUpload', function (): void {
         resolveHostsTo(['93.184.216.34']);
         Http::fake(['https://cdn.example.com/*' => Http::response(str_repeat('a', 10 * 1024 * 1024 + 1), 200)]);
 
-        expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->team, ['source_url' => 'https://cdn.example.com/huge.bin']))
+        expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->workspace, ['source_url' => 'https://cdn.example.com/huge.bin']))
             ->toThrow(UploadException::class, __('uploads.errors.too_large', ['max' => 10]));
     });
 
     it('decodes base64 into pending uploads', function (): void {
-        $media = resolve(StoreAgentUpload::class)->execute($this->user, $this->team, [
+        $media = resolve(StoreAgentUpload::class)->execute($this->user, $this->workspace, [
             'base64' => base64_encode(onePixelPng()),
             'filename' => 'pixel.png',
         ]);
@@ -73,27 +73,27 @@ describe('StoreAgentUpload', function (): void {
     });
 
     it('rejects base64 over 5 MB decoded', function (): void {
-        expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->team, [
+        expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->workspace, [
             'base64' => base64_encode(str_repeat('a', 5 * 1024 * 1024 + 1)),
             'filename' => 'big.pdf',
         ]))->toThrow(UploadException::class, __('uploads.errors.too_large', ['max' => 5]));
     });
 
     it('rejects malformed base64', function (): void {
-        expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->team, ['base64' => '***', 'filename' => 'x.pdf']))
+        expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->workspace, ['base64' => '***', 'filename' => 'x.pdf']))
             ->toThrow(UploadException::class, __('uploads.errors.invalid_base64'));
     });
 
     it('reports no source when none of source_url, base64, or upload_id is given', function (): void {
-        expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->team, ['base64' => '', 'filename' => 'x.pdf']))
+        expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->workspace, ['base64' => '', 'filename' => 'x.pdf']))
             ->toThrow(UploadException::class, __('uploads.errors.no_source'));
     });
 
     it('moves a signed-put temp file into pending uploads', function (): void {
-        $name = TemporaryUploads::newName('report.pdf', (string) $this->team->getKey());
+        $name = TemporaryUploads::newName('report.pdf', (string) $this->workspace->getKey());
         TemporaryUploads::disk()->put(TemporaryUploads::path($name), pdfBytes());
 
-        $media = resolve(StoreAgentUpload::class)->execute($this->user, $this->team, ['upload_id' => $name]);
+        $media = resolve(StoreAgentUpload::class)->execute($this->user, $this->workspace, ['upload_id' => $name]);
 
         expect($media->getCustomProperty('source'))->toBe('signed_put')
             ->and($media->mime_type)->toBe('application/pdf');
@@ -101,23 +101,23 @@ describe('StoreAgentUpload', function (): void {
     });
 
     it('rejects a temp file over the 10 MB ceiling', function (): void {
-        $name = TemporaryUploads::newName('report.pdf', (string) $this->team->getKey());
+        $name = TemporaryUploads::newName('report.pdf', (string) $this->workspace->getKey());
         TemporaryUploads::disk()->put(TemporaryUploads::path($name), str_repeat('a', 10 * 1024 * 1024 + 1));
 
-        expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->team, ['upload_id' => $name]))
+        expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->workspace, ['upload_id' => $name]))
             ->toThrow(UploadException::class, __('uploads.errors.too_large', ['max' => 10]));
     });
 
     it('reports a missing or malformed upload id', function (): void {
-        expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->team, ['upload_id' => '../etc/passwd']))
+        expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->workspace, ['upload_id' => '../etc/passwd']))
             ->toThrow(UploadException::class, __('uploads.errors.not_found'));
 
-        expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->team, ['upload_id' => TemporaryUploads::newName('gone.pdf', (string) $this->team->getKey())]))
+        expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->workspace, ['upload_id' => TemporaryUploads::newName('gone.pdf', (string) $this->workspace->getKey())]))
             ->toThrow(UploadException::class, __('uploads.errors.not_found'));
     });
 
     it('rejects a temp name whose extension is outside the allowlist', function (): void {
-        expect(fn (): string => TemporaryUploads::newName('page.html', (string) $this->team->getKey()))
+        expect(fn (): string => TemporaryUploads::newName('page.html', (string) $this->workspace->getKey()))
             ->toThrow(UploadException::class, __('uploads.errors.mime_not_allowed', ['mime' => 'html']));
     });
 });
@@ -153,7 +153,7 @@ describe('create-upload-url', function (): void {
 
 describe('signed put receiver', function (): void {
     it('stores the body under tmp on the local disk and answers 204', function (): void {
-        $name = TemporaryUploads::newName('deck.pdf', (string) $this->team->getKey());
+        $name = TemporaryUploads::newName('deck.pdf', (string) $this->workspace->getKey());
         $url = URL::temporarySignedRoute('mcp.uploads.receive', now()->addMinutes(5), ['upload' => $name]);
 
         $this->call('PUT', $url, [], [], [], ['CONTENT_LENGTH' => strlen(pdfBytes()), 'CONTENT_TYPE' => 'application/pdf'], pdfBytes())
@@ -163,12 +163,12 @@ describe('signed put receiver', function (): void {
     });
 
     it('rejects an unsigned request', function (): void {
-        $this->put(route('mcp.uploads.receive', ['upload' => TemporaryUploads::newName('deck.pdf', (string) $this->team->getKey())]), [], ['Content-Length' => '10'])
+        $this->put(route('mcp.uploads.receive', ['upload' => TemporaryUploads::newName('deck.pdf', (string) $this->workspace->getKey())]), [], ['Content-Length' => '10'])
             ->assertForbidden();
     });
 
     it('rejects a missing or oversized content length before reading', function (): void {
-        $name = TemporaryUploads::newName('deck.pdf', (string) $this->team->getKey());
+        $name = TemporaryUploads::newName('deck.pdf', (string) $this->workspace->getKey());
         $url = URL::temporarySignedRoute('mcp.uploads.receive', now()->addMinutes(5), ['upload' => $name]);
 
         $this->call('PUT', $url, [], [], [], ['CONTENT_LENGTH' => (string) (10 * 1024 * 1024 + 1)], 'x')
@@ -206,7 +206,7 @@ describe('upload-file', function (): void {
     });
 
     it('accepts a completed signed put by upload id', function (): void {
-        $upload = TemporaryUploads::newName('deck.pdf', (string) $this->team->getKey());
+        $upload = TemporaryUploads::newName('deck.pdf', (string) $this->workspace->getKey());
         TemporaryUploads::disk()->put(TemporaryUploads::path($upload), pdfBytes());
 
         RelaticleServer::actingAs($this->user)
@@ -221,9 +221,9 @@ describe('upload-file', function (): void {
     });
 
     it('prevents another workspace from finalizing a signed put', function (): void {
-        $upload = TemporaryUploads::newName('deck.pdf', (string) $this->team->getKey());
+        $upload = TemporaryUploads::newName('deck.pdf', (string) $this->workspace->getKey());
         TemporaryUploads::disk()->put(TemporaryUploads::path($upload), pdfBytes());
-        $otherUser = User::factory()->withPersonalTeam()->create();
+        $otherUser = User::factory()->withPersonalWorkspace()->create();
 
         RelaticleServer::actingAs($otherUser)
             ->tool(UploadFileTool::class, ['upload_id' => $upload, 'filename' => 'deck.pdf'])
@@ -242,7 +242,7 @@ describe('upload-file', function (): void {
             ->assertHasErrors();
 
         RelaticleServer::actingAs($this->user)
-            ->tool(UploadFileTool::class, ['base64' => base64_encode(pdfBytes()), 'filename' => 'a.pdf', 'upload_id' => TemporaryUploads::newName('b.pdf', (string) $this->team->getKey())])
+            ->tool(UploadFileTool::class, ['base64' => base64_encode(pdfBytes()), 'filename' => 'a.pdf', 'upload_id' => TemporaryUploads::newName('b.pdf', (string) $this->workspace->getKey())])
             ->assertHasErrors();
     });
 
@@ -265,7 +265,7 @@ describe('upload-file', function (): void {
     });
 
     it('limits a workspace to 60 uploads per hour across both tools', function (): void {
-        RateLimiter::clear("mcp-uploads:{$this->team->getKey()}");
+        RateLimiter::clear("mcp-uploads:{$this->workspace->getKey()}");
 
         foreach (range(1, 60) as $i) {
             RelaticleServer::actingAs($this->user)

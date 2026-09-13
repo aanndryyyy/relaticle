@@ -191,7 +191,7 @@ it('resolves record names with a constant number of lookups, not one per row', f
 it('claims file uploads for every CRM entity over rest', function (CrmEntity $entity, string $endpoint, string $titleKey): void {
     Storage::fake('public');
     $field = CustomField::factory()->create([
-        'tenant_id' => $this->team->getKey(),
+        'tenant_id' => $this->workspace->getKey(),
         'entity_type' => $entity->value,
         'code' => 'contract',
         'name' => 'Contract',
@@ -200,9 +200,9 @@ it('claims file uploads for every CRM entity over rest', function (CrmEntity $en
         'active' => true,
         'system_defined' => false,
     ]);
-    $pending = $this->team->addMediaFromString(pdfBytes())
+    $pending = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName("{$entity->value}.pdf")
-        ->withCustomProperties(['team_id' => $this->team->getKey()])
+        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
     $path = $pending->getPathRelativeToRoot();
 
@@ -229,7 +229,7 @@ describe('file-upload values over rest', function (): void {
     beforeEach(function (): void {
         Storage::fake('public');
         $this->contract = CustomField::factory()->create([
-            'tenant_id' => $this->team->getKey(),
+            'tenant_id' => $this->workspace->getKey(),
             'entity_type' => 'note',
             'code' => 'contract',
             'name' => 'Contract',
@@ -238,8 +238,8 @@ describe('file-upload values over rest', function (): void {
             'active' => true,
             'system_defined' => false,
         ]);
-        $this->pending = $this->team->addMediaFromString(pdfBytes())->usingFileName('01ARZ3NDEKTSV4RRFFQ69G5FAV.pdf')
-            ->withCustomProperties(['team_id' => $this->team->getKey()])
+        $this->pending = $this->workspace->addMediaFromString(pdfBytes())->usingFileName('01ARZ3NDEKTSV4RRFFQ69G5FAV.pdf')
+            ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
             ->toMediaCollection(MediaCollection::PendingUploads->value);
     });
 
@@ -259,7 +259,7 @@ describe('file-upload values over rest', function (): void {
     });
 
     it('returns null for an empty file field', function (): void {
-        $note = Note::factory()->create(['team_id' => $this->team->getKey()]);
+        $note = Note::factory()->create(['workspace_id' => $this->workspace->getKey()]);
         $note->saveCustomFieldValue($this->contract, null);
 
         $this->getJson("/api/v1/notes/{$note->getKey()}")
@@ -269,11 +269,11 @@ describe('file-upload values over rest', function (): void {
 
     it('resolves file urls with a constant number of media lookups', function (): void {
         $attach = function (int $count): void {
-            Note::factory()->count($count)->create(['team_id' => $this->team->getKey()])
+            Note::factory()->count($count)->create(['workspace_id' => $this->workspace->getKey()])
                 ->each(function (Note $note): void {
-                    $media = $this->team->addMediaFromString(pdfBytes())
+                    $media = $this->workspace->addMediaFromString(pdfBytes())
                         ->usingFileName("{$note->getKey()}.pdf")
-                        ->withCustomProperties(['team_id' => $this->team->getKey()])
+                        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
                         ->toMediaCollection(MediaCollection::PendingUploads->value);
                     $note->saveCustomFieldValue($this->contract, $media->getPathRelativeToRoot());
                 });

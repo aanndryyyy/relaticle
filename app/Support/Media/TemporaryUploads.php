@@ -23,13 +23,13 @@ final readonly class TemporaryUploads
         return $disk;
     }
 
-    public static function newName(string $filename, string $teamId): string
+    public static function newName(string $filename, string $workspaceId): string
     {
         $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
 
         throw_unless(in_array($extension, UploadAllowlist::extensions(), true), UploadException::mimeNotAllowed($extension));
 
-        return strtoupper($teamId).'.'.Str::ulid().'.'.$extension;
+        return strtoupper($workspaceId).'.'.Str::ulid().'.'.$extension;
     }
 
     public static function path(string $upload): string
@@ -42,12 +42,12 @@ final readonly class TemporaryUploads
         return preg_match(self::NAME_PATTERN, $upload) === 1;
     }
 
-    public static function belongsToTeam(string $upload, string $teamId): bool
+    public static function belongsToWorkspace(string $upload, string $workspaceId): bool
     {
         if (! self::isValidName($upload)) {
             return false;
         }
 
-        return hash_equals(strtoupper($teamId), explode('.', $upload, 2)[0]);
+        return hash_equals(strtoupper($workspaceId), explode('.', $upload, 2)[0]);
     }
 }

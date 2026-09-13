@@ -7,8 +7,8 @@ namespace App\Actions\Upload;
 use App\Enums\UploadSource;
 use App\Exceptions\SsrfGuardException;
 use App\Exceptions\UploadException;
-use App\Models\Team;
 use App\Models\User;
+use App\Models\Workspace;
 use App\Services\Favicon\SsrfGuard;
 use App\Support\Media\TemporaryUploads;
 use App\Support\Media\UploadAllowlist;
@@ -25,18 +25,18 @@ final readonly class StoreAgentUpload
     /**
      * @param  array{source_url?: ?string, base64?: ?string, filename?: ?string, upload_id?: ?string}  $input
      */
-    public function execute(User $user, Team $team, array $input): Media
+    public function execute(User $user, Workspace $workspace, array $input): Media
     {
-        abort_unless($user->belongsToTeam($team), 403);
+        abort_unless($user->belongsToWorkspace($workspace), 403);
 
         $temp = sys_get_temp_dir().'/agent-upload-'.Str::ulid();
         touch($temp);
         chmod($temp, 0600);
 
         try {
-            [$name, $source] = $this->materialise($input, (string) $team->getKey(), $temp);
+            [$name, $source] = $this->materialise($input, (string) $workspace->getKey(), $temp);
 
-            $media = $this->store->execute($user, $team, $temp, $name, $source);
+            $media = $this->store->execute($user, $workspace, $temp, $name, $source);
 
             if ($source === UploadSource::SignedPut) {
                 TemporaryUploads::disk()->delete(TemporaryUploads::path((string) ($input['upload_id'] ?? '')));
@@ -52,7 +52,7 @@ final readonly class StoreAgentUpload
      * @param  array{source_url?: ?string, base64?: ?string, filename?: ?string, upload_id?: ?string}  $input
      * @return array{0: string, 1: UploadSource}
      */
-    private function materialise(array $input, string $teamId, string $temp): array
+    private function materialise(array $input, string $workspaceId, string $temp): array
     {
         if (filled($input['source_url'] ?? null)) {
             return [$this->fetch((string) $input['source_url'], $temp), UploadSource::Url];
@@ -63,7 +63,7 @@ final readonly class StoreAgentUpload
         }
 
         if (filled($input['upload_id'] ?? null)) {
-            $upload = $this->takeTemporary((string) $input['upload_id'], $teamId, $temp);
+            $upload = $this->takeTemporary((string) $input['upload_id'], $workspaceId, $temp);
             $name = filled($input['filename'] ?? null) ? (string) $input['filename'] : $upload;
 
             return [$name, UploadSource::SignedPut];
@@ -103,9 +103,9 @@ final readonly class StoreAgentUpload
         return $filename;
     }
 
-    private function takeTemporary(string $upload, string $teamId, string $temp): string
+    private function takeTemporary(string $upload, string $workspaceId, string $temp): string
     {
-        throw_unless(TemporaryUploads::belongsToTeam($upload, $teamId), UploadException::notFound());
+        throw_unless(TemporaryUploads::belongsToWorkspace($upload, $workspaceId), UploadException::notFound());
 
         $disk = TemporaryUploads::disk();
         $path = TemporaryUploads::path($upload);

@@ -9,8 +9,8 @@ use App\Actions\Upload\StorePendingUpload;
 use App\Enums\MediaCollection;
 use App\Enums\UploadSource;
 use App\Exceptions\UploadException;
-use App\Models\Team;
 use App\Models\User;
+use App\Models\Workspace;
 use App\Support\Media\MediaPaths;
 use App\Support\Media\UploadAllowlist;
 use Filament\Facades\Filament;
@@ -47,13 +47,13 @@ final readonly class FileUploadComponent extends AbstractFormComponent
     private function store(TemporaryUploadedFile $file, FileUpload $component): string
     {
         $user = auth()->user();
-        $team = Filament::getTenant();
+        $workspace = Filament::getTenant();
 
-        abort_unless($user instanceof User && $team instanceof Team, 403);
+        abort_unless($user instanceof User && $workspace instanceof Workspace, 403);
 
         try {
             return resolve(StorePendingUpload::class)
-                ->execute($user, $team, $file->getRealPath(), $file->getClientOriginalName(), UploadSource::Panel)
+                ->execute($user, $workspace, $file->getRealPath(), $file->getClientOriginalName(), UploadSource::Panel)
                 ->getPathRelativeToRoot();
         } catch (UploadException $exception) {
             throw ValidationException::withMessages([$component->getStatePath() => $exception->getMessage()]);
@@ -80,10 +80,10 @@ final readonly class FileUploadComponent extends AbstractFormComponent
     private function discardPending(string $file): null
     {
         $user = auth()->user();
-        $team = Filament::getTenant();
+        $workspace = Filament::getTenant();
 
-        if ($user instanceof User && $team instanceof Team) {
-            resolve(DiscardPendingUpload::class)->execute($user, $team, $file);
+        if ($user instanceof User && $workspace instanceof Workspace) {
+            resolve(DiscardPendingUpload::class)->execute($user, $workspace, $file);
         }
 
         return null;
@@ -91,13 +91,13 @@ final readonly class FileUploadComponent extends AbstractFormComponent
 
     private function isAllowedPath(string $file, FileUpload $component, CustomField $customField): bool
     {
-        $team = Filament::getTenant();
+        $workspace = Filament::getTenant();
 
-        if (! $team instanceof Team) {
+        if (! $workspace instanceof Workspace) {
             return false;
         }
 
-        $media = resolve(MediaPaths::class)->find((string) $team->getKey(), $file);
+        $media = resolve(MediaPaths::class)->find((string) $workspace->getKey(), $file);
 
         if ($media === null) {
             return false;
@@ -119,12 +119,12 @@ final readonly class FileUploadComponent extends AbstractFormComponent
 
     private function find(string $file): ?Media
     {
-        $team = Filament::getTenant();
+        $workspace = Filament::getTenant();
 
-        if (! $team instanceof Team) {
+        if (! $workspace instanceof Workspace) {
             return null;
         }
 
-        return resolve(MediaPaths::class)->find((string) $team->getKey(), $file);
+        return resolve(MediaPaths::class)->find((string) $workspace->getKey(), $file);
     }
 }

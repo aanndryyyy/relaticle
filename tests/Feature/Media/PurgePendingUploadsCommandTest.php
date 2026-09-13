@@ -17,23 +17,23 @@ mutates(PurgeExpiredUploads::class, PurgePendingUploadsCommand::class);
 beforeEach(function (): void {
     Storage::fake('public');
     Storage::fake('local');
-    $this->team = User::factory()->withPersonalTeam()->create()->personalTeam();
+    $this->workspace = User::factory()->withPersonalWorkspace()->create()->personalWorkspace();
 });
 
 it('removes pending media and temp files older than a day, keeps the rest', function (): void {
     $this->travelTo(now()->subHours(25));
-    $old = $this->team->addMediaFromString(pdfBytes())->usingFileName('old.pdf')
-        ->withCustomProperties(['team_id' => $this->team->getKey()])
+    $old = $this->workspace->addMediaFromString(pdfBytes())->usingFileName('old.pdf')
+        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
-    $oldTemp = TemporaryUploads::newName('old.pdf', (string) $this->team->getKey());
+    $oldTemp = TemporaryUploads::newName('old.pdf', (string) $this->workspace->getKey());
     TemporaryUploads::disk()->put(TemporaryUploads::path($oldTemp), pdfBytes());
     touch(TemporaryUploads::disk()->path(TemporaryUploads::path($oldTemp)), now()->getTimestamp());
 
     $this->travelBack();
-    $fresh = $this->team->addMediaFromString(pdfBytes())->usingFileName('fresh.pdf')
-        ->withCustomProperties(['team_id' => $this->team->getKey()])
+    $fresh = $this->workspace->addMediaFromString(pdfBytes())->usingFileName('fresh.pdf')
+        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
-    $freshTemp = TemporaryUploads::newName('fresh.pdf', (string) $this->team->getKey());
+    $freshTemp = TemporaryUploads::newName('fresh.pdf', (string) $this->workspace->getKey());
     TemporaryUploads::disk()->put(TemporaryUploads::path($freshTemp), pdfBytes());
 
     $this->artisan('app:purge-pending-uploads')
@@ -60,8 +60,8 @@ it('is scheduled hourly without overlap on a single server', function (): void {
 });
 
 it('rejects a non-positive retention window without deleting uploads', function (string $hours): void {
-    $pending = $this->team->addMediaFromString(pdfBytes())->usingFileName('pending.pdf')
-        ->withCustomProperties(['team_id' => $this->team->getKey()])
+    $pending = $this->workspace->addMediaFromString(pdfBytes())->usingFileName('pending.pdf')
+        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
 
     $this->artisan('app:purge-pending-uploads', ['--hours' => $hours])

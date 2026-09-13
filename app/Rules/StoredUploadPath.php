@@ -14,7 +14,7 @@ use Relaticle\CustomFields\Models\CustomField;
 final readonly class StoredUploadPath implements ValidationRule
 {
     public function __construct(
-        private string $teamId,
+        private string $workspaceId,
         private string $entityType,
         private CustomField $field,
         private string|int|null $entityId = null,
@@ -26,7 +26,7 @@ final readonly class StoredUploadPath implements ValidationRule
             return;
         }
 
-        $media = is_string($value) ? resolve(MediaPaths::class)->find($this->teamId, $value) : null;
+        $media = is_string($value) ? resolve(MediaPaths::class)->find($this->workspaceId, $value) : null;
 
         if ($media === null) {
             $fail(__('validation.custom_field.upload_path', ['field' => $this->field->name]));
@@ -44,7 +44,7 @@ final readonly class StoredUploadPath implements ValidationRule
             && $media->collection_name === MediaCollection::forCustomField($this->field->code)
             && CustomFieldValue::query()
                 ->withoutGlobalScopes()
-                ->where('tenant_id', $this->teamId)
+                ->where('tenant_id', $this->workspaceId)
                 ->where('entity_type', $this->entityType)
                 ->where('entity_id', $this->entityId)
                 ->where('custom_field_id', $this->field->getKey())

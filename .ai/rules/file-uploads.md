@@ -17,7 +17,7 @@ Durable user files go through medialibrary with a named collection on the owning
 model (`App\Enums\MediaCollection`). Two exemptions: import CSVs under
 `storage/app/imports` (transient) and Jetstream profile photos (framework-owned).
 
-- Every custom-field upload lands in the team's `pending-uploads` collection
+- Every custom-field upload lands in the workspace's `pending-uploads` collection
   first (`App\Actions\Upload\StorePendingUpload`); `logo` collections are
   written directly. `App\Support\Media\UploadClaims` claims a pending row onto
   the record when a saved custom-field value references it. For `file-upload`

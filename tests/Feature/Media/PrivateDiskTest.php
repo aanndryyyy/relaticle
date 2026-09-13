@@ -7,18 +7,18 @@ use App\Http\Controllers\Media\ShowMediaController;
 use App\Mcp\Servers\RelaticleServer;
 use App\Mcp\Tools\UploadFileTool;
 use App\Models\Company;
-use App\Models\Team;
 use App\Models\User;
+use App\Models\Workspace;
 use App\Support\Media\MediaUrlGenerator;
 use Illuminate\Support\Facades\Storage;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
-mutates(MediaUrlGenerator::class, ShowMediaController::class, Team::class);
+mutates(MediaUrlGenerator::class, ShowMediaController::class, Workspace::class);
 
 beforeEach(function (): void {
     Storage::fake('public');
-    $this->user = User::factory()->withPersonalTeam()->create();
-    $this->team = $this->user->personalTeam();
+    $this->user = User::factory()->withPersonalWorkspace()->create();
+    $this->workspace = $this->user->personalWorkspace();
 });
 
 function usePrivateMediaDisk(): void
@@ -78,9 +78,9 @@ it('renders images inline on a private disk', function (): void {
 it('falls back to the stored file name when original_name is absent', function (): void {
     usePrivateMediaDisk();
 
-    $media = $this->team->addMediaFromString(pdfBytes())
+    $media = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName('brief.pdf')
-        ->withCustomProperties(['team_id' => $this->team->getKey()])
+        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
 
     $this->get($media->getUrl())
@@ -119,7 +119,7 @@ it('refuses an unsigned or expired private url', function (): void {
 
 it('keeps company logos on the public disk regardless of the switch', function (): void {
     usePrivateMediaDisk();
-    $company = Company::factory()->create(['team_id' => $this->team->getKey()]);
+    $company = Company::factory()->create(['workspace_id' => $this->workspace->getKey()]);
 
     $logo = $company->addMediaFromString(onePixelPng())->usingFileName('logo.png')->toMediaCollection(MediaCollection::Logo->value);
 
@@ -130,7 +130,7 @@ it('keeps company logos on the public disk regardless of the switch', function (
 it('keeps workspace logos on the public disk regardless of the switch', function (): void {
     usePrivateMediaDisk();
 
-    $logo = $this->team->addMediaFromString(onePixelPng())->usingFileName('logo.png')->toMediaCollection(Team::LOGO_MEDIA_COLLECTION);
+    $logo = $this->workspace->addMediaFromString(onePixelPng())->usingFileName('logo.png')->toMediaCollection(Workspace::LOGO_MEDIA_COLLECTION);
 
     expect($logo->disk)->toBe('public')
         ->and($logo->getUrl())->not->toContain('signature=');

@@ -31,7 +31,7 @@ final class FileEntry extends AbstractInfolistEntry
             return null;
         }
 
-        return resolve(MediaPaths::class)->find((string) $record->getAttribute('team_id'), $value);
+        return resolve(MediaPaths::class)->find((string) $record->getAttribute('workspace_id'), $value);
     }
 
     private function label(?Media $media): ?string

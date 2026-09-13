@@ -7,8 +7,8 @@ namespace App\Actions\Upload;
 use App\Enums\MediaCollection;
 use App\Enums\UploadSource;
 use App\Exceptions\UploadException;
-use App\Models\Team;
 use App\Models\User;
+use App\Models\Workspace;
 use App\Support\Media\UploadAllowlist;
 use finfo;
 use Illuminate\Support\Str;
@@ -16,9 +16,9 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 final readonly class StorePendingUpload
 {
-    public function execute(User $user, Team $team, string $path, string $originalName, UploadSource $source): Media
+    public function execute(User $user, Workspace $workspace, string $path, string $originalName, UploadSource $source): Media
     {
-        abort_unless($user->belongsToTeam($team), 403);
+        abort_unless($user->belongsToWorkspace($workspace), 403);
 
         throw_unless(is_file($path), UploadException::notFound());
 
@@ -33,11 +33,11 @@ final readonly class StorePendingUpload
 
         $originalName = $this->safeOriginalName($originalName, $extension);
 
-        return $team->addMedia($path)
+        return $workspace->addMedia($path)
             ->usingFileName(Str::ulid().'.'.$extension)
             ->usingName(pathinfo($originalName, PATHINFO_FILENAME))
             ->withCustomProperties([
-                'team_id' => $team->getKey(),
+                'workspace_id' => $workspace->getKey(),
                 'uploaded_by' => $user->getKey(),
                 'source' => $source->value,
                 'original_name' => $originalName,

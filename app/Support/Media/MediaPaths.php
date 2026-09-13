@@ -54,10 +54,10 @@ final readonly class MediaPaths
             }
         }
 
-        foreach ($wanted as $teamId => $paths) {
+        foreach ($wanted as $workspaceId => $paths) {
             $missing = array_filter(
                 $paths,
-                fn (string $uuid, string $path): bool => ! $this->byPath->has($this->pathKey($teamId, $path)),
+                fn (string $uuid, string $path): bool => ! $this->byPath->has($this->pathKey($workspaceId, $path)),
                 ARRAY_FILTER_USE_BOTH,
             );
 
@@ -66,7 +66,7 @@ final readonly class MediaPaths
             }
 
             $found = Media::query()
-                ->where('custom_properties->team_id', $teamId)
+                ->where('custom_properties->workspace_id', $workspaceId)
                 ->whereIn('uuid', array_values($missing))
                 ->get()
                 ->keyBy('uuid');
@@ -75,8 +75,8 @@ final readonly class MediaPaths
                 $media = $found->get($uuid);
                 $media = $media instanceof Media && $media->getPathRelativeToRoot() === $path ? $media : null;
 
-                $this->byPath->put($this->pathKey($teamId, $path), $media);
-                $this->byUuid->put($this->uuidKey($teamId, $uuid), $media);
+                $this->byPath->put($this->pathKey($workspaceId, $path), $media);
+                $this->byUuid->put($this->uuidKey($workspaceId, $uuid), $media);
             }
         }
     }
@@ -86,9 +86,9 @@ final readonly class MediaPaths
         return preg_match(self::PATH_PATTERN, $path, $matches) === 1 ? $matches[1] : null;
     }
 
-    public function find(string $teamId, string $path): ?Media
+    public function find(string $workspaceId, string $path): ?Media
     {
-        $key = $this->pathKey($teamId, $path);
+        $key = $this->pathKey($workspaceId, $path);
 
         if ($this->byPath->has($key)) {
             return $this->byPath->get($key);
@@ -102,7 +102,7 @@ final readonly class MediaPaths
             return null;
         }
 
-        $media = $this->findByUuid($teamId, $uuid);
+        $media = $this->findByUuid($workspaceId, $uuid);
 
         if (! $media instanceof Media || $media->getPathRelativeToRoot() !== $path) {
             $this->byPath->put($key, null);
@@ -115,9 +115,9 @@ final readonly class MediaPaths
         return $media;
     }
 
-    public function findByUuid(string $teamId, string $uuid): ?Media
+    public function findByUuid(string $workspaceId, string $uuid): ?Media
     {
-        $key = $this->uuidKey($teamId, $uuid);
+        $key = $this->uuidKey($workspaceId, $uuid);
 
         if ($this->byUuid->has($key)) {
             return $this->byUuid->get($key);
@@ -125,7 +125,7 @@ final readonly class MediaPaths
 
         $media = Media::query()
             ->where('uuid', $uuid)
-            ->where('custom_properties->team_id', $teamId)
+            ->where('custom_properties->workspace_id', $workspaceId)
             ->first();
 
         $this->byUuid->put($key, $media);
@@ -133,13 +133,13 @@ final readonly class MediaPaths
         return $media;
     }
 
-    private function pathKey(string $teamId, string $path): string
+    private function pathKey(string $workspaceId, string $path): string
     {
-        return $teamId.':'.$path;
+        return $workspaceId.':'.$path;
     }
 
-    private function uuidKey(string $teamId, string $uuid): string
+    private function uuidKey(string $workspaceId, string $uuid): string
     {
-        return $teamId.':'.$uuid;
+        return $workspaceId.':'.$uuid;
     }
 }

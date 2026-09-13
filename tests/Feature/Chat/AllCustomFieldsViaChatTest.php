@@ -114,7 +114,7 @@ it('updates the note body via custom_fields and persists as text_value', functio
 it('sets and clears a note file upload through chat approval', function (): void {
     Storage::fake('public');
     $field = CustomField::factory()->create([
-        'tenant_id' => $this->team->getKey(),
+        'tenant_id' => $this->workspace->getKey(),
         'entity_type' => 'note',
         'code' => 'contract',
         'name' => 'Contract',
@@ -125,8 +125,8 @@ it('sets and clears a note file upload through chat approval', function (): void
     ]);
     $source = tempnam(sys_get_temp_dir(), 'chat-upload');
     file_put_contents($source, pdfBytes());
-    $media = resolve(StorePendingUpload::class)->execute($this->user, $this->team, $source, 'contract.pdf', UploadSource::Panel);
-    $note = Note::factory()->for($this->team)->create(['title' => 'N']);
+    $media = resolve(StorePendingUpload::class)->execute($this->user, $this->workspace, $source, 'contract.pdf', UploadSource::Panel);
+    $note = Note::factory()->for($this->workspace)->create(['title' => 'N']);
 
     runUpdateToolForCustomFieldsTest(UpdateNoteTool::class, $note, ['contract' => $media->getPathRelativeToRoot()]);
     resolve(UpdateNote::class)->execute($this->user, $note, latestPendingForCustomFieldsTest()->action_data);
