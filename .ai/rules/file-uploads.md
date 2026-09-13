@@ -28,7 +28,8 @@ model (`App\Enums\MediaCollection`). Two exemptions: import CSVs under
   `RichContentEntry`. `data-id` is the Media `uuid`; reads (`FormatsCustomFields`,
   the record page) rewrite `src` from the row, and `CustomFieldInput::richText()`
   tags an untagged `<img>` whose URL names an owned upload so the claim finds it.
-  A bare-filename `data-id` is a legacy Filament upload on the public disk;
+  A bare-filename `data-id`, or an `<img>` with no `data-id` whose `src` sits
+  under `/storage/`, is a legacy Filament upload on the public disk;
   `media:backfill-rich-editor-attachments --force` moves those onto their records.
 - The `file-upload` custom field type ships disabled in `config/custom-fields.php`.
   Its media-backed implementation stays registered so enabling it is a config
