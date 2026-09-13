@@ -137,3 +137,13 @@ it('keeps workspace logos on the public disk regardless of the switch', function
     expect($logo->disk)->toBe('public')
         ->and($logo->getUrl())->not->toContain('signature=');
 });
+it('answers 404 when the file behind a signed url is gone from the disk', function (): void {
+    usePrivateMediaDisk();
+    RelaticleServer::actingAs($this->user)
+        ->tool(UploadFileTool::class, ['base64' => base64_encode(onePixelPng()), 'filename' => 'pixel.png'])
+        ->assertOk();
+    $media = Media::query()->latest('id')->firstOrFail();
+    Storage::disk('media')->delete($media->getPathRelativeToRoot());
+
+    $this->get($media->getUrl())->assertNotFound();
+});
