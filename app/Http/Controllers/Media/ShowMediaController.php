@@ -16,6 +16,10 @@ final readonly class ShowMediaController
         $name = (string) $media->getCustomProperty('original_name', $media->file_name);
         $disposition = UploadAllowlist::isImage((string) $media->mime_type) ? 'inline' : 'attachment';
 
-        return Storage::disk($media->disk)->response($media->getPathRelativeToRoot(), $name, ['Cache-Control' => 'private, no-store'], $disposition);
+        return Storage::disk($media->disk)->response($media->getPathRelativeToRoot(), $name, [
+            'Cache-Control' => 'private, no-store',
+            'X-Content-Type-Options' => 'nosniff',
+            'Content-Security-Policy' => "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+        ], $disposition);
     }
 }

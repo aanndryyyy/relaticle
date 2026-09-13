@@ -72,7 +72,9 @@ it('renders images inline on a private disk', function (): void {
 
     $this->get($media->getUrl())
         ->assertOk()
-        ->assertHeader('Content-Disposition', 'inline; filename=pixel.png');
+        ->assertHeader('Content-Disposition', 'inline; filename=pixel.png')
+        ->assertHeader('X-Content-Type-Options', 'nosniff')
+        ->assertHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
 });
 
 it('falls back to the stored file name when original_name is absent', function (): void {
