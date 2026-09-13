@@ -6,21 +6,19 @@ namespace App\Filament\CustomFields;
 
 use App\Actions\Upload\DiscardPendingUpload;
 use App\Actions\Upload\StorePendingUpload;
-use App\Enums\MediaCollection;
 use App\Enums\UploadSource;
 use App\Exceptions\UploadException;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Rules\StoredUploadPath;
 use App\Support\Media\MediaPaths;
 use App\Support\Media\UploadAllowlist;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\FileUpload;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Validation\ValidationException;
 use Livewire\Component;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Relaticle\CustomFields\Filament\Integration\Base\AbstractFormComponent;
-use Relaticle\CustomFields\Models\Contracts\HasCustomFields;
 use Relaticle\CustomFields\Models\CustomField;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
@@ -47,7 +45,7 @@ final readonly class FileUploadComponent extends AbstractFormComponent
     private function store(TemporaryUploadedFile $file, FileUpload $component): string
     {
         $user = auth()->user();
-        $workspace = Filament::getTenant();
+        $workspace = $this->workspace();
 
         abort_unless($user instanceof User && $workspace instanceof Workspace, 403);
 
@@ -63,7 +61,10 @@ final readonly class FileUploadComponent extends AbstractFormComponent
     /** @return array{name: string, size: int, type: ?string, url: ?string}|null */
     private function describe(string $file): ?array
     {
-        $media = $this->find($file);
+        $workspace = $this->workspace();
+        $media = $workspace instanceof Workspace
+            ? resolve(MediaPaths::class)->find((string) $workspace->getKey(), $file)
+            : null;
 
         if (! $media instanceof Media) {
             return null;
@@ -80,7 +81,7 @@ final readonly class FileUploadComponent extends AbstractFormComponent
     private function discardPending(string $file): null
     {
         $user = auth()->user();
-        $workspace = Filament::getTenant();
+        $workspace = $this->workspace();
 
         if ($user instanceof User && $workspace instanceof Workspace) {
             resolve(DiscardPendingUpload::class)->execute($user, $workspace, $file);
@@ -91,40 +92,26 @@ final readonly class FileUploadComponent extends AbstractFormComponent
 
     private function isAllowedPath(string $file, FileUpload $component, CustomField $customField): bool
     {
-        $workspace = Filament::getTenant();
+        $workspace = $this->workspace();
 
         if (! $workspace instanceof Workspace) {
             return false;
         }
 
-        $media = resolve(MediaPaths::class)->find((string) $workspace->getKey(), $file);
+        $allowed = true;
 
-        if ($media === null) {
-            return false;
-        }
+        new StoredUploadPath((string) $workspace->getKey(), $customField->entity_type, $customField, $component->getRecord()?->getKey())
+            ->validate($component->getStatePath(), $file, function () use (&$allowed): void {
+                $allowed = false;
+            });
 
-        if ($media->collection_name === MediaCollection::PendingUploads->value) {
-            return true;
-        }
-
-        $record = $component->getRecord();
-
-        return $record instanceof Model
-            && $record instanceof HasCustomFields
-            && $media->model_type === $record->getMorphClass()
-            && (string) $media->model_id === (string) $record->getKey()
-            && $media->collection_name === MediaCollection::forCustomField($customField->code)
-            && $record->getCustomFieldValue($customField) === $file;
+        return $allowed;
     }
 
-    private function find(string $file): ?Media
+    private function workspace(): ?Workspace
     {
-        $workspace = Filament::getTenant();
+        $tenant = Filament::getTenant();
 
-        if (! $workspace instanceof Workspace) {
-            return null;
-        }
-
-        return resolve(MediaPaths::class)->find((string) $workspace->getKey(), $file);
+        return $tenant instanceof Workspace ? $tenant : null;
     }
 }
