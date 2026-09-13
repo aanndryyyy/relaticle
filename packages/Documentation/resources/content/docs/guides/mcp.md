@@ -233,6 +233,15 @@ The server provides 39 tools. They cover account context, cross-entity discovery
 | `attach-note-to-entities-tool` | Link a note to companies, people, or opportunities. Adds without removing existing links. |
 | `detach-note-from-entities-tool` | Unlink a note from companies, people, or opportunities |
 
+### Files
+
+| Tool | Description |
+|------|-------------|
+| `upload-file` | Store a file in the workspace from a public https URL, a base64 body with `filename`, or an `upload_id`. Returns the `path` to set on a `file-upload` custom field. Allowed types: pdf, doc, docx, jpeg, png, gif, webp, up to 10 MB. |
+| `create-upload-url` | Get a five-minute signed URL to `PUT` a file body to, then pass the returned `upload_id` to `upload-file`. |
+
+Uploads stay pending for 24 hours. Saving a record whose `file-upload` field references the path claims the file; unclaimed files are purged.
+
 Entity list tools support `search`, `per_page` (default 15, maximum 25), and `page`. They also support date filters, custom-field filters, sorting, and selected relationship includes.
 
 List responses include `page`, `per_page`, `total`, `has_more`, and `next_page`. Create and update tools accept `custom_fields` as key-value pairs.
