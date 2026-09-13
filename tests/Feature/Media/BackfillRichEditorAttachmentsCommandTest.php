@@ -25,18 +25,21 @@ beforeEach(function (): void {
         ->firstOrFail();
     Storage::disk('public')->put('legacy.png', onePixelPng());
     Storage::disk('public')->put('second.png', onePixelPng());
+    Storage::disk('public')->put('untagged.jpg', onePixelPng());
     $this->note = Note::factory()->create(['workspace_id' => $this->workspace->getKey()]);
     $this->second = Note::factory()->create(['workspace_id' => $this->workspace->getKey()]);
+    $this->untagged = Note::factory()->create(['workspace_id' => $this->workspace->getKey()]);
 
     TenantContextService::withTenant($this->workspace->getKey(), function (): void {
         $this->note->saveCustomFieldValue($this->body, '<p><img src="https://app.test/storage/legacy.png" alt="old" data-id="legacy.png"></p>');
         $this->second->saveCustomFieldValue($this->body, '<p><img src="https://app.test/storage/second.png" data-id="second.png"></p>');
+        $this->untagged->saveCustomFieldValue($this->body, '<p><img src="https://app.test/storage/untagged.jpg"><img src="https://cdn.example.com/external.png"></p>');
     });
 });
 
 it('reports without writing by default', function (): void {
     $this->artisan('media:backfill-rich-editor-attachments')
-        ->expectsOutputToContain('2 image(s) would be migrated')
+        ->expectsOutputToContain('3 image(s) would be migrated')
         ->assertSuccessful();
 
     expect(Media::query()->count())->toBe(0);
@@ -46,7 +49,7 @@ it('creates a media row on the record and rewrites the image with --force, outsi
     $activities = Activity::query()->count();
 
     $this->artisan('media:backfill-rich-editor-attachments --force')
-        ->expectsOutputToContain('2 image(s) migrated.')
+        ->expectsOutputToContain('3 image(s) migrated.')
         ->assertSuccessful();
 
     $media = Media::query()->where('model_id', $this->note->getKey())->firstOrFail();
@@ -71,7 +74,17 @@ it('is idempotent', function (): void {
         ->expectsOutputToContain('0 image(s) migrated.')
         ->assertSuccessful();
 
-    expect(Media::query()->count())->toBe(2);
+    expect(Media::query()->count())->toBe(3);
+});
+
+it('tags an untagged public-disk image with its new media uuid and leaves external images alone', function (): void {
+    $this->artisan('media:backfill-rich-editor-attachments --force')->assertSuccessful();
+
+    $media = Media::query()->where('model_id', $this->untagged->getKey())->firstOrFail();
+    $html = (string) TenantContextService::withTenant($this->workspace->getKey(), fn (): mixed => $this->untagged->refresh()->getCustomFieldValue($this->body));
+
+    expect($media->getCustomProperty('original_name'))->toBe('untagged.jpg')
+        ->and($html)->toBe('<p><img src="'.e($media->getUrl()).'" data-id="'.$media->uuid.'"><img src="https://cdn.example.com/external.png"></p>');
 });
 
 it('skips an image whose file is gone from the public disk', function (): void {
@@ -79,9 +92,9 @@ it('skips an image whose file is gone from the public disk', function (): void {
 
     $this->artisan('media:backfill-rich-editor-attachments --force')
         ->expectsOutputToContain('legacy.png is missing on the public disk, skipped.')
-        ->expectsOutputToContain('1 image(s) migrated.')
+        ->expectsOutputToContain('2 image(s) migrated.')
         ->assertSuccessful();
 
-    expect(Media::query()->count())->toBe(1)
-        ->and(Media::query()->first()->model_id)->toBe($this->second->getKey());
+    expect(Media::query()->count())->toBe(2)
+        ->and(Media::query()->where('model_id', $this->note->getKey())->exists())->toBeFalse();
 });

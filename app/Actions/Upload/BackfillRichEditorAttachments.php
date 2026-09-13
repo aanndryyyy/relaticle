@@ -15,7 +15,11 @@ use Spatie\MediaLibrary\HasMedia;
 
 final readonly class BackfillRichEditorAttachments
 {
-    private const string LEGACY_IMAGE = '/<img\b[^>]*\bdata-id="(?![0-9a-f]{8}-[0-9a-f]{4}-)([A-Za-z0-9][A-Za-z0-9._-]*)"[^>]*>/i';
+    private const string IMAGE = '/<img\b[^>]*>/i';
+
+    private const string LEGACY_ID = '/\bdata-id="(?![0-9a-f]{8}-[0-9a-f]{4}-)([A-Za-z0-9][A-Za-z0-9._-]*)"/i';
+
+    private const string PUBLIC_DISK_SRC = '#\bsrc="[^"]*/storage/([A-Za-z0-9][A-Za-z0-9._-]*)"#i';
 
     /** @return array{migrated: list<string>, skipped: list<string>} */
     public function execute(bool $write): array
@@ -27,14 +31,26 @@ final readonly class BackfillRichEditorAttachments
         $values = CustomFieldValue::query()
             ->withoutGlobalScopes()
             ->whereHas('customField', fn (Builder $query): Builder => $query->withoutGlobalScopes()->where('type', CustomFieldType::RICH_EDITOR->value))
-            ->where('text_value', 'like', '%data-id=%')
+            ->where('text_value', 'like', '%<img%')
             ->with(['entity', 'customField' => fn (Relation $query): Relation => $query->withoutGlobalScopes()])
             ->get();
 
         foreach ($values as $value) {
             $html = (string) $value->text_value;
 
-            if (preg_match_all(self::LEGACY_IMAGE, $html, $matches, PREG_SET_ORDER) === 0) {
+            $legacy = [];
+
+            preg_match_all(self::IMAGE, $html, $tags);
+
+            foreach ($tags[0] as $tag) {
+                $legacyPath = $this->legacyPath($tag);
+
+                if ($legacyPath !== null) {
+                    $legacy[$tag] = $legacyPath;
+                }
+            }
+
+            if ($legacy === []) {
                 continue;
             }
 
@@ -46,9 +62,7 @@ final readonly class BackfillRichEditorAttachments
                 continue;
             }
 
-            foreach ($matches as $match) {
-                $legacyPath = $match[1];
-
+            foreach ($legacy as $tag => $legacyPath) {
                 if (! $public->exists($legacyPath)) {
                     $skipped[] = "Value {$value->getKey()}: {$legacyPath} is missing on the public disk, skipped.";
 
@@ -71,9 +85,8 @@ final readonly class BackfillRichEditorAttachments
                     ])
                     ->toMediaCollection(MediaCollection::forCustomField($value->customField->code));
 
-                $tag = (string) preg_replace('/\ssrc="[^"]*"/i', '', $match[0]);
-                $tag = str_replace("data-id=\"{$legacyPath}\"", "data-id=\"{$media->uuid}\"", $tag);
-                $html = str_replace($match[0], '<img src="'.e($media->getUrl()).'"'.substr($tag, 4), $html);
+                $rewritten = (string) preg_replace(['/\ssrc="[^"]*"/i', '/\sdata-id="[^"]*"/i'], '', $tag);
+                $html = str_replace($tag, '<img src="'.e($media->getUrl()).'" data-id="'.$media->uuid.'"'.substr($rewritten, 4), $html);
             }
 
             if (! $write || $html === (string) $value->text_value) {
@@ -92,5 +105,14 @@ final readonly class BackfillRichEditorAttachments
         }
 
         return ['migrated' => $migrated, 'skipped' => $skipped];
+    }
+
+    private function legacyPath(string $tag): ?string
+    {
+        if (str_contains($tag, 'data-id=')) {
+            return preg_match(self::LEGACY_ID, $tag, $match) === 1 ? $match[1] : null;
+        }
+
+        return preg_match(self::PUBLIC_DISK_SRC, $tag, $match) === 1 ? $match[1] : null;
     }
 }
