@@ -11,6 +11,7 @@ use App\Mcp\Tools\CreateUploadUrlTool;
 use App\Mcp\Tools\UploadFileTool;
 use App\Models\User;
 use App\Support\Media\TemporaryUploads;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
@@ -151,6 +152,21 @@ describe('create-upload-url', function (): void {
 });
 
 describe('signed put receiver', function (): void {
+    it('refuses to overwrite an upload being finalized', function (): void {
+        $name = TemporaryUploads::newName('deck.pdf', (string) $this->workspace->getKey());
+        $url = URL::temporarySignedRoute('mcp.uploads.receive', now()->addMinutes(5), ['upload' => $name]);
+        $lock = Cache::lock("mcp-upload:{$name}", 60);
+        $lock->get();
+
+        try {
+            $this->call('PUT', $url, [], [], [], ['CONTENT_LENGTH' => strlen(pdfBytes())], pdfBytes())
+                ->assertConflict();
+            TemporaryUploads::disk()->assertMissing(TemporaryUploads::path($name));
+        } finally {
+            $lock->release();
+        }
+    });
+
     it('stores the body under tmp on the local disk and answers 204', function (): void {
         $name = TemporaryUploads::newName('deck.pdf', (string) $this->workspace->getKey());
         $url = URL::temporarySignedRoute('mcp.uploads.receive', now()->addMinutes(5), ['upload' => $name]);
@@ -196,6 +212,26 @@ describe('signed put receiver', function (): void {
 });
 
 describe('upload-file', function (): void {
+    it('refuses simultaneous finalization of a signed upload', function (): void {
+        $name = TemporaryUploads::newName('deck.pdf', (string) $this->workspace->getKey());
+        TemporaryUploads::disk()->put(TemporaryUploads::path($name), pdfBytes());
+        $lock = Cache::lock("mcp-upload:{$name}", 60);
+        $lock->get();
+
+        try {
+            RelaticleServer::actingAs($this->user)->tool(UploadFileTool::class, ['upload_id' => $name])
+                ->assertHasErrors(['The upload is being processed. Try again shortly.']);
+            expect(Media::query()->count())->toBe(0);
+        } finally {
+            $lock->release();
+        }
+
+        RelaticleServer::actingAs($this->user)->tool(UploadFileTool::class, ['upload_id' => $name])->assertOk();
+        RelaticleServer::actingAs($this->user)->tool(UploadFileTool::class, ['upload_id' => $name])
+            ->assertHasErrors([__('uploads.errors.not_found')]);
+        expect(Media::query()->count())->toBe(1);
+    });
+
     it('stores a base64 file and returns the file_id to put in a file-upload field', function (): void {
         RelaticleServer::actingAs($this->user)
             ->tool(UploadFileTool::class, ['base64' => base64_encode(pdfBytes()), 'filename' => 'brief.pdf'])

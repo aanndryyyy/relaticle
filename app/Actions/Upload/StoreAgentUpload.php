@@ -13,6 +13,7 @@ use App\Support\Http\SsrfGuard;
 use App\Support\Media\TemporaryUploads;
 use App\Support\Media\UploadAllowlist;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
@@ -27,6 +28,23 @@ final readonly class StoreAgentUpload
     {
         abort_unless($user->belongsToWorkspace($workspace), 403);
 
+        if (filled($input['upload_id'] ?? null)) {
+            $upload = (string) $input['upload_id'];
+            throw_unless(TemporaryUploads::belongsToWorkspace($upload, (string) $workspace->getKey()), UploadException::notFound());
+            $media = Cache::lock("mcp-upload:{$upload}", 60)
+                ->get(fn (): Media => $this->storeUpload($user, $workspace, $input));
+
+            throw_unless($media instanceof Media, UploadException::class, __('uploads.errors.busy'));
+
+            return $media;
+        }
+
+        return $this->storeUpload($user, $workspace, $input);
+    }
+
+    /** @param array{source_url?: ?string, base64?: ?string, filename?: ?string, upload_id?: ?string} $input */
+    private function storeUpload(User $user, Workspace $workspace, array $input): Media
+    {
         $temp = sys_get_temp_dir().'/agent-upload-'.Str::ulid();
         touch($temp);
         chmod($temp, 0600);

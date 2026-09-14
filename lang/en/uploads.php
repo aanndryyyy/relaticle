@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 return [
     'errors' => [
+        'busy' => 'The upload is being processed. Try again shortly.',
         'too_large' => 'The file is larger than :max MB.',
         'mime_not_allowed' => 'Files of type :mime are not accepted. Allowed: :allowed.',
         'unreachable' => 'The URL could not be fetched.',

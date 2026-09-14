@@ -8,6 +8,7 @@ use App\Support\Media\TemporaryUploads;
 use App\Support\Media\UploadAllowlist;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Cache;
 
 final class ReceiveUploadController
 {
@@ -15,6 +16,16 @@ final class ReceiveUploadController
     {
         abort_unless(TemporaryUploads::isValidName($upload), Response::HTTP_NOT_FOUND);
 
+        $response = Cache::lock("mcp-upload:{$upload}", 60)
+            ->get(fn (): Response => $this->receive($request, $upload));
+
+        abort_unless($response instanceof Response, Response::HTTP_CONFLICT);
+
+        return $response;
+    }
+
+    private function receive(Request $request, string $upload): Response
+    {
         $length = $request->header('Content-Length');
 
         abort_if(! is_numeric($length) || (int) $length < 1, Response::HTTP_LENGTH_REQUIRED);
