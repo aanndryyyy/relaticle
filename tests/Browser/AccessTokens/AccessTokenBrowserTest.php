@@ -2,11 +2,45 @@
 
 declare(strict_types=1);
 
+use App\Livewire\App\AccessTokens\CreateAccessToken;
 use App\Livewire\App\AccessTokens\ManageAccessTokens;
 use App\Models\User;
 use Illuminate\Support\Str;
 
-mutates(ManageAccessTokens::class);
+mutates(CreateAccessToken::class, ManageAccessTokens::class);
+
+it('copies a newly created access token to the clipboard', function (): void {
+    $user = User::factory()->withWorkspace()->create();
+    $workspace = $user->ownedWorkspaces()->first();
+
+    $page = loginViaBrowser($user)
+        ->assertPathIs("/app/{$workspace->slug}")
+        ->assertSee('New task')
+        ->navigate("/app/{$workspace->slug}/settings/access-tokens")
+        ->type('[id="form.name"]', 'MCP integration')
+        ->click('button[type="submit"][wire\\:target="createToken"]')
+        ->waitForText('Please copy your new access token.');
+
+    $copied = $page->script(<<<'JS'
+        (async () => {
+            let copied = null;
+            Object.defineProperty(navigator, 'clipboard', {
+                configurable: true,
+                value: { writeText: (text) => { copied = text; return Promise.resolve(); } },
+            });
+
+            const token = document.querySelector('input[readonly]').value;
+            document.querySelector('button[x-on\\:click*="plainTextToken"]').click();
+            await new Promise((resolve) => setTimeout(resolve, 0));
+
+            return token.length > 0 && copied === token;
+        })()
+        JS);
+
+    expect($copied)->toBeTrue();
+
+    $page->assertNoJavaScriptErrors();
+});
 
 it('scrolls a table wider than its card so the row actions stay reachable', function (): void {
     $user = User::factory()->withWorkspace()->create();

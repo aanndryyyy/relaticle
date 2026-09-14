@@ -15,6 +15,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Support\Enums\Width;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Js;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 use Laravel\Jetstream\Jetstream;
@@ -122,7 +123,7 @@ final class CreateAccessToken extends BaseLivewireComponent
                             ->tooltip(__('access-tokens.modals.show_token.copy_to_clipboard_tooltip'))
                             ->alpineClickHandler(sprintf(
                                 'window.navigator.clipboard.writeText($wire.plainTextToken); $tooltip(%s);',
-                                json_encode(__('access-tokens.modals.show_token.copied_tooltip'), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+                                Js::from(__('access-tokens.modals.show_token.copied_tooltip')),
                             )),
                     ),
             ])
