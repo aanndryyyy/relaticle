@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 use App\Exceptions\SsrfGuardException;
-use App\Services\Favicon\SsrfGuard;
+use App\Support\Http\SsrfGuard;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
 use GuzzleHttp\Psr7\Utils;

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Services\Favicon;
+namespace App\Support\Http;
 
 use App\Exceptions\SsrfGuardException;
 use App\Exceptions\UploadException;
