@@ -386,9 +386,9 @@
         "Tests\\Feature\\Rules\\ArrayExistsForWorkspaceTest": 3.2133,
         "Tests\\Feature\\Rules\\ValidWorkspaceSlugTest": 7.9408,
         "Tests\\Feature\\Services\\Favicon\\HighQualityDriverTest": 3.0272,
-        "Tests\\Feature\\Services\\Favicon\\SsrfGuardTest": 2.4749,
         "Tests\\Feature\\Support\\DatabaseTimezoneTest": 1.5282,
         "Tests\\Feature\\Support\\FeatureFlagsTest": 7.8249,
+        "Tests\\Feature\\Support\\Http\\SsrfGuardTest": 4.2816,
         "Tests\\Feature\\Support\\ImmutableDatesTest": 1.001,
         "Tests\\Feature\\Support\\LocaleServiceProviderTest": 0.7001,
         "Tests\\Feature\\Support\\TenantFkValidatorAssertOwnedManyTest": 2.2426,
@@ -461,6 +461,6 @@
         "Tests\\PHPStan\\Rules\\RelationAccessInPolicyRuleTest": 1.7409,
         "Tests\\Smoke\\RouteTest": 34.1734
     },
-    "checksum": "0ec22eb77305c19f4d9dad14c5b8fcfa",
+    "checksum": "3da17a4f9976b75119a661d1ce20038f",
     "updated_at": "2026-09-14T21:50:22+00:00"
 }
