@@ -2,9 +2,24 @@
 
 declare(strict_types=1);
 
+use App\Models\Company;
+use App\Models\Note;
+use App\Models\Opportunity;
+use App\Models\People;
+use App\Models\Task;
 use App\Models\User;
+use App\Models\Workspace;
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
+use Laravel\Cashier\Subscription;
+use Laravel\Sanctum\PersonalAccessToken;
+use Relaticle\Chat\Models\AiCreditBalance;
+use Relaticle\Ink\Models\Category;
+use Relaticle\Ink\Models\Post;
+use Relaticle\Ink\Models\Tag;
 use Relaticle\SystemAdmin\Enums\SystemAdministratorRole;
+use Relaticle\SystemAdmin\Filament\Pages\Settings\ManageAiSettings;
+use Relaticle\SystemAdmin\Filament\Resources\UserResource\Pages\EditUser;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
 
 mutates(SystemAdministrator::class);
@@ -83,4 +98,80 @@ describe('SystemAdmin Security', function () {
             ->assertOk();
     });
 
+});
+
+describe('Administrator role', function () {
+    beforeEach(function () {
+        Filament::setCurrentPanel(Filament::getPanel('sysadmin'));
+
+        $this->administrator = SystemAdministrator::factory()->administrator()->create();
+        $this->actingAs($this->administrator, 'sysadmin');
+    });
+
+    it('reads every panel index it is allowed to see', function (string $route) {
+        $this->get($route)->assertOk();
+    })->with([
+        'dashboard' => '/sysadmin',
+        'companies' => '/sysadmin/companies',
+        'users' => '/sysadmin/users',
+        'workspaces' => '/sysadmin/workspaces',
+        'subscriptions' => '/sysadmin/billing/subscriptions',
+        'ai credit balances' => '/sysadmin/ai/credit-balances',
+        'activities' => '/sysadmin/activity',
+        'posts' => '/sysadmin/posts',
+        'categories' => '/sysadmin/categories',
+        'tags' => '/sysadmin/tags',
+    ]);
+
+    it('writes but never deletes', function (string $model) {
+        expect(auth('sysadmin')->user()->can('viewAny', $model))->toBeTrue()
+            ->and(auth('sysadmin')->user()->can('create', $model))->toBeTrue()
+            ->and(auth('sysadmin')->user()->can('delete', $model))->toBeFalse()
+            ->and(auth('sysadmin')->user()->can('deleteAny', $model))->toBeFalse()
+            ->and(auth('sysadmin')->user()->can('forceDeleteAny', $model))->toBeFalse();
+    })->with([
+        'companies' => Company::class,
+        'people' => People::class,
+        'opportunities' => Opportunity::class,
+        'tasks' => Task::class,
+        'notes' => Note::class,
+        'users' => User::class,
+        'workspaces' => Workspace::class,
+        'posts' => Post::class,
+        'categories' => Category::class,
+        'tags' => Tag::class,
+    ]);
+
+    it('is offered no delete action on a record it may edit', function () {
+        $user = User::factory()->withPersonalWorkspace()->create();
+
+        livewire(EditUser::class, ['record' => $user->getKey()])
+            ->assertOk()
+            ->assertActionHidden(TestAction::make('delete'));
+    });
+
+    it('cannot reach the system administrators resource on any route', function (string $route) {
+        $this->get($route)->assertForbidden();
+    })->with([
+        'index' => '/sysadmin/system-administrators',
+        'create' => '/sysadmin/system-administrators/create',
+    ]);
+
+    it('cannot reach its own administrator record', function () {
+        $this->get('/sysadmin/system-administrators/'.$this->administrator->getKey().'/edit')
+            ->assertForbidden();
+
+        expect(auth('sysadmin')->user()->can('update', $this->administrator))->toBeFalse()
+            ->and(auth('sysadmin')->user()->can('create', SystemAdministrator::class))->toBeFalse()
+            ->and(auth('sysadmin')->user()->can('viewAny', PersonalAccessToken::class))->toBeFalse();
+    });
+
+    it('keeps the writes that are not deletes', function () {
+        $balance = AiCreditBalance::factory()->create();
+
+        expect(auth('sysadmin')->user()->can('transfer', Subscription::class))->toBeTrue()
+            ->and(auth('sysadmin')->user()->can('update', $balance))->toBeTrue();
+
+        $this->get(ManageAiSettings::getUrl())->assertOk();
+    });
 });

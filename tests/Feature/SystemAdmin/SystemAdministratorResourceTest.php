@@ -76,3 +76,26 @@ it('keeps the existing password when the field is left blank', function (): void
             'password' => 'original-password',
         ]))->toBeTrue();
 });
+
+it('refuses to give the last Super Administrator another role', function (): void {
+    $lastSuperAdministrator = Auth::guard('sysadmin')->user();
+    SystemAdministrator::factory()->administrator()->create();
+
+    livewire(EditSystemAdministrator::class, ['record' => $lastSuperAdministrator->getKey()])
+        ->fillForm(['role' => SystemAdministratorRole::Administrator->value])
+        ->call('save')
+        ->assertHasFormErrors(['role']);
+
+    expect($lastSuperAdministrator->refresh()->role)->toBe(SystemAdministratorRole::SuperAdministrator);
+});
+
+it('gives a Super Administrator another role once a second one exists', function (): void {
+    $target = SystemAdministrator::factory()->create();
+
+    livewire(EditSystemAdministrator::class, ['record' => $target->getKey()])
+        ->fillForm(['role' => SystemAdministratorRole::Administrator->value])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($target->refresh()->role)->toBe(SystemAdministratorRole::Administrator);
+});

@@ -35,9 +35,7 @@ final class SystemAdministratorsTable
                 TextColumn::make('role')
                     ->badge()
                     ->formatStateUsing(fn (SystemAdministratorRole $state): string => $state->getLabel())
-                    ->color(fn (SystemAdministratorRole $state): string => match ($state) {
-                        SystemAdministratorRole::SuperAdministrator => 'danger',
-                    }),
+                    ->color(fn (SystemAdministratorRole $state): string => $state->getColor()),
 
                 IconColumn::make('email_verified_at')
                     ->label('Verified')
