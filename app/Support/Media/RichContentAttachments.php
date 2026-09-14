@@ -9,26 +9,20 @@ use App\Enums\UploadSource;
 use App\Exceptions\UploadException;
 use App\Models\User;
 use App\Models\Workspace;
+use Dom\HTMLDocument;
 use Filament\Forms\Components\RichEditor\FileAttachmentProviders\Contracts\FileAttachmentProvider;
 use Filament\Forms\Components\RichEditor\RichContentAttribute;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 final readonly class RichContentAttachments implements FileAttachmentProvider
 {
-    private const string UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
-
     // Filament's default flow stored the bare public-disk filename as data-id. Those bodies
     // keep rendering until media:backfill-rich-editor-attachments has rewritten them.
     private const string LEGACY_FILENAME = '/^[A-Za-z0-9][A-Za-z0-9._-]*$/';
-
-    private const string TAGGED_IMAGE = '/<img\b[^>]*\bdata-id="('.self::UUID.')"[^>]*>/i';
-
-    private const string UNTAGGED_IMAGE = '/<img\b(?![^>]*\bdata-id=)[^>]*\bsrc="([^"]*)"[^>]*>/i';
-
-    private const string OWNED_URL = '#/(?:uploads|media)/('.self::UUID.')(?:/|\?|$)#';
 
     private function __construct(private string $workspaceId, private MediaLookup $lookup) {}
 
@@ -48,7 +42,7 @@ final readonly class RichContentAttachments implements FileAttachmentProvider
             return null;
         }
 
-        if (preg_match('/^'.self::UUID.'$/', $file) === 1) {
+        if (Str::isUuid($file)) {
             return $this->lookup->find($this->workspaceId, $file)?->getUrl();
         }
 
@@ -94,33 +88,54 @@ final readonly class RichContentAttachments implements FileAttachmentProvider
         // cleanup would delete another member's pending draft image in the same workspace.
     }
 
-    public function tagOwnedImages(string $html): string
+    public function tagOwnedAttachments(string $html): string
     {
-        return (string) preg_replace_callback(self::UNTAGGED_IMAGE, function (array $match): string {
-            if (preg_match(self::OWNED_URL, $match[1], $url) !== 1) {
-                return $match[0];
-            }
+        $document = HTMLDocument::createFromString('<body>'.$html, LIBXML_NOERROR, 'UTF-8');
 
-            if (! $this->lookup->find($this->workspaceId, $url[1]) instanceof Media) {
-                return $match[0];
-            }
+        foreach ($document->querySelectorAll('img:not([data-id])') as $image) {
+            $uuid = $this->lookup->uuidFromUrl($image->getAttribute('src') ?? '');
 
-            return '<img data-id="'.$url[1].'"'.substr($match[0], 4);
-        }, $html);
+            if ($uuid !== null && $this->lookup->find($this->workspaceId, $uuid) instanceof Media) {
+                $image->setAttribute('data-id', $uuid);
+            }
+        }
+
+        return $this->bodyHtml($document);
     }
 
-    public function rewriteImageSources(string $html): string
+    public function rewriteAttachmentUrls(string $html): string
     {
-        return (string) preg_replace_callback(self::TAGGED_IMAGE, function (array $match): string {
-            $url = $this->getFileAttachmentUrl($match[1]);
+        $document = HTMLDocument::createFromString('<body>'.$html, LIBXML_NOERROR, 'UTF-8');
 
-            if ($url === null) {
-                return $match[0];
+        foreach ($document->querySelectorAll('img[data-id], a[href]') as $element) {
+            $isImage = $element->localName === 'img';
+            $uuid = $isImage
+                ? $element->getAttribute('data-id')
+                : $this->lookup->uuidFromUrl($element->getAttribute('href') ?? '');
+            $url = $this->getFileAttachmentUrl($uuid);
+
+            if ($url !== null) {
+                $fragment = $isImage ? null : parse_url($element->getAttribute('href') ?? '', PHP_URL_FRAGMENT);
+
+                if (is_string($fragment)) {
+                    $url .= '#'.$fragment;
+                }
+
+                $element->setAttribute($isImage ? 'src' : 'href', $url);
             }
+        }
 
-            $tag = (string) preg_replace('/\ssrc="[^"]*"/i', '', $match[0]);
+        return $this->bodyHtml($document);
+    }
 
-            return '<img src="'.e($url).'"'.substr($tag, 4);
-        }, $html);
+    private function bodyHtml(HTMLDocument $document): string
+    {
+        $html = '';
+
+        foreach ($document->body->childNodes as $node) {
+            $html .= $document->saveHtml($node);
+        }
+
+        return $html;
     }
 }

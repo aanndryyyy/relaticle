@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Enums\MediaCollection;
 use App\Filament\CustomFields\RichContentEntry;
+use App\Filament\CustomFields\RichEditorComponent;
 use App\Filament\CustomFields\RichEditorFieldType;
 use App\Filament\Resources\CompanyResource\Pages\ViewCompany;
 use App\Filament\Resources\NoteResource\Pages\ManageNotes;
@@ -23,7 +24,7 @@ use Livewire\Features\SupportFileUploads\FileUploadConfiguration;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
-mutates(RichContentAttachments::class, RichContentEntry::class, RichEditorFieldType::class);
+mutates(RichContentAttachments::class, RichContentEntry::class, RichEditorFieldType::class, RichEditorComponent::class);
 
 beforeEach(function (): void {
     Storage::fake('local');
@@ -144,6 +145,20 @@ it('releases an image the edited body no longer references', function (): void {
         ->assertHasNoActionErrors();
 
     expect(Media::query()->where('uuid', $id)->exists())->toBeFalse();
+});
+
+it('signs document links when opening the note editor', function (): void {
+    $media = $this->workspace->addMediaFromString(pdfBytes())->usingFileName('brief.pdf')
+        ->withAttributes(['workspace_id' => $this->workspace->getKey()])
+        ->toMediaCollection(MediaCollection::PendingUploads->value);
+    $note = Note::factory()->recycle([$this->user, $this->workspace])->create();
+    $note->saveCustomFieldValue($this->body, '<p><a href="'.route('media.show', ['media' => $media->uuid]).'">Brief</a></p>');
+
+    livewire(ManageNotes::class)
+        ->mountAction(TestAction::make('edit')->table($note))
+        ->assertSchemaStateSet(function (array $state): void {
+            expect(json_encode($state['custom_fields']['body']))->toContain('signature=');
+        });
 });
 
 it('renders a claimed image on the record page through the provider', function (): void {

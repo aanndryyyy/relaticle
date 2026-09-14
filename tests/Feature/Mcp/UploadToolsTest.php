@@ -11,6 +11,7 @@ use App\Mcp\Tools\CreateUploadUrlTool;
 use App\Mcp\Tools\UploadFileTool;
 use App\Models\User;
 use App\Support\Media\TemporaryUploads;
+use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\RateLimiter;
@@ -149,6 +150,7 @@ describe('create-upload-url', function (): void {
             ->tool(CreateUploadUrlTool::class, ['filename' => 'deck.pdf'])
             ->assertHasErrors(['Invalid ability provided.']);
     });
+
 });
 
 describe('signed put receiver', function (): void {
@@ -165,6 +167,19 @@ describe('signed put receiver', function (): void {
         } finally {
             $lock->release();
         }
+    });
+
+    it('does not acknowledge a failed write over an existing temporary upload', function (): void {
+        $name = TemporaryUploads::newName('deck.pdf', (string) $this->workspace->getKey());
+        $url = URL::temporarySignedRoute('mcp.uploads.receive', now()->addMinutes(5), ['upload' => $name]);
+        $disk = Mockery::mock(FilesystemAdapter::class);
+        $disk->shouldReceive('writeStream')->once()->andReturnFalse();
+        $disk->shouldReceive('size')->zeroOrMoreTimes()->andReturn(100);
+        $disk->shouldReceive('delete')->once()->with(TemporaryUploads::path($name))->andReturnTrue();
+        Storage::shouldReceive('disk')->with('local')->andReturn($disk);
+
+        $this->call('PUT', $url, [], [], [], ['CONTENT_LENGTH' => strlen(pdfBytes())], pdfBytes())
+            ->assertServiceUnavailable();
     });
 
     it('stores the body under tmp on the local disk and answers 204', function (): void {
@@ -230,6 +245,17 @@ describe('upload-file', function (): void {
         RelaticleServer::actingAs($this->user)->tool(UploadFileTool::class, ['upload_id' => $name])
             ->assertHasErrors([__('uploads.errors.not_found')]);
         expect(Media::query()->count())->toBe(1);
+    });
+
+    it('bounds the display name of a file fetched from a long url', function (): void {
+        resolveHostsTo(['93.184.216.34']);
+        Http::fake(['https://cdn.example.com/*' => Http::response(pdfBytes(), 200, ['Content-Type' => 'application/pdf'])]);
+
+        RelaticleServer::actingAs($this->user)
+            ->tool(UploadFileTool::class, ['source_url' => 'https://cdn.example.com/'.str_repeat('a', 256).'.pdf'])
+            ->assertOk();
+
+        expect(mb_strlen(Media::query()->latest('id')->firstOrFail()->name))->toBeLessThanOrEqual(255);
     });
 
     it('stores a base64 file and returns the file_id to put in a file-upload field', function (): void {

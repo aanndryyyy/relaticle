@@ -14,6 +14,7 @@ use App\Models\Company;
 use App\Models\CustomField;
 use App\Models\Note;
 use App\Models\User;
+use App\Support\Media\MediaLookup;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\Testing\TestAction;
@@ -177,6 +178,7 @@ it('deletes a pending upload but leaves a claimed one alone', function (): void 
         ->usingFileName('claimed.pdf')
         ->withAttributes(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
+    resolve(MediaLookup::class)->find((string) $this->workspace->getKey(), $claimed->uuid);
     $note->saveCustomFieldValue($this->contract, $claimed->uuid);
 
     resolve(DiscardPendingUpload::class)->execute($this->user, $this->workspace, $pending->uuid);

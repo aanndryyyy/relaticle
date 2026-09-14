@@ -30,8 +30,10 @@ final class RichContentEntry extends AbstractInfolistEntry
             return null;
         }
 
-        return RichContentRenderer::make($value)
-            ->fileAttachmentProvider(RichContentAttachments::forWorkspace((string) $record->getAttribute('workspace_id')))
+        $attachments = RichContentAttachments::forWorkspace((string) $record->getAttribute('workspace_id'));
+
+        return RichContentRenderer::make($attachments->rewriteAttachmentUrls($value))
+            ->fileAttachmentProvider($attachments)
             ->toHtml();
     }
 }

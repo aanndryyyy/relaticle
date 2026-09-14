@@ -49,6 +49,7 @@ final readonly class StorePendingUpload
             ->afterLast('/')
             ->replaceMatches('/[\x00-\x1F\x7F]/u', '')
             ->trim()
+            ->limit(255, '')
             ->toString();
 
         return $name === '' ? "upload.{$extension}" : $name;

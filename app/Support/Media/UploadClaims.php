@@ -106,12 +106,23 @@ final readonly class UploadClaims
                 'custom_field_id' => $field->getKey(),
             ]);
 
-        DB::afterCommit(function () use ($entity, $field, $referenced): void {
-            $entity->media()
-                ->where('custom_field_id', $field->getKey())
-                ->whereNotIn('uuid', $referenced)
-                ->get()
-                ->each(fn (Model $media): ?bool => $media->delete());
+        DB::afterCommit(function () use ($entity, $field, $value): void {
+            DB::transaction(function () use ($entity, $field, $value): void {
+                $entity->newQueryWithoutScopes()->whereKey($entity->getKey())->lockForUpdate()->first();
+                $current = CustomFieldValue::query()->withoutGlobalScopes()
+                    ->where('tenant_id', $value->getAttribute('tenant_id'))
+                    ->where('entity_type', $entity->getMorphClass())
+                    ->where('entity_id', $entity->getKey())
+                    ->where('custom_field_id', $field->getKey())
+                    ->first();
+                $referenced = $this->lookup->referencedUuids($field->type, $current?->getValue());
+
+                $entity->media()
+                    ->where('custom_field_id', $field->getKey())
+                    ->whereNotIn('uuid', $referenced)
+                    ->get()
+                    ->each(fn (Model $media): ?bool => $media->delete());
+            });
         });
     }
 }

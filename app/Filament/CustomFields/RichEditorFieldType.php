@@ -35,7 +35,7 @@ final class RichEditorFieldType extends BaseFieldType
     public function configure(): FieldSchema
     {
         return (new PackageRichEditorFieldType)->configure()
-            ->formComponent(fn (CustomField $customField): RichEditor => RichEditor::make($customField->getFieldName())
+            ->formComponent(fn (CustomField $customField): RichEditor => RichEditorComponent::make($customField->getFieldName())
                 ->plugins([SlashMenuPlugin::make()])
                 ->toolbarButtons([])
                 // Filament decides attachments by whether `attachFiles` sits in the toolbar,

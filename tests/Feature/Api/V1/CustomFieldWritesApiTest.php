@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
+use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 mutates(BaseCrmEntityRequest::class, OwnedUpload::class, MediaLookup::class);
 
@@ -359,25 +360,6 @@ describe('rich editor images over rest', function (): void {
             ->firstOrFail();
     });
 
-    it('refuses to share an image already owned by another note', function (bool $uppercase): void {
-        $media = $this->workspace->addMediaFromString(onePixelPng())->usingFileName('a.png')
-            ->withAttributes(['workspace_id' => $this->workspace->getKey()])
-            ->toMediaCollection(MediaCollection::PendingUploads->value);
-        $body = '<img data-id="'.$media->uuid.'" src="stale">';
-        $id = $this->postJson('/api/v1/notes', ['title' => 'Image owner', 'custom_fields' => ['body' => $body]])
-            ->assertCreated()->json('data.id');
-
-        if ($uppercase) {
-            $body = str_replace($media->uuid, strtoupper($media->uuid), $body);
-        }
-
-        $this->postJson('/api/v1/notes', ['title' => 'Image copy', 'custom_fields' => ['body' => $body]])
-            ->assertUnprocessable()->assertJsonValidationErrors('custom_fields.body');
-
-        $this->assertDatabaseHas('media', ['uuid' => $media->uuid, 'model_id' => $id]);
-        $this->assertDatabaseMissing('notes', ['title' => 'Image copy']);
-    })->with(['lowercase' => false, 'uppercase' => true]);
-
     it('rewrites image sources from the media row on read', function (): void {
         $media = $this->workspace->addMediaFromString(onePixelPng())->usingFileName('a.png')
             ->withAttributes(['workspace_id' => $this->workspace->getKey()])
@@ -412,5 +394,83 @@ describe('rich editor images over rest', function (): void {
         expect($mediaQueries)->toHaveCount(1)
             ->and($response->json('data'))->toHaveCount(3)
             ->and(collect($response->json('data'))->pluck('attributes.custom_fields.body')->implode(''))->not->toContain('stale');
+    });
+
+    it('keeps an image when its html attributes use single quotes', function (bool $uppercase): void {
+        $media = $this->workspace->addMediaFromString(onePixelPng())->usingFileName('a.png')
+            ->withAttributes(['workspace_id' => $this->workspace->getKey()])
+            ->toMediaCollection(MediaCollection::PendingUploads->value);
+
+        $id = $this->postJson('/api/v1/notes', ['title' => 'Quoted image', 'custom_fields' => ['body' => "<p><img src=\"stale\" data-id=\"{$media->uuid}\"></p>"]])
+            ->assertCreated()->json('data.id');
+
+        $uuid = $uppercase ? strtoupper($media->uuid) : $media->uuid;
+
+        $this->patchJson("/api/v1/notes/{$id}", ['custom_fields' => ['body' => "<p><img src='stale' data-id='{$uuid}'></p>"]])
+            ->assertOk();
+
+        $this->assertDatabaseHas('media', ['uuid' => $media->uuid, 'model_id' => $id]);
+        Storage::disk('local')->assertExists($media->getPathRelativeToRoot());
+        $this->getJson("/api/v1/notes/{$id}")->assertOk()
+            ->assertJsonPath('data.attributes.custom_fields.body', fn (string $body): bool => str_contains($body, 'signature=') && ! str_contains($body, 'stale'));
+    })->with(['lowercase' => false, 'uppercase' => true]);
+
+    it('claims document links and signs them when the note is read', function (string $fragment): void {
+        $media = $this->workspace->addMediaFromString(pdfBytes())->usingFileName('brief.pdf')
+            ->withAttributes(['workspace_id' => $this->workspace->getKey()])
+            ->toMediaCollection(MediaCollection::PendingUploads->value);
+        $markdown = '[brief.pdf]('.route('media.show', ['media' => $media->uuid]).$fragment.')';
+
+        $id = $this->postJson('/api/v1/notes', ['title' => 'Document link', 'custom_fields' => ['body' => $markdown]])
+            ->assertCreated()->json('data.id');
+
+        $this->assertDatabaseHas('media', ['uuid' => $media->uuid, 'model_id' => $id, 'collection_name' => MediaCollection::Attachments->value]);
+        $body = $this->getJson("/api/v1/notes/{$id}")->assertOk()->json('data.attributes.custom_fields.body');
+        preg_match('/href="([^"]+)"/', $body, $matches);
+        expect(parse_url($matches[1], PHP_URL_FRAGMENT))->toBe($fragment === '' ? null : ltrim($fragment, '#'));
+        $this->get(explode('#', html_entity_decode($matches[1]), 2)[0])->assertOk();
+
+        $this->patchJson("/api/v1/notes/{$id}", ['custom_fields' => ['body' => null]])->assertOk();
+        $this->assertDatabaseMissing('media', ['uuid' => $media->uuid]);
+    })->with(['plain' => '', 'page fragment' => '#page=2']);
+
+    it('refuses to share an image already owned by another note', function (bool $uppercase): void {
+        $media = $this->workspace->addMediaFromString(onePixelPng())->usingFileName('a.png')
+            ->withAttributes(['workspace_id' => $this->workspace->getKey()])
+            ->toMediaCollection(MediaCollection::PendingUploads->value);
+        $body = '<img data-id="'.$media->uuid.'" src="stale">';
+        $id = $this->postJson('/api/v1/notes', ['title' => 'Image owner', 'custom_fields' => ['body' => $body]])
+            ->assertCreated()->json('data.id');
+
+        if ($uppercase) {
+            $body = str_replace($media->uuid, strtoupper($media->uuid), $body);
+        }
+
+        $this->postJson('/api/v1/notes', ['title' => 'Image copy', 'custom_fields' => ['body' => $body]])
+            ->assertUnprocessable()->assertJsonValidationErrors('custom_fields.body');
+
+        $this->assertDatabaseHas('media', ['uuid' => $media->uuid, 'model_id' => $id]);
+        $this->assertDatabaseMissing('notes', ['title' => 'Image copy']);
+    })->with(['lowercase' => false, 'uppercase' => true]);
+
+    it('keeps the final image after repeated updates in one transaction', function (): void {
+        $images = collect(['first', 'second', 'third'])->map(fn (string $name): Media => $this->workspace
+            ->addMediaFromString(onePixelPng())->usingFileName("{$name}.png")
+            ->withAttributes(['workspace_id' => $this->workspace->getKey()])
+            ->toMediaCollection(MediaCollection::PendingUploads->value));
+        $id = $this->postJson('/api/v1/notes', ['title' => 'Repeated image', 'custom_fields' => ['body' => '<img data-id="'.$images[0]->uuid.'" src="stale">']])
+            ->assertCreated()->json('data.id');
+
+        DB::transaction(function () use ($id, $images): void {
+            foreach ($images->slice(1) as $image) {
+                $this->patchJson("/api/v1/notes/{$id}", ['custom_fields' => ['body' => '<img data-id="'.$image->uuid.'" src="stale">']])
+                    ->assertOk();
+            }
+        });
+
+        $this->assertDatabaseHas('media', ['uuid' => $images[2]->uuid, 'model_id' => $id]);
+        $this->assertDatabaseMissing('media', ['uuid' => $images[0]->uuid]);
+        $this->assertDatabaseMissing('media', ['uuid' => $images[1]->uuid]);
+        Storage::disk('local')->assertExists($images[2]->getPathRelativeToRoot());
     });
 });

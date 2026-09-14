@@ -58,7 +58,7 @@ trait FormatsCustomFields
         }
 
         if ($customField->type === CustomFieldType::RICH_EDITOR->value && is_string($rawValue)) {
-            return RichContentAttachments::forWorkspace((string) $fieldValue->getAttribute('tenant_id'))->rewriteImageSources($rawValue);
+            return RichContentAttachments::forWorkspace((string) $fieldValue->getAttribute('tenant_id'))->rewriteAttachmentUrls($rawValue);
         }
 
         if (! $customField->typeData->dataType->isChoiceField()) {

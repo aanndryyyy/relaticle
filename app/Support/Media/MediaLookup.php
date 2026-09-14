@@ -72,13 +72,13 @@ final class MediaLookup
 
         return match ($fieldType) {
             CustomFieldType::FILE_UPLOAD->value => Str::isUuid($value) ? [strtolower($value)] : [],
-            CustomFieldType::RICH_EDITOR->value => $this->imageUuids($value),
+            CustomFieldType::RICH_EDITOR->value => $this->attachmentUuids($value),
             default => [],
         };
     }
 
     /** @return list<string> */
-    public function imageUuids(string $html): array
+    public function attachmentUuids(string $html): array
     {
         $document = HTMLDocument::createFromString('<body>'.$html, LIBXML_NOERROR, 'UTF-8');
         $uuids = [];

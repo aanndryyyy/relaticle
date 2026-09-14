@@ -37,7 +37,17 @@ final class ReceiveUploadController
 
         abort_unless(is_resource($body), Response::HTTP_LENGTH_REQUIRED);
 
-        $disk->writeStream($path, $body);
+        try {
+            $written = $disk->writeStream($path, $body);
+        } finally {
+            fclose($body);
+        }
+
+        if (! $written) {
+            $disk->delete($path);
+
+            abort(Response::HTTP_SERVICE_UNAVAILABLE);
+        }
 
         if ((int) $disk->size($path) > UploadAllowlist::maxBytes()) {
             $disk->delete($path);
