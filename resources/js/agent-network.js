@@ -52,6 +52,7 @@ export function initAgentNetwork(root) {
     let tapped = null
     let pointerStart = null
     let dragged = false
+    let engaged = false
     let ambient = null
     let cycleIndex = 0
     const running = new Set()
@@ -142,7 +143,7 @@ export function initAgentNetwork(root) {
     }
 
     async function runAmbient(token) {
-        while (ambient === token && !active && motionAllowed()) {
+        while (ambient === token && engaged && !active && motionAllowed()) {
             const agents = horizontal ? incoming : [incoming[0]]
             const records = horizontal ? outgoing : [outgoing[0]]
             const agent = agents[cycleIndex % agents.length]
@@ -156,7 +157,7 @@ export function initAgentNetwork(root) {
     }
 
     function startAmbient() {
-        if (ambient || !entered || active || !motionAllowed()) return
+        if (ambient || !engaged || !entered || active || !motionAllowed()) return
         ambient = {}
         runAmbient(ambient)
     }
@@ -279,6 +280,15 @@ export function initAgentNetwork(root) {
         return node && root.contains(node) ? node : null
     }
 
+    root.addEventListener("pointerenter", event => {
+        if (event.pointerType === "touch") return
+        engaged = true
+        startAmbient()
+    })
+    root.addEventListener("pointerleave", () => {
+        engaged = false
+        stopAmbient()
+    })
     root.addEventListener("pointerover", event => {
         if (event.pointerType === "touch") return
         const node = nodeFor(event.target)

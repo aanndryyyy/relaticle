@@ -125,10 +125,12 @@ it('keeps the star count to the hero, not the header', function (): void {
     Cache::put('github_stars_Relaticle_relaticle', 1517, 60);
 
     $html = $this->get('/')->assertOk()->getContent();
+    preg_match('/<header\b.*?<\/header>/s', $html, $header);
 
-    // The hero carries the social proof. A second occurrence would mean the
-    // header badge came back, which duplicates it in the sticky chrome.
-    expect(substr_count($html, '1.5K'))->toBe(1);
+    // The hero carries the social proof. A copy in the header would duplicate
+    // it in the sticky chrome.
+    expect($html)->toContain('1.5K')
+        ->and($header[0])->not->toContain('1.5K');
 });
 
 it('drops nav groups that feature flags emptied instead of rendering a dead link', function (): void {

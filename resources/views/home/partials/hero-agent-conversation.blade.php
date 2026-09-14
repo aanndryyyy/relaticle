@@ -133,11 +133,63 @@
         </div>
     </div>
 
-    {{-- Decided proposal, collapsed to one line: the dock's identity folded flat
-         (operation-tinted entity tile, bold record label), then the record link
-         and the Details disclosure. No record pill here -- chips are reserved
-         for inline clickable references. --}}
+    {{-- Decided proposal, collapsed to one line: record chip, outcome, and the
+         Details disclosure. No record pill here -- chips are reserved for
+         inline clickable references. --}}
     <div class="mcp-el mcp-audit-card my-3 w-full overflow-hidden rounded-xl border border-[var(--surface-block-border)] bg-[var(--surface-block-bg)]" aria-hidden="true">
+        <div class="group relative flex items-center gap-2.5 px-4 py-2.5">
+            <span class="relative flex min-w-0 flex-1 items-center gap-2">
+                <span class="chat-chip min-w-0" data-proposal-record-chip data-record-type="task">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="{{ $heroChipIcons['task'] }}"/>
+                    </svg>
+                    <span class="chat-chip-label">Schedule demo with Kovra Systems</span>
+                </span>
+            </span>
+
+            <span class="relative inline-flex shrink-0 items-center gap-1.5 text-micro font-medium text-gray-500 dark:text-gray-400">
+                <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500"></span>
+                <span>Done</span>
+            </span>
+
+            <span class="relative inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-400">
+                <x-heroicon-o-chevron-down class="h-3.5 w-3.5"/>
+            </span>
+        </div>
+    </div>
+
+    {{-- Deciding a proposal resumes the turn (TurnContinuationService), so what
+         lands under the decided row is the agent's OWN reply: flat prose like
+         any other, with the record it touched rendered as a chip. --}}
+    <div class="mcp-el mcp-approve-done w-full min-w-0 px-1 py-1 text-sm leading-relaxed text-gray-900 dark:text-gray-100" aria-hidden="true">
+        <span class="chat-chip" data-record-type="task">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="{{ $heroChipIcons['task'] }}"/>
+            </svg>
+            <span class="chat-chip-label">Schedule demo with Kovra Systems</span></span> has been marked done.
+    </div>
+</div>
+
+{{-- ── Exchange 3: create a contact, also gated by review ──
+     Creates are proposals too (CreatePersonTool returns a proposal for
+     approval), so this exchange must NOT show a write landing unattended. It
+     resolves into the same decided row + record card the real transcript renders. --}}
+<div class="mcp-el mcp-user mcp-user-3 flex justify-end">
+    <div class="max-w-[85%] [overflow-wrap:anywhere] break-words rounded-2xl rounded-br-md bg-gray-100 px-4 py-2.5 text-sm leading-relaxed text-gray-900 dark:bg-white/10 dark:text-gray-100">
+        Add Sarah Chen as a contact at <span class="chat-chip" data-record-type="company"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="{{ $heroChipIcons['company'] }}"/></svg><span class="chat-chip-label">Kovra Systems</span></span>. She's VP of Engineering.
+    </div>
+</div>
+
+<div class="flex w-full flex-col items-start gap-3">
+    <div class="mcp-el mcp-avatar mcp-avatar-3 w-full min-w-0">
+        <span class="mcp-el mcp-label mcp-label-3 sr-only">Assistant</span>
+
+        <div class="mcp-el mcp-text mcp-text-3 px-1 py-1 text-sm leading-relaxed text-gray-900 dark:text-gray-100">
+            Review the proposal below to add her to Kovra Systems.
+        </div>
+    </div>
+
+    <div class="mcp-el mcp-create-card my-3 w-full overflow-hidden rounded-xl border border-[var(--surface-block-border)] bg-[var(--surface-block-bg)]" aria-hidden="true">
         <div class="group relative flex items-center gap-2.5 px-4 py-2.5">
             <span class="relative flex min-w-0 flex-1 items-center gap-2">
                 <span class="chat-chip min-w-0" data-proposal-record-chip data-record-type="people">
