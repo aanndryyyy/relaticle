@@ -97,6 +97,7 @@ final readonly class SsrfGuard
         // DNS answer cannot change between the check and the fetch.
         return Http::withOptions([
             'allow_redirects' => false,
+            'decode_content' => false,
             'connect_timeout' => 10,
             'timeout' => 30,
             'curl' => [CURLOPT_RESOLVE => ["{$host}:443:{$pinned}"]],

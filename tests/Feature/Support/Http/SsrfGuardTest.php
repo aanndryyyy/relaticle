@@ -93,6 +93,7 @@ test('pinned client never follows redirects and pins the resolved address', func
     $options = (fn (): array => $this->options)->call($client);
 
     expect($options['allow_redirects'])->toBeFalse()
+        ->and($options['decode_content'])->toBeFalse()
         ->and($options['timeout'])->toBe(30)
         ->and($options['curl'][CURLOPT_RESOLVE])->toBe(['93.184.216.34:443:93.184.216.34']);
 });
