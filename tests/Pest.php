@@ -15,7 +15,7 @@ declare(strict_types=1);
  */
 
 use App\Models\User;
-use App\Services\Favicon\HostResolver;
+use App\Support\Http\HostResolver;
 use Illuminate\Contracts\Broadcasting\Broadcaster as BroadcasterContract;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Livewire\Features\SupportTesting\Testable;
@@ -120,9 +120,11 @@ function onePixelPng(): string
     return (string) base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', true);
 }
 
-function enableFileUploadFieldType(): void
+function signedUrlSignature(string $url): string
 {
-    config('custom-fields.field_type_configuration')->disabled(['markdown-editor']);
+    parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+
+    return (string) ($query['signature'] ?? '');
 }
 
 /** @param list<string> $addresses */

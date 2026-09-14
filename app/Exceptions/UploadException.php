@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Exceptions;
 
+use App\Support\Media\UploadAllowlist;
 use RuntimeException;
 
 final class UploadException extends RuntimeException
@@ -15,7 +16,7 @@ final class UploadException extends RuntimeException
 
     public static function mimeNotAllowed(string $mime): self
     {
-        return new self(__('uploads.errors.mime_not_allowed', ['mime' => $mime]));
+        return new self(__('uploads.errors.mime_not_allowed', ['mime' => $mime, 'allowed' => implode(', ', UploadAllowlist::extensions())]));
     }
 
     public static function unreachable(): self

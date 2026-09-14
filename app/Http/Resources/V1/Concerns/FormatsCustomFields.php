@@ -6,7 +6,7 @@ namespace App\Http\Resources\V1\Concerns;
 
 use App\Enums\CustomFieldType;
 use App\Support\CustomFields\RecordNameResolver;
-use App\Support\Media\MediaPaths;
+use App\Support\Media\MediaLookup;
 use App\Support\Media\RichContentAttachments;
 use Illuminate\Contracts\Pagination\Paginator;
 use Illuminate\Database\Eloquent\Model;
@@ -22,7 +22,7 @@ trait FormatsCustomFields
         $records = $resource instanceof Paginator ? $resource->items() : $resource;
 
         resolve(RecordNameResolver::class)->prime($records);
-        resolve(MediaPaths::class)->prime($records);
+        resolve(MediaLookup::class)->prime($records);
 
         return parent::collection($resource);
     }
@@ -124,7 +124,7 @@ trait FormatsCustomFields
     }
 
     /**
-     * @return array{path: string, url: ?string}|null
+     * @return array{id: string, name: string, url: string}|null
      */
     private function resolveFileValue(CustomFieldValue $fieldValue, mixed $rawValue): ?array
     {
@@ -132,8 +132,12 @@ trait FormatsCustomFields
             return null;
         }
 
-        $media = resolve(MediaPaths::class)->find((string) $fieldValue->getAttribute('tenant_id'), $rawValue);
+        $media = resolve(MediaLookup::class)->find((string) $fieldValue->getAttribute('tenant_id'), $rawValue);
 
-        return ['path' => $rawValue, 'url' => $media?->getUrl()];
+        if ($media === null) {
+            return null;
+        }
+
+        return ['id' => $rawValue, 'name' => $media->name, 'url' => $media->getUrl()];
     }
 }

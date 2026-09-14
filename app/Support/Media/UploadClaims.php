@@ -7,8 +7,10 @@ namespace App\Support\Media;
 use App\Enums\CustomFieldType;
 use App\Enums\MediaCollection;
 use App\Models\CustomFieldValue;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Relaticle\CustomFields\Models\CustomField;
 use Spatie\MediaLibrary\HasMedia;
@@ -16,7 +18,48 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 final readonly class UploadClaims
 {
-    public function __construct(private MediaPaths $paths) {}
+    public function __construct(private MediaLookup $lookup) {}
+
+    public function isClaimable(string $workspaceId, string $uuid, string $entityType, string|int|null $entityId, string $customFieldId): bool
+    {
+        return Media::query()
+            ->where('workspace_id', $workspaceId)
+            ->where('uuid', $uuid)
+            ->where(fn (Builder $query): Builder => $query
+                ->where('collection_name', MediaCollection::PendingUploads->value)
+                ->orWhere(fn (Builder $owned): Builder => $owned
+                    ->where('model_type', $entityType)
+                    ->where('model_id', $entityId)
+                    ->where('custom_field_id', $customFieldId)))
+            ->exists();
+    }
+
+    public function assertClaimable(CustomFieldValue $value): void
+    {
+        $uuid = $value->string_value;
+
+        if (! $value->isDirty('string_value') || ! is_string($uuid) || ! Str::isUuid($uuid)) {
+            return;
+        }
+
+        $field = $value->getRelationValue('customField');
+
+        if (! $field instanceof CustomField || $field->type !== CustomFieldType::FILE_UPLOAD->value) {
+            return;
+        }
+
+        $claimable = $this->isClaimable(
+            (string) $value->getAttribute('tenant_id'),
+            $uuid,
+            (string) $value->getAttribute('entity_type'),
+            $value->getAttribute('entity_id'),
+            (string) $field->getKey(),
+        );
+
+        throw_unless($claimable, ValidationException::withMessages([
+            "custom_fields.{$field->code}" => __('validation.custom_field.upload', ['field' => $field->name]),
+        ]));
+    }
 
     public function sync(CustomFieldValue $value): void
     {
@@ -26,13 +69,7 @@ final readonly class UploadClaims
             return;
         }
 
-        $referenced = match ($field->type) {
-            CustomFieldType::FILE_UPLOAD->value => $this->fileUuids($value->getValue()),
-            CustomFieldType::RICH_EDITOR->value => $this->imageUuids($value->getValue()),
-            default => null,
-        };
-
-        if ($referenced === null) {
+        if (! in_array($field->type, [CustomFieldType::FILE_UPLOAD->value, CustomFieldType::RICH_EDITOR->value], true)) {
             return;
         }
 
@@ -42,71 +79,25 @@ final readonly class UploadClaims
             return;
         }
 
-        $collection = MediaCollection::forCustomField($field->code);
-        $workspaceId = (string) $value->getAttribute('tenant_id');
+        $referenced = $this->lookup->referencedUuids($field->type, $value->getValue());
 
         Media::query()
-            ->where('custom_properties->workspace_id', $workspaceId)
+            ->where('workspace_id', $value->getAttribute('tenant_id'))
             ->where('collection_name', MediaCollection::PendingUploads->value)
             ->whereIn('uuid', $referenced)
             ->update([
                 'model_type' => $entity->getMorphClass(),
                 'model_id' => $entity->getKey(),
-                'collection_name' => $collection,
+                'collection_name' => MediaCollection::Attachments->value,
+                'custom_field_id' => $field->getKey(),
             ]);
 
-        if ($field->type === CustomFieldType::FILE_UPLOAD->value) {
-            $this->assertClaimedByEntity($referenced, $workspaceId, $entity, $collection, $field);
-        }
-
-        DB::afterCommit(function () use ($entity, $collection, $referenced): void {
+        DB::afterCommit(function () use ($entity, $field, $referenced): void {
             $entity->media()
-                ->where('collection_name', $collection)
+                ->where('custom_field_id', $field->getKey())
                 ->whereNotIn('uuid', $referenced)
                 ->get()
                 ->each(fn (Model $media): ?bool => $media->delete());
         });
-    }
-
-    /** @param list<string> $referenced */
-    private function assertClaimedByEntity(array $referenced, string $workspaceId, Model&HasMedia $entity, string $collection, CustomField $field): void
-    {
-        if ($referenced === []) {
-            return;
-        }
-
-        $ownedByEntity = Media::query()
-            ->where('custom_properties->workspace_id', $workspaceId)
-            ->whereIn('uuid', $referenced)
-            ->where('model_type', $entity->getMorphClass())
-            ->where('model_id', $entity->getKey())
-            ->where('collection_name', $collection)
-            ->count() === count($referenced);
-
-        if ($ownedByEntity) {
-            return;
-        }
-
-        throw ValidationException::withMessages([
-            "custom_fields.{$field->code}" => __('validation.custom_field.upload_path', ['field' => $field->name]),
-        ]);
-    }
-
-    /** @return list<string> */
-    private function fileUuids(mixed $value): array
-    {
-        if (! is_string($value)) {
-            return [];
-        }
-
-        $uuid = $this->paths->uuidFromPath($value);
-
-        return $uuid === null ? [] : [$uuid];
-    }
-
-    /** @return list<string> */
-    private function imageUuids(mixed $value): array
-    {
-        return is_string($value) ? $this->paths->imageUuids($value) : [];
     }
 }

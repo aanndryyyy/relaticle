@@ -8,11 +8,11 @@ use App\Actions\Upload\StoreAgentUpload;
 use App\Exceptions\UploadException;
 use App\Mcp\Tools\Concerns\ChecksTokenAbility;
 use App\Mcp\Tools\Concerns\HasExplicitToolAnnotations;
-use App\Mcp\Tools\Concerns\LimitsUploads;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Support\Media\UploadAllowlist;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Illuminate\Support\Facades\RateLimiter;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
@@ -20,15 +20,17 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Attributes\Title;
 use Laravel\Mcp\Server\Tool;
+use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 #[Name('upload-file')]
 #[Title('Upload File')]
-#[Description('Store a file in this workspace. Returns suggested_markdown to embed an image in a rich-editor field (note body, task description) and path for a file-upload custom field where the workspace has one. Pass exactly one of: source_url (public https), base64 with filename (max 5 MB decoded), or upload_id from create-upload-url. filename is optional with upload_id but recommended. Allowed types: pdf, doc, docx, jpeg, png, gif, webp; 10 MB max.')]
+#[Description('Store a file in this workspace. Returns file_id to set a file-upload custom field, and suggested_markdown to embed the file in a rich-editor field (note body, task description). Pass exactly one of: source_url (public https), base64 with filename, or upload_id from create-upload-url. filename is optional with upload_id but recommended. Allowed types: pdf, doc, docx, xlsx, pptx, jpeg, png, gif, webp; 10 MB max. Limited to 60 calls per hour per workspace, refused files included.')]
 final class UploadFileTool extends Tool
 {
     use ChecksTokenAbility;
     use HasExplicitToolAnnotations;
-    use LimitsUploads;
+
+    private const int UPLOADS_PER_HOUR = 60;
 
     protected function destructiveHint(): bool
     {
@@ -53,12 +55,12 @@ final class UploadFileTool extends Tool
     public function outputSchema(JsonSchema $schema): array
     {
         return [
-            'file_id' => $schema->string()->required(),
-            'path' => $schema->string()->required(),
-            'url' => $schema->string()->required(),
+            'file_id' => $schema->string()->required()->description('The value to set on a file-upload custom field.'),
+            'name' => $schema->string()->required(),
+            'url' => $schema->string()->required()->description('A link to view the file now. It expires after 30 minutes; do not store it.'),
             'mime_type' => $schema->string()->required(),
             'size' => $schema->integer()->required(),
-            'suggested_markdown' => $schema->string()->required(),
+            'suggested_markdown' => $schema->string()->required()->description('Stable markdown to paste into a rich-editor field.'),
         ];
     }
 
@@ -81,27 +83,32 @@ final class UploadFileTool extends Tool
         /** @var Workspace $workspace */
         $workspace = $user->currentWorkspace;
 
-        if (($limited = $this->denyIfUploadLimitReached($workspace)) instanceof Response) {
-            return $limited;
-        }
-
         /** @var array{source_url?: ?string, base64?: ?string, filename?: ?string, upload_id?: ?string} $validated */
         try {
-            $media = resolve(StoreAgentUpload::class)->execute($user, $workspace, $validated);
+            $media = RateLimiter::attempt(
+                "mcp-uploads:{$workspace->getKey()}",
+                self::UPLOADS_PER_HOUR,
+                fn (): Media => resolve(StoreAgentUpload::class)->execute($user, $workspace, $validated),
+                3600,
+            );
         } catch (UploadException $exception) {
             return Response::error($exception->getMessage());
         }
 
-        $label = $this->markdownLabel((string) $media->getCustomProperty('original_name', $media->file_name));
-        $url = $media->getUrl();
+        if (! $media instanceof Media) {
+            return Response::error(__('uploads.errors.rate_limited'));
+        }
+
+        $label = $this->markdownLabel($media->name);
+        $stableUrl = route('media.show', ['media' => $media->uuid]);
 
         return Response::structured([
             'file_id' => $media->uuid,
-            'path' => $media->getPathRelativeToRoot(),
-            'url' => $url,
+            'name' => $media->name,
+            'url' => $media->getUrl(),
             'mime_type' => (string) $media->mime_type,
             'size' => (int) $media->size,
-            'suggested_markdown' => UploadAllowlist::isImage((string) $media->mime_type) ? "![{$label}]({$url})" : "[{$label}]({$url})",
+            'suggested_markdown' => UploadAllowlist::isImage((string) $media->mime_type) ? "![{$label}]({$stableUrl})" : "[{$label}]({$stableUrl})",
         ]);
     }
 

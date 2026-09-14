@@ -77,13 +77,13 @@ final readonly class BackfillRichEditorAttachments
 
                 $media = $entity->addMediaFromDisk($legacyPath, 'public')
                     ->preservingOriginal()
-                    ->usingName(pathinfo($legacyPath, PATHINFO_FILENAME))
-                    ->withCustomProperties([
+                    ->usingName(basename($legacyPath))
+                    ->withAttributes([
                         'workspace_id' => $value->getAttribute('tenant_id'),
-                        'source' => UploadSource::Panel->value,
-                        'original_name' => basename($legacyPath),
+                        'custom_field_id' => $value->customField->getKey(),
                     ])
-                    ->toMediaCollection(MediaCollection::forCustomField($value->customField->code));
+                    ->withCustomProperties(['source' => UploadSource::Panel->value])
+                    ->toMediaCollection(MediaCollection::Attachments->value);
 
                 $rewritten = (string) preg_replace(['/\ssrc="[^"]*"/i', '/\sdata-id="[^"]*"/i'], '', $tag);
                 $html = str_replace($tag, '<img src="'.e($media->getUrl()).'" data-id="'.$media->uuid.'"'.substr($rewritten, 4), $html);

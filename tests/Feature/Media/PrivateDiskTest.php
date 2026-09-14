@@ -16,21 +16,15 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
 mutates(MediaUrlGenerator::class, ShowMediaController::class, Workspace::class);
 
 beforeEach(function (): void {
+    Storage::fake('local');
     Storage::fake('public');
     $this->user = User::factory()->withPersonalWorkspace()->create();
     $this->workspace = $this->user->personalWorkspace();
 });
 
-function usePrivateMediaDisk(): void
+function usePublicMediaDisk(): void
 {
-    config()->set('filesystems.disks.media', [
-        'driver' => 'local',
-        'root' => storage_path('framework/testing/disks/media'),
-        'visibility' => 'private',
-        'throw' => false,
-    ]);
-    config()->set('media-library.disk_name', 'media');
-    Storage::fake('media', ['visibility' => 'private']);
+    config()->set('media-library.disk_name', 'public');
 }
 
 function uploadPdf(User $user): Media
@@ -43,17 +37,19 @@ function uploadPdf(User $user): Media
 }
 
 it('serves plain public urls when the media disk is public', function (): void {
+    usePublicMediaDisk();
     $media = uploadPdf($this->user);
 
-    expect($media->getUrl())->toContain('/storage/uploads/')
+    expect($media->disk)->toBe('public')
+        ->and($media->getUrl())->toContain('/storage/uploads/')
         ->and($media->getUrl())->not->toContain('signature=');
 });
 
-it('serves a signed route on a private disk and downloads non-images', function (): void {
-    usePrivateMediaDisk();
+it('stores on the private local disk by default and downloads non-images through a signed route', function (): void {
     $media = uploadPdf($this->user);
 
-    expect($media->getUrl())->toContain('/media/'.$media->uuid)
+    expect($media->disk)->toBe('local')
+        ->and($media->getUrl())->toContain('/media/'.$media->uuid)
         ->and($media->getUrl())->toContain('signature=')
         ->and(parse_url($media->getUrl(), PHP_URL_HOST))->toBe(parse_url((string) config('app.url'), PHP_URL_HOST));
 
@@ -63,8 +59,7 @@ it('serves a signed route on a private disk and downloads non-images', function 
         ->assertHeader('Cache-Control', 'no-store, private');
 });
 
-it('renders images inline on a private disk', function (): void {
-    usePrivateMediaDisk();
+it('renders images inline on the private disk', function (): void {
     RelaticleServer::actingAs($this->user)
         ->tool(UploadFileTool::class, ['base64' => base64_encode(onePixelPng()), 'filename' => 'pixel.png'])
         ->assertOk();
@@ -77,22 +72,7 @@ it('renders images inline on a private disk', function (): void {
         ->assertHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
 });
 
-it('falls back to the stored file name when original_name is absent', function (): void {
-    usePrivateMediaDisk();
-
-    $media = $this->workspace->addMediaFromString(pdfBytes())
-        ->usingFileName('brief.pdf')
-        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
-        ->toMediaCollection(MediaCollection::PendingUploads->value);
-
-    $this->get($media->getUrl())
-        ->assertOk()
-        ->assertHeader('Content-Disposition', 'attachment; filename='.$media->file_name);
-});
-
 it('serves agent files with a safe original download name', function (): void {
-    usePrivateMediaDisk();
-
     RelaticleServer::actingAs($this->user)
         ->tool(UploadFileTool::class, [
             'base64' => base64_encode(pdfBytes()),
@@ -105,11 +85,10 @@ it('serves agent files with a safe original download name', function (): void {
         ->assertOk()
         ->assertHeader('Content-Disposition', 'attachment; filename=brief.pdf');
 
-    expect($media->getCustomProperty('original_name'))->toBe('brief.pdf');
+    expect($media->name)->toBe('brief.pdf');
 });
 
 it('refuses an unsigned or expired private url', function (): void {
-    usePrivateMediaDisk();
     $media = uploadPdf($this->user);
 
     $this->get(route('media.show', ['media' => $media->uuid]))->assertForbidden();
@@ -119,8 +98,7 @@ it('refuses an unsigned or expired private url', function (): void {
     $this->get($url)->assertForbidden();
 });
 
-it('keeps company logos on the public disk regardless of the switch', function (): void {
-    usePrivateMediaDisk();
+it('keeps company logos on the public disk', function (): void {
     $company = Company::factory()->create(['workspace_id' => $this->workspace->getKey()]);
 
     $logo = $company->addMediaFromString(onePixelPng())->usingFileName('logo.png')->toMediaCollection(MediaCollection::Logo->value);
@@ -129,21 +107,16 @@ it('keeps company logos on the public disk regardless of the switch', function (
         ->and($logo->getUrl())->not->toContain('signature=');
 });
 
-it('keeps workspace logos on the public disk regardless of the switch', function (): void {
-    usePrivateMediaDisk();
-
+it('keeps workspace logos on the public disk', function (): void {
     $logo = $this->workspace->addMediaFromString(onePixelPng())->usingFileName('logo.png')->toMediaCollection(Workspace::LOGO_MEDIA_COLLECTION);
 
     expect($logo->disk)->toBe('public')
         ->and($logo->getUrl())->not->toContain('signature=');
 });
+
 it('answers 404 when the file behind a signed url is gone from the disk', function (): void {
-    usePrivateMediaDisk();
-    RelaticleServer::actingAs($this->user)
-        ->tool(UploadFileTool::class, ['base64' => base64_encode(onePixelPng()), 'filename' => 'pixel.png'])
-        ->assertOk();
-    $media = Media::query()->latest('id')->firstOrFail();
-    Storage::disk('media')->delete($media->getPathRelativeToRoot());
+    $media = uploadPdf($this->user);
+    Storage::disk('local')->delete($media->getPathRelativeToRoot());
 
     $this->get($media->getUrl())->assertNotFound();
 });

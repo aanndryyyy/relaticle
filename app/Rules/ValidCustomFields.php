@@ -67,7 +67,7 @@ final readonly class ValidCustomFields implements ValidationRule
                 }
 
                 if ($customField->type === CustomFieldType::FILE_UPLOAD->value) {
-                    $rules["custom_fields.{$customField->code}"][] = new StoredUploadPath(
+                    $rules["custom_fields.{$customField->code}"][] = new OwnedUpload(
                         $this->tenantId,
                         $this->entityType,
                         $customField,

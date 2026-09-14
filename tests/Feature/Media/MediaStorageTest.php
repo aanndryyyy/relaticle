@@ -17,6 +17,7 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
 mutates(StorePendingUpload::class, UploadPathGenerator::class);
 
 beforeEach(function (): void {
+    Storage::fake('local');
     Storage::fake('public');
     $this->user = User::factory()->withPersonalWorkspace()->create();
     $this->workspace = $this->user->personalWorkspace();
@@ -52,15 +53,16 @@ it('stores a pending upload under uploads/{uuid} with its provenance', function 
 
     expect($media->collection_name)->toBe(MediaCollection::PendingUploads->value)
         ->and($media->model_id)->toBe($this->workspace->getKey())
+        ->and($media->disk)->toBe('local')
         ->and($media->getPathRelativeToRoot())->toMatch('#^uploads/[0-9a-f-]{36}/[0-9A-Z]{26}\.pdf$#')
         ->and($media->mime_type)->toBe('application/pdf')
-        ->and($media->name)->toBe('Contract v2')
-        ->and($media->getCustomProperty('workspace_id'))->toBe($this->workspace->getKey())
+        ->and($media->name)->toBe('Contract v2.pdf')
+        ->and($media->workspace_id)->toBe($this->workspace->getKey())
+        ->and($media->custom_field_id)->toBeNull()
         ->and($media->getCustomProperty('uploaded_by'))->toBe($this->user->getKey())
-        ->and($media->getCustomProperty('source'))->toBe('panel')
-        ->and($media->getCustomProperty('original_name'))->toBe('Contract v2.pdf');
+        ->and($media->getCustomProperty('source'))->toBe('panel');
 
-    Storage::disk('public')->assertExists($media->getPathRelativeToRoot());
+    Storage::disk('local')->assertExists($media->getPathRelativeToRoot());
 });
 
 it('names the file by the sniffed type, not the claimed extension', function (): void {
@@ -85,7 +87,7 @@ it('rejects a type outside the allowlist', function (): void {
         tempFileWith($svg, 'svg'),
         'evil.svg',
         UploadSource::Panel,
-    ))->toThrow(UploadException::class, __('uploads.errors.mime_not_allowed', ['mime' => 'image/svg+xml']));
+    ))->toThrow(UploadException::class, 'Files of type image/svg+xml are not accepted. Allowed: pdf, doc, docx, xlsx, pptx, jpg, png, gif, webp, jpeg.');
 });
 
 it('rejects a file over the 10 MB ceiling', function (): void {

@@ -11,6 +11,8 @@ final readonly class UploadAllowlist
         'application/pdf' => 'pdf',
         'application/msword' => 'doc',
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => 'docx',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => 'xlsx',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation' => 'pptx',
         'image/jpeg' => 'jpg',
         'image/png' => 'png',
         'image/gif' => 'gif',

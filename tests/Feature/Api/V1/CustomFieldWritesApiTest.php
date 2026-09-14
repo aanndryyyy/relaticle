@@ -12,16 +12,15 @@ use App\Models\CustomFieldSection;
 use App\Models\Note;
 use App\Models\Task;
 use App\Models\User;
-use App\Rules\StoredUploadPath;
-use App\Support\Media\MediaPaths;
+use App\Rules\OwnedUpload;
+use App\Support\Media\MediaLookup;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 
-mutates(BaseCrmEntityRequest::class, StoredUploadPath::class, MediaPaths::class);
+mutates(BaseCrmEntityRequest::class, OwnedUpload::class, MediaLookup::class);
 
 beforeEach(function (): void {
-    enableFileUploadFieldType();
     $this->user = User::factory()->withPersonalWorkspace()->create();
     $this->workspace = $this->user->personalWorkspace();
     $this->status = CustomField::query()
@@ -190,7 +189,7 @@ it('resolves record names with a constant number of lookups, not one per row', f
 });
 
 it('claims file uploads for every CRM entity over rest', function (CrmEntity $entity, string $endpoint, string $titleKey): void {
-    Storage::fake('public');
+    Storage::fake('local');
     $field = CustomField::factory()->create([
         'tenant_id' => $this->workspace->getKey(),
         'entity_type' => $entity->value,
@@ -203,13 +202,12 @@ it('claims file uploads for every CRM entity over rest', function (CrmEntity $en
     ]);
     $pending = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName("{$entity->value}.pdf")
-        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
+        ->withAttributes(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
-    $path = $pending->getPathRelativeToRoot();
 
     $response = $this->postJson("/api/v1/{$endpoint}", [
         $titleKey => "File {$entity->value}",
-        'custom_fields' => [$field->code => $path],
+        'custom_fields' => [$field->code => $pending->uuid],
     ])->assertCreated();
 
     $modelClass = $entity->model();
@@ -217,7 +215,8 @@ it('claims file uploads for every CRM entity over rest', function (CrmEntity $en
 
     expect($pending->refresh()->model_type)->toBe($record->getMorphClass())
         ->and($pending->model_id)->toBe($record->getKey())
-        ->and($pending->collection_name)->toBe(MediaCollection::forCustomField($field->code));
+        ->and($pending->collection_name)->toBe(MediaCollection::Attachments->value)
+        ->and($pending->custom_field_id)->toBe($field->getKey());
 })->with([
     'company' => [CrmEntity::Company, 'companies', 'name'],
     'people' => [CrmEntity::People, 'people', 'name'],
@@ -228,7 +227,7 @@ it('claims file uploads for every CRM entity over rest', function (CrmEntity $en
 
 describe('file-upload values over rest', function (): void {
     beforeEach(function (): void {
-        Storage::fake('public');
+        Storage::fake('local');
         $this->contract = CustomField::factory()->create([
             'tenant_id' => $this->workspace->getKey(),
             'entity_type' => 'note',
@@ -240,24 +239,29 @@ describe('file-upload values over rest', function (): void {
             'system_defined' => false,
         ]);
         $this->pending = $this->workspace->addMediaFromString(pdfBytes())->usingFileName('01ARZ3NDEKTSV4RRFFQ69G5FAV.pdf')
-            ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
+            ->usingName('Contract.pdf')
+            ->withAttributes(['workspace_id' => $this->workspace->getKey()])
             ->toMediaCollection(MediaCollection::PendingUploads->value);
     });
 
-    it('stores an owned pending path and returns path and url', function (): void {
-        $path = $this->pending->getPathRelativeToRoot();
-
-        $this->postJson('/api/v1/notes', ['title' => 'Rest file', 'custom_fields' => ['contract' => $path]])
+    it('stores an owned pending file id and returns id, name and url', function (): void {
+        $response = $this->postJson('/api/v1/notes', ['title' => 'Rest file', 'custom_fields' => ['contract' => $this->pending->uuid]])
             ->assertCreated()
-            ->assertJsonPath('data.attributes.custom_fields.contract.path', $path)
-            ->assertJsonPath('data.attributes.custom_fields.contract.url', $this->pending->refresh()->getUrl());
+            ->assertJsonPath('data.attributes.custom_fields.contract.id', $this->pending->uuid)
+            ->assertJsonPath('data.attributes.custom_fields.contract.name', 'Contract.pdf');
+
+        expect($response->json('data.attributes.custom_fields.contract.url'))->toContain('/media/'.$this->pending->uuid);
     });
 
-    it('returns 422 for a path this workspace does not own', function (): void {
-        $this->postJson('/api/v1/notes', ['title' => 'Rest bad', 'custom_fields' => ['contract' => 'uploads/00000000-0000-0000-0000-000000000000/x.pdf']])
+    it('returns 422 for a file id this workspace does not own', function (string $value): void {
+        $this->postJson('/api/v1/notes', ['title' => 'Rest bad', 'custom_fields' => ['contract' => $value]])
             ->assertUnprocessable()
             ->assertJsonValidationErrors(['custom_fields.contract']);
-    });
+    })->with([
+        'unknown uuid' => '00000000-0000-0000-0000-000000000000',
+        'path' => 'uploads/00000000-0000-0000-0000-000000000000/x.pdf',
+        'traversal' => '../.env',
+    ]);
 
     it('returns null for an empty file field', function (): void {
         $note = Note::factory()->create(['workspace_id' => $this->workspace->getKey()]);
@@ -274,9 +278,9 @@ describe('file-upload values over rest', function (): void {
                 ->each(function (Note $note): void {
                     $media = $this->workspace->addMediaFromString(pdfBytes())
                         ->usingFileName("{$note->getKey()}.pdf")
-                        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
+                        ->withAttributes(['workspace_id' => $this->workspace->getKey()])
                         ->toMediaCollection(MediaCollection::PendingUploads->value);
-                    $note->saveCustomFieldValue($this->contract, $media->getPathRelativeToRoot());
+                    $note->saveCustomFieldValue($this->contract, $media->uuid);
                 });
         };
 
@@ -305,7 +309,7 @@ describe('file-upload values over rest', function (): void {
 
 describe('rich editor images over rest', function (): void {
     beforeEach(function (): void {
-        Storage::fake('public');
+        Storage::fake('local');
         $this->body = CustomField::query()
             ->where('tenant_id', $this->workspace->getKey())
             ->where('entity_type', 'note')
@@ -315,7 +319,7 @@ describe('rich editor images over rest', function (): void {
 
     it('rewrites image sources from the media row on read', function (): void {
         $media = $this->workspace->addMediaFromString(onePixelPng())->usingFileName('a.png')
-            ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
+            ->withAttributes(['workspace_id' => $this->workspace->getKey()])
             ->toMediaCollection(MediaCollection::PendingUploads->value);
 
         $id = $this->postJson('/api/v1/notes', ['title' => 'Rest image', 'custom_fields' => ['body' => "<p><img src=\"stale\" alt=\"a\" data-id=\"{$media->uuid}\"></p>"]])
@@ -330,7 +334,7 @@ describe('rich editor images over rest', function (): void {
     it('lists notes with images through one media query per workspace', function (): void {
         foreach (range(1, 3) as $index) {
             $media = $this->workspace->addMediaFromString(onePixelPng())->usingFileName("{$index}.png")
-                ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
+                ->withAttributes(['workspace_id' => $this->workspace->getKey()])
                 ->toMediaCollection(MediaCollection::PendingUploads->value);
             $this->postJson('/api/v1/notes', ['title' => "Listed {$index}", 'custom_fields' => ['body' => "<p><img src=\"stale\" data-id=\"{$media->uuid}\"></p>"]])
                 ->assertCreated();

@@ -16,6 +16,7 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
 mutates(BackfillRichEditorAttachments::class, BackfillRichEditorAttachmentsCommand::class);
 
 beforeEach(function (): void {
+    Storage::fake('local');
     Storage::fake('public');
     $this->workspace = User::factory()->withPersonalWorkspace()->create()->personalWorkspace();
     $this->body = CustomField::query()
@@ -56,8 +57,10 @@ it('creates a media row on the record and rewrites the image with --force, outsi
     $html = (string) TenantContextService::withTenant($this->workspace->getKey(), fn (): mixed => $this->note->refresh()->getCustomFieldValue($this->body));
 
     expect($media->model_id)->toBe($this->note->getKey())
-        ->and($media->collection_name)->toBe(MediaCollection::forCustomField('body'))
-        ->and($media->getCustomProperty('workspace_id'))->toBe($this->workspace->getKey())
+        ->and($media->collection_name)->toBe(MediaCollection::Attachments->value)
+        ->and($media->custom_field_id)->toBe($this->body->getKey())
+        ->and($media->workspace_id)->toBe($this->workspace->getKey())
+        ->and($media->disk)->toBe('local')
         ->and($html)->toContain("data-id=\"{$media->uuid}\"")
         ->and($html)->toContain('src="'.e($media->getUrl()).'"')
         ->and($html)->toContain('alt="old"')
@@ -83,7 +86,7 @@ it('tags an untagged public-disk image with its new media uuid and leaves extern
     $media = Media::query()->where('model_id', $this->untagged->getKey())->firstOrFail();
     $html = (string) TenantContextService::withTenant($this->workspace->getKey(), fn (): mixed => $this->untagged->refresh()->getCustomFieldValue($this->body));
 
-    expect($media->getCustomProperty('original_name'))->toBe('untagged.jpg')
+    expect($media->name)->toBe('untagged.jpg')
         ->and($html)->toBe('<p><img src="'.e($media->getUrl()).'" data-id="'.$media->uuid.'"><img src="https://cdn.example.com/external.png"></p>');
 });
 

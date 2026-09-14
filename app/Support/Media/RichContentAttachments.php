@@ -30,11 +30,11 @@ final readonly class RichContentAttachments implements FileAttachmentProvider
 
     private const string OWNED_URL = '#/(?:uploads|media)/('.self::UUID.')(?:/|\?|$)#';
 
-    private function __construct(private string $workspaceId, private MediaPaths $paths) {}
+    private function __construct(private string $workspaceId, private MediaLookup $lookup) {}
 
     public static function forWorkspace(string $workspaceId): self
     {
-        return new self($workspaceId, resolve(MediaPaths::class));
+        return new self($workspaceId, resolve(MediaLookup::class));
     }
 
     public function attribute(RichContentAttribute $attribute): static
@@ -49,7 +49,7 @@ final readonly class RichContentAttachments implements FileAttachmentProvider
         }
 
         if (preg_match('/^'.self::UUID.'$/', $file) === 1) {
-            return $this->paths->findByUuid($this->workspaceId, $file)?->getUrl();
+            return $this->lookup->find($this->workspaceId, $file)?->getUrl();
         }
 
         if (preg_match(self::LEGACY_FILENAME, $file) !== 1) {
@@ -101,7 +101,7 @@ final readonly class RichContentAttachments implements FileAttachmentProvider
                 return $match[0];
             }
 
-            if (! $this->paths->findByUuid($this->workspaceId, $url[1]) instanceof Media) {
+            if (! $this->lookup->find($this->workspaceId, $url[1]) instanceof Media) {
                 return $match[0];
             }
 

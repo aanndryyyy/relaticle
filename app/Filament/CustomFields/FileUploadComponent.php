@@ -10,8 +10,8 @@ use App\Enums\UploadSource;
 use App\Exceptions\UploadException;
 use App\Models\User;
 use App\Models\Workspace;
-use App\Rules\StoredUploadPath;
-use App\Support\Media\MediaPaths;
+use App\Rules\OwnedUpload;
+use App\Support\Media\MediaLookup;
 use App\Support\Media\UploadAllowlist;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\FileUpload;
@@ -29,13 +29,12 @@ final readonly class FileUploadComponent extends AbstractFormComponent
     public function create(CustomField $customField): FileUpload
     {
         return FileUpload::make($customField->getFieldName())
-            ->disk(config('media-library.disk_name'))
             ->acceptedFileTypes(array_keys(UploadAllowlist::MIME_TYPES))
             ->maxSize((int) (UploadAllowlist::maxBytes() / 1024))
             ->downloadable()
             ->openable()
             ->previewable()
-            ->preventFilePathTampering(allowFilePathUsing: fn (string $file, FileUpload $component): bool => $this->isAllowedPath($file, $component, $customField))
+            ->preventFilePathTampering(allowFilePathUsing: fn (string $file, FileUpload $component): bool => $this->isOwned($file, $component, $customField))
             ->afterStateUpdated(function (FileUpload $component, Component $livewire): void {
                 $livewire->resetValidation($component->getStatePath().'.*');
             })
@@ -54,7 +53,7 @@ final readonly class FileUploadComponent extends AbstractFormComponent
         try {
             return resolve(StorePendingUpload::class)
                 ->execute($user, $workspace, $file->getRealPath(), $file->getClientOriginalName(), UploadSource::Panel)
-                ->getPathRelativeToRoot();
+                ->uuid;
         } catch (UploadException $exception) {
             throw ValidationException::withMessages([$component->getStatePath() => $exception->getMessage()]);
         }
@@ -65,7 +64,7 @@ final readonly class FileUploadComponent extends AbstractFormComponent
     {
         $workspace = $this->workspace();
         $media = $workspace instanceof Workspace
-            ? resolve(MediaPaths::class)->find((string) $workspace->getKey(), $file)
+            ? resolve(MediaLookup::class)->find((string) $workspace->getKey(), $file)
             : null;
 
         if (! $media instanceof Media) {
@@ -73,7 +72,7 @@ final readonly class FileUploadComponent extends AbstractFormComponent
         }
 
         return [
-            'name' => $media->getCustomProperty('original_name', $media->file_name),
+            'name' => $media->name,
             'size' => (int) $media->size,
             'type' => $media->mime_type,
             'url' => $media->getUrl(),
@@ -92,7 +91,7 @@ final readonly class FileUploadComponent extends AbstractFormComponent
         return null;
     }
 
-    private function isAllowedPath(string $file, FileUpload $component, CustomField $customField): bool
+    private function isOwned(string $file, FileUpload $component, CustomField $customField): bool
     {
         $workspace = $this->workspace();
 
@@ -105,7 +104,7 @@ final readonly class FileUploadComponent extends AbstractFormComponent
 
         return Validator::make(
             ['file' => $file],
-            ['file' => [new StoredUploadPath((string) $workspace->getKey(), $customField->entity_type, $customField, $entityId)]],
+            ['file' => [new OwnedUpload((string) $workspace->getKey(), $customField->entity_type, $customField, $entityId)]],
         )->passes();
     }
 

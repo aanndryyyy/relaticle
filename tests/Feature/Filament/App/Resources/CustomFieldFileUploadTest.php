@@ -23,14 +23,11 @@ use Filament\Schemas\Components\Component;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Relaticle\CustomFields\Facades\CustomFieldsType;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 mutates(FileUploadFieldType::class, FileUploadComponent::class, FileEntry::class, FileColumn::class, DiscardPendingUpload::class);
 
 beforeEach(function (): void {
-    enableFileUploadFieldType();
-    Storage::fake('public');
     Storage::fake('local');
     $this->user = User::factory()->withWorkspace()->create();
     $this->actingAs($this->user);
@@ -48,13 +45,6 @@ beforeEach(function (): void {
     ]);
 });
 
-it('ships the file-upload type disabled and resolves it once config enables it', function (): void {
-    $shipped = require base_path('config/custom-fields.php');
-
-    expect($shipped['field_type_configuration']->isFieldTypeAllowed('file-upload'))->toBeFalse()
-        ->and(CustomFieldsType::getFieldType('file-upload'))->not->toBeNull();
-});
-
 it('stores a panel upload as pending media and claims it when the note is created', function (): void {
     livewire(ManageNotes::class)
         ->callAction('create', [
@@ -64,13 +54,13 @@ it('stores a panel upload as pending media and claims it when the note is create
         ->assertHasNoActionErrors();
 
     $note = Note::query()->where('title', 'With contract')->with('customFieldValues.customField')->firstOrFail();
-    $path = $note->getCustomFieldValue($this->contract);
-    $media = Media::query()->where('collection_name', MediaCollection::forCustomField('contract'))->firstOrFail();
+    $media = Media::query()->where('collection_name', MediaCollection::Attachments->value)->firstOrFail();
 
-    expect($path)->toBe($media->getPathRelativeToRoot())
+    expect($note->getCustomFieldValue($this->contract))->toBe($media->uuid)
         ->and($media->model_id)->toBe($note->getKey())
-        ->and($media->getCustomProperty('original_name'))->toBe('contract.pdf');
-    Storage::disk('public')->assertExists($path);
+        ->and($media->custom_field_id)->toBe($this->contract->getKey())
+        ->and($media->name)->toBe('contract.pdf');
+    Storage::disk('local')->assertExists($media->getPathRelativeToRoot());
 });
 
 it('rejects an svg through the accepted file types', function (): void {
@@ -104,9 +94,9 @@ it('shows the original file name, not the storage name, as a link on the record'
     $note = Note::factory()->recycle([$this->user, $this->workspace])->create();
     $media = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName('01ARZ3NDEKTSV4RRFFQ69G5FAV.pdf')
-        ->withCustomProperties(['workspace_id' => $this->workspace->getKey(), 'original_name' => 'Contract v2.pdf'])
+        ->withAttributes(['workspace_id' => $this->workspace->getKey()])->usingName('Contract v2.pdf')
         ->toMediaCollection(MediaCollection::PendingUploads->value);
-    $note->saveCustomFieldValue($this->contract, $media->getPathRelativeToRoot());
+    $note->saveCustomFieldValue($this->contract, $media->uuid);
 
     livewire(ManageNotes::class)
         ->assertSee('Contract v2.pdf')
@@ -127,9 +117,9 @@ it('shows the original file name through a real infolist entry', function (): vo
     $company = Company::factory()->recycle([$this->user, $this->workspace])->create();
     $media = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName('01ARZ3NDEKTSV4RRFFQ69G5FAV.pdf')
-        ->withCustomProperties(['workspace_id' => $this->workspace->getKey(), 'original_name' => 'Master Agreement.pdf'])
+        ->withAttributes(['workspace_id' => $this->workspace->getKey()])->usingName('Master Agreement.pdf')
         ->toMediaCollection(MediaCollection::PendingUploads->value);
-    $company->saveCustomFieldValue($companyField, $media->getPathRelativeToRoot());
+    $company->saveCustomFieldValue($companyField, $media->uuid);
 
     livewire(ViewCompany::class, ['record' => $company->getKey()])
         ->assertOk()
@@ -141,9 +131,9 @@ it('releases the file when it is removed from the form', function (): void {
     $note = Note::factory()->recycle([$this->user, $this->workspace])->create();
     $media = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName('01ARZ3NDEKTSV4RRFFQ69G5FAV.pdf')
-        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
+        ->withAttributes(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
-    $note->saveCustomFieldValue($this->contract, $media->getPathRelativeToRoot());
+    $note->saveCustomFieldValue($this->contract, $media->uuid);
 
     livewire(ManageNotes::class)
         ->callAction(TestAction::make('edit')->table($note), ['custom_fields' => ['contract' => null]])
@@ -157,9 +147,9 @@ it('resolves the original file name and url through getUploadedFileUsing', funct
     $note = Note::factory()->recycle([$this->user, $this->workspace])->create();
     $media = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName('01ARZ3NDEKTSV4RRFFQ69G5FAV.pdf')
-        ->withCustomProperties(['workspace_id' => $this->workspace->getKey(), 'original_name' => 'Signed Contract.pdf'])
+        ->withAttributes(['workspace_id' => $this->workspace->getKey()])->usingName('Signed Contract.pdf')
         ->toMediaCollection(MediaCollection::PendingUploads->value);
-    $note->saveCustomFieldValue($this->contract, $media->getPathRelativeToRoot());
+    $note->saveCustomFieldValue($this->contract, $media->uuid);
 
     $test = livewire(ManageNotes::class)->mountAction(TestAction::make('edit')->table($note));
 
@@ -179,49 +169,46 @@ it('resolves the original file name and url through getUploadedFileUsing', funct
 it('deletes a pending upload but leaves a claimed one alone', function (): void {
     $pending = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName('pending.pdf')
-        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
+        ->withAttributes(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
 
     $note = Note::factory()->recycle([$this->user, $this->workspace])->create();
     $claimed = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName('claimed.pdf')
-        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
+        ->withAttributes(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
-    $note->saveCustomFieldValue($this->contract, $claimed->getPathRelativeToRoot());
-    $claimedPath = $claimed->refresh()->getPathRelativeToRoot();
+    $note->saveCustomFieldValue($this->contract, $claimed->uuid);
 
-    resolve(DiscardPendingUpload::class)->execute($this->user, $this->workspace, $pending->getPathRelativeToRoot());
-    resolve(DiscardPendingUpload::class)->execute($this->user, $this->workspace, $claimedPath);
+    resolve(DiscardPendingUpload::class)->execute($this->user, $this->workspace, $pending->uuid);
+    resolve(DiscardPendingUpload::class)->execute($this->user, $this->workspace, $claimed->uuid);
 
     expect(Media::query()->find($pending->getKey()))->toBeNull()
         ->and(Media::query()->find($claimed->getKey()))->not->toBeNull();
 });
 
-it('rejects a pasted path claimed by another record on the same field', function (): void {
+it('rejects a pasted file id claimed by another record on the same field', function (): void {
     $noteA = Note::factory()->recycle([$this->user, $this->workspace])->create();
     $noteB = Note::factory()->recycle([$this->user, $this->workspace])->create();
     $media = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName('01ARZ3NDEKTSV4RRFFQ69G5FAV.pdf')
-        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
+        ->withAttributes(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
-    $noteA->saveCustomFieldValue($this->contract, $media->getPathRelativeToRoot());
-    $claimedPath = $media->refresh()->getPathRelativeToRoot();
+    $noteA->saveCustomFieldValue($this->contract, $media->uuid);
 
     livewire(ManageNotes::class)
-        ->callAction(TestAction::make('edit')->table($noteB), ['custom_fields' => ['contract' => [(string) Str::uuid() => $claimedPath]]])
+        ->callAction(TestAction::make('edit')->table($noteB), ['custom_fields' => ['contract' => [(string) Str::uuid() => $media->uuid]]])
         ->assertHasActionErrors(['custom_fields.contract']);
 });
 
-it('allows re-saving a record with its own currently claimed path', function (): void {
+it('allows re-saving a record with its own currently claimed file id', function (): void {
     $note = Note::factory()->recycle([$this->user, $this->workspace])->create();
     $media = $this->workspace->addMediaFromString(pdfBytes())
         ->usingFileName('01ARZ3NDEKTSV4RRFFQ69G5FAV.pdf')
-        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
+        ->withAttributes(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
-    $note->saveCustomFieldValue($this->contract, $media->getPathRelativeToRoot());
-    $claimedPath = $media->refresh()->getPathRelativeToRoot();
+    $note->saveCustomFieldValue($this->contract, $media->uuid);
 
     livewire(ManageNotes::class)
-        ->callAction(TestAction::make('edit')->table($note), ['custom_fields' => ['contract' => [(string) Str::uuid() => $claimedPath]]])
+        ->callAction(TestAction::make('edit')->table($note), ['custom_fields' => ['contract' => [(string) Str::uuid() => $media->uuid]]])
         ->assertHasNoActionErrors();
 });

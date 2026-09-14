@@ -20,8 +20,7 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
 mutates(UploadClaims::class, CustomFieldValueObserver::class);
 
 beforeEach(function (): void {
-    enableFileUploadFieldType();
-    Storage::fake('public');
+    Storage::fake('local');
     $this->user = User::factory()->withPersonalWorkspace()->create();
     $this->workspace = $this->user->personalWorkspace();
     TenantContextService::setTenantId($this->workspace->getKey());
@@ -59,49 +58,50 @@ it('claims a pending upload onto the record when a file value references it', fu
     $path = $media->getPathRelativeToRoot();
     $note = Note::factory()->create(['workspace_id' => $this->workspace->getKey()]);
 
-    $note->saveCustomFieldValue($this->contract, $path);
+    $note->saveCustomFieldValue($this->contract, $media->uuid);
 
     $media->refresh();
     expect($media->model_type)->toBe($note->getMorphClass())
         ->and($media->model_id)->toBe($note->getKey())
-        ->and($media->collection_name)->toBe(MediaCollection::forCustomField('contract'))
+        ->and($media->collection_name)->toBe(MediaCollection::Attachments->value)
+        ->and($media->custom_field_id)->toBe($this->contract->getKey())
         ->and($media->getPathRelativeToRoot())->toBe($path);
-    Storage::disk('public')->assertExists($path);
+    Storage::disk('local')->assertExists($path);
 });
 
 it('releases the previous file when a file value is replaced', function (): void {
     $first = pendingUpload($this->user, pdfBytes(), 'a.pdf');
     $second = pendingUpload($this->user, pdfBytes(), 'b.pdf');
     $note = Note::factory()->create(['workspace_id' => $this->workspace->getKey()]);
-    $note->saveCustomFieldValue($this->contract, $first->getPathRelativeToRoot());
+    $note->saveCustomFieldValue($this->contract, $first->uuid);
 
-    $note->saveCustomFieldValue($this->contract, $second->getPathRelativeToRoot());
+    $note->saveCustomFieldValue($this->contract, $second->uuid);
 
     expect(Media::query()->find($first->getKey()))->toBeNull()
         ->and($second->refresh()->model_id)->toBe($note->getKey());
-    Storage::disk('public')->assertMissing($first->getPathRelativeToRoot());
+    Storage::disk('local')->assertMissing($first->getPathRelativeToRoot());
 });
 
 it('keeps the released file when the surrounding transaction rolls back', function (): void {
     $first = pendingUpload($this->user, pdfBytes(), 'a.pdf');
     $second = pendingUpload($this->user, pdfBytes(), 'b.pdf');
     $note = Note::factory()->create(['workspace_id' => $this->workspace->getKey()]);
-    $note->saveCustomFieldValue($this->contract, $first->getPathRelativeToRoot());
+    $note->saveCustomFieldValue($this->contract, $first->uuid);
 
     expect(fn (): mixed => DB::transaction(function () use ($note, $second): void {
-        $note->saveCustomFieldValue($this->contract, $second->getPathRelativeToRoot());
+        $note->saveCustomFieldValue($this->contract, $second->uuid);
 
         throw new RuntimeException('boom');
     }))->toThrow(RuntimeException::class);
 
     expect(Media::query()->find($first->getKey()))->not->toBeNull();
-    Storage::disk('public')->assertExists($first->getPathRelativeToRoot());
+    Storage::disk('local')->assertExists($first->getPathRelativeToRoot());
 });
 
 it('releases the file when a file value is cleared', function (): void {
     $media = pendingUpload($this->user, pdfBytes(), 'a.pdf');
     $note = Note::factory()->create(['workspace_id' => $this->workspace->getKey()]);
-    $note->saveCustomFieldValue($this->contract, $media->getPathRelativeToRoot());
+    $note->saveCustomFieldValue($this->contract, $media->uuid);
 
     $note->saveCustomFieldValue($this->contract, null);
 
@@ -113,7 +113,7 @@ it('never claims another team\'s pending upload', function (): void {
     $foreign = pendingUpload($stranger, pdfBytes(), 'a.pdf');
     $note = Note::factory()->create(['workspace_id' => $this->workspace->getKey()]);
 
-    expect(fn (): mixed => DB::transaction(fn () => $note->saveCustomFieldValue($this->contract, $foreign->getPathRelativeToRoot())))
+    expect(fn (): mixed => $note->saveCustomFieldValue($this->contract, $foreign->uuid))
         ->toThrow(ValidationException::class);
 
     expect($foreign->refresh()->collection_name)->toBe(MediaCollection::PendingUploads->value)
@@ -122,12 +122,11 @@ it('never claims another team\'s pending upload', function (): void {
 
 it('refuses to store a file value whose upload another record owns', function (): void {
     $media = pendingUpload($this->user, pdfBytes(), 'a.pdf');
-    $path = $media->getPathRelativeToRoot();
     $noteA = Note::factory()->create(['workspace_id' => $this->workspace->getKey()]);
     $noteB = Note::factory()->create(['workspace_id' => $this->workspace->getKey()]);
-    $noteA->saveCustomFieldValue($this->contract, $path);
+    $noteA->saveCustomFieldValue($this->contract, $media->uuid);
 
-    expect(fn (): mixed => DB::transaction(fn () => $noteB->saveCustomFieldValue($this->contract, $path)))
+    expect(fn (): mixed => $noteB->saveCustomFieldValue($this->contract, $media->uuid))
         ->toThrow(ValidationException::class);
 
     expect(CustomFieldValue::query()
@@ -143,7 +142,8 @@ it('claims every image a rich editor body references and releases the ones it dr
     $note = Note::factory()->create(['workspace_id' => $this->workspace->getKey()]);
     $note->saveCustomFieldValue($this->body, "<p><img data-id=\"{$kept->uuid}\" src=\"x\"><img data-id=\"{$dropped->uuid}\" src=\"y\"></p>");
 
-    expect($kept->refresh()->collection_name)->toBe(MediaCollection::forCustomField('body'))
+    expect($kept->refresh()->collection_name)->toBe(MediaCollection::Attachments->value)
+        ->and($kept->custom_field_id)->toBe($this->body->getKey())
         ->and($dropped->refresh()->model_id)->toBe($note->getKey());
 
     $note->saveCustomFieldValue($this->body, "<p><img data-id=\"{$kept->uuid}\" src=\"x\"></p>");
@@ -152,10 +152,23 @@ it('claims every image a rich editor body references and releases the ones it dr
         ->and(Media::query()->find($kept->getKey()))->not->toBeNull();
 });
 
+it('keeps releasing after the field code is renamed', function (): void {
+    $first = pendingUpload($this->user, pdfBytes(), 'a.pdf');
+    $second = pendingUpload($this->user, pdfBytes(), 'b.pdf');
+    $note = Note::factory()->create(['workspace_id' => $this->workspace->getKey()]);
+    $note->saveCustomFieldValue($this->contract, $first->uuid);
+
+    $this->contract->update(['code' => 'agreement']);
+    $note->saveCustomFieldValue($this->contract->refresh(), $second->uuid);
+
+    expect(Media::query()->find($first->getKey()))->toBeNull()
+        ->and($second->refresh()->custom_field_id)->toBe($this->contract->getKey());
+});
+
 it('deletes claimed media with the record', function (): void {
     $media = pendingUpload($this->user, pdfBytes(), 'a.pdf');
     $note = Note::factory()->create(['workspace_id' => $this->workspace->getKey()]);
-    $note->saveCustomFieldValue($this->contract, $media->getPathRelativeToRoot());
+    $note->saveCustomFieldValue($this->contract, $media->uuid);
 
     $note->forceDelete();
 

@@ -21,6 +21,11 @@ final readonly class CustomFieldValueObserver
         private UploadClaims $uploadClaims,
     ) {}
 
+    public function saving(CustomFieldValue $value): void
+    {
+        $this->uploadClaims->assertClaimable($value);
+    }
+
     public function saved(CustomFieldValue $value): void
     {
         if ($value->wasRecentlyCreated || $value->wasChanged(['string_value', 'text_value'])) {

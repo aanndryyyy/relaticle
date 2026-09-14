@@ -9,7 +9,7 @@ use App\Exceptions\SsrfGuardException;
 use App\Exceptions\UploadException;
 use App\Models\User;
 use App\Models\Workspace;
-use App\Services\Favicon\SsrfGuard;
+use App\Support\Http\SsrfGuard;
 use App\Support\Media\TemporaryUploads;
 use App\Support\Media\UploadAllowlist;
 use Illuminate\Http\Client\ConnectionException;
@@ -18,8 +18,6 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 final readonly class StoreAgentUpload
 {
-    private const int MAX_BASE64_BYTES = 5 * 1024 * 1024;
-
     public function __construct(private StorePendingUpload $store) {}
 
     /**
@@ -94,7 +92,7 @@ final readonly class StoreAgentUpload
         $bytes = base64_decode($base64, strict: true);
 
         throw_if($bytes === false, UploadException::invalidBase64());
-        throw_if(strlen($bytes) > self::MAX_BASE64_BYTES, UploadException::tooLarge(self::MAX_BASE64_BYTES));
+        throw_if(strlen($bytes) > UploadAllowlist::maxBytes(), UploadException::tooLarge(UploadAllowlist::maxBytes()));
 
         file_put_contents($temp, $bytes);
 

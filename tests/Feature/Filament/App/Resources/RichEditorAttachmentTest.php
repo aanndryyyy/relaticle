@@ -26,6 +26,7 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
 mutates(RichContentAttachments::class, RichContentEntry::class, RichEditorFieldType::class);
 
 beforeEach(function (): void {
+    Storage::fake('local');
     Storage::fake('public');
     Storage::fake(FileUploadConfiguration::disk());
     $this->user = User::factory()->withWorkspace()->create();
@@ -83,8 +84,8 @@ it('saves a pasted image as pending media keyed by uuid', function (): void {
     $media = Media::query()->where('uuid', $id)->firstOrFail();
 
     expect($media->collection_name)->toBe(MediaCollection::PendingUploads->value)
-        ->and($media->getCustomProperty('original_name'))->toBe('shot.png')
-        ->and($media->getCustomProperty('workspace_id'))->toBe($this->workspace->getKey())
+        ->and($media->name)->toBe('shot.png')
+        ->and($media->workspace_id)->toBe($this->workspace->getKey())
         ->and($editor->getFileAttachmentUrl($id))->toBe($media->getUrl())
         ->and($editor->getFileAttachmentsMaxSize())->toBe(10240);
 });
@@ -101,7 +102,7 @@ it('refuses a pasted file whose bytes are not an allowed image', function (): vo
 it('resolves no url for an image another workspace owns or for an unknown id', function (): void {
     $stranger = User::factory()->withPersonalWorkspace()->create()->personalWorkspace();
     $foreign = $stranger->addMediaFromString(onePixelPng())->usingFileName('a.png')
-        ->withCustomProperties(['workspace_id' => $stranger->getKey()])
+        ->withAttributes(['workspace_id' => $stranger->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
 
     $editor = noteBodyEditor();
@@ -127,7 +128,8 @@ it('claims the image when the note is created', function (): void {
 
     expect($media->model_id)->toBe($note->getKey())
         ->and($media->model_type)->toBe($note->getMorphClass())
-        ->and($media->collection_name)->toBe(MediaCollection::forCustomField('body'));
+        ->and($media->collection_name)->toBe(MediaCollection::Attachments->value)
+        ->and($media->custom_field_id)->toBe($this->body->getKey());
 });
 
 it('releases an image the edited body no longer references', function (): void {
@@ -145,15 +147,17 @@ it('releases an image the edited body no longer references', function (): void {
 });
 
 it('renders a claimed image on the record page through the provider', function (): void {
+    $this->freezeTime();
     $brief = companyBriefField($this->workspace->getKey());
     $company = Company::factory()->recycle([$this->user, $this->workspace])->create();
     $media = $this->workspace->addMediaFromString(onePixelPng())->usingFileName('a.png')
-        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
+        ->withAttributes(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
     $company->saveCustomFieldValue($brief, "<p><img data-id=\"{$media->uuid}\" src=\"stale\" alt=\"brief\"></p>");
 
     livewire(ViewCompany::class, ['record' => $company->getKey()])
-        ->assertSee($media->refresh()->getUrl())
+        ->assertSee('/media/'.$media->uuid)
+        ->assertSee(signedUrlSignature($media->refresh()->getUrl()))
         ->assertDontSee('stale');
 });
 

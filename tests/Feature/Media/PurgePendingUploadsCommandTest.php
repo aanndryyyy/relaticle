@@ -15,7 +15,6 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
 mutates(PurgeExpiredUploads::class, PurgePendingUploadsCommand::class);
 
 beforeEach(function (): void {
-    Storage::fake('public');
     Storage::fake('local');
     $this->workspace = User::factory()->withPersonalWorkspace()->create()->personalWorkspace();
 });
@@ -23,7 +22,7 @@ beforeEach(function (): void {
 it('removes pending media and temp files older than a day, keeps the rest', function (): void {
     $this->travelTo(now()->subHours(25));
     $old = $this->workspace->addMediaFromString(pdfBytes())->usingFileName('old.pdf')
-        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
+        ->withAttributes(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
     $oldTemp = TemporaryUploads::newName('old.pdf', (string) $this->workspace->getKey());
     TemporaryUploads::disk()->put(TemporaryUploads::path($oldTemp), pdfBytes());
@@ -31,7 +30,7 @@ it('removes pending media and temp files older than a day, keeps the rest', func
 
     $this->travelBack();
     $fresh = $this->workspace->addMediaFromString(pdfBytes())->usingFileName('fresh.pdf')
-        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
+        ->withAttributes(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
     $freshTemp = TemporaryUploads::newName('fresh.pdf', (string) $this->workspace->getKey());
     TemporaryUploads::disk()->put(TemporaryUploads::path($freshTemp), pdfBytes());
@@ -61,7 +60,7 @@ it('is scheduled hourly without overlap on a single server', function (): void {
 
 it('rejects a non-positive retention window without deleting uploads', function (string $hours): void {
     $pending = $this->workspace->addMediaFromString(pdfBytes())->usingFileName('pending.pdf')
-        ->withCustomProperties(['workspace_id' => $this->workspace->getKey()])
+        ->withAttributes(['workspace_id' => $this->workspace->getKey()])
         ->toMediaCollection(MediaCollection::PendingUploads->value);
 
     $this->artisan('app:purge-pending-uploads', ['--hours' => $hours])

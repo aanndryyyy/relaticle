@@ -38,7 +38,6 @@ use Relaticle\Chat\Tools\Task\UpdateTaskTool;
 mutates(StorePendingUpload::class, UploadClaims::class);
 
 beforeEach(function (): void {
-    enableFileUploadFieldType();
     Feature::define(OnboardSeed::class, false);
     $this->user = User::factory()->withPersonalWorkspace()->create();
     $this->workspace = $this->user->currentWorkspace;
@@ -113,7 +112,7 @@ it('updates the note body via custom_fields and persists as text_value', functio
 });
 
 it('sets and clears a note file upload through chat approval', function (): void {
-    Storage::fake('public');
+    Storage::fake('local');
     $field = CustomField::factory()->create([
         'tenant_id' => $this->workspace->getKey(),
         'entity_type' => 'note',
@@ -129,11 +128,11 @@ it('sets and clears a note file upload through chat approval', function (): void
     $media = resolve(StorePendingUpload::class)->execute($this->user, $this->workspace, $source, 'contract.pdf', UploadSource::Panel);
     $note = Note::factory()->for($this->workspace)->create(['title' => 'N']);
 
-    runUpdateToolForCustomFieldsTest(UpdateNoteTool::class, $note, ['contract' => $media->getPathRelativeToRoot()]);
+    runUpdateToolForCustomFieldsTest(UpdateNoteTool::class, $note, ['contract' => $media->uuid]);
     resolve(UpdateNote::class)->execute($this->user, $note, latestPendingForCustomFieldsTest()->action_data);
 
-    expect($media->refresh()->collection_name)->toBe(MediaCollection::forCustomField('contract'))
-        ->and(rawValueForCustomFieldsTest($note, 'contract', 'string_value'))->toBe($media->getPathRelativeToRoot());
+    expect($media->refresh()->collection_name)->toBe(MediaCollection::Attachments->value)
+        ->and(rawValueForCustomFieldsTest($note, 'contract', 'string_value'))->toBe($media->uuid);
 
     runUpdateToolForCustomFieldsTest(UpdateNoteTool::class, $note, ['contract' => null]);
     resolve(UpdateNote::class)->execute($this->user, $note, latestPendingForCustomFieldsTest()->action_data);

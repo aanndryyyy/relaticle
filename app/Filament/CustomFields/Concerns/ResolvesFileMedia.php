@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Filament\CustomFields\Concerns;
 
-use App\Support\Media\MediaPaths;
+use App\Support\Media\MediaLookup;
 use Illuminate\Database\Eloquent\Model;
 use Relaticle\CustomFields\Models\Contracts\HasCustomFields;
 use Relaticle\CustomFields\Models\CustomField;
@@ -20,11 +20,11 @@ trait ResolvesFileMedia
             return null;
         }
 
-        return resolve(MediaPaths::class)->find((string) $record->getAttribute('workspace_id'), $value);
+        return resolve(MediaLookup::class)->find((string) $record->getAttribute('workspace_id'), $value);
     }
 
     private function label(?Media $media): ?string
     {
-        return $media?->getCustomProperty('original_name', $media->file_name);
+        return $media?->name;
     }
 }

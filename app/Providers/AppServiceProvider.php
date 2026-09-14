@@ -44,7 +44,7 @@ use App\Support\BrandColors;
 use App\Support\CustomFields\CustomFieldInput;
 use App\Support\CustomFields\RecordNameResolver;
 use App\Support\Markdown\TableAwareLeagueDriver;
-use App\Support\Media\MediaPaths;
+use App\Support\Media\MediaLookup;
 use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
 use Filament\Auth\Notifications\NoticeOfEmailChangeRequest;
@@ -137,7 +137,7 @@ final class AppServiceProvider extends ServiceProvider
         $this->app->scoped(WorkspaceActivationFacts::class);
 
         $this->app->scoped(RecordNameResolver::class);
-        $this->app->scoped(MediaPaths::class);
+        $this->app->scoped(MediaLookup::class);
 
         // spatie/laravel-onboard binds OnboardingSteps as a SINGLETON, which
         // makes every workspace share one OnboardingStep instance. Its complete()

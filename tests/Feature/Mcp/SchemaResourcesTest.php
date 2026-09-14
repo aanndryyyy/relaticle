@@ -32,7 +32,6 @@ mutates(
 );
 
 beforeEach(function (): void {
-    enableFileUploadFieldType();
     $this->user = User::factory()->withPersonalWorkspace()->create();
 });
 
@@ -409,7 +408,7 @@ function customFieldHintRows(): array
         ['date', 'ISO 8601 date"'],
         ['date-time', 'ISO 8601 datetime string'],
         ['record', 'array of record IDs of the lookup entity'],
-        ['file-upload', 'read back as {path, url}'],
+        ['file-upload', 'read back as {id, name, url}'],
     ];
 }
 

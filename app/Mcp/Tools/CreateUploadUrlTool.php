@@ -7,7 +7,6 @@ namespace App\Mcp\Tools;
 use App\Exceptions\UploadException;
 use App\Mcp\Tools\Concerns\ChecksTokenAbility;
 use App\Mcp\Tools\Concerns\HasExplicitToolAnnotations;
-use App\Mcp\Tools\Concerns\LimitsUploads;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Support\Media\TemporaryUploads;
@@ -24,12 +23,11 @@ use Laravel\Mcp\Server\Tool;
 
 #[Name('create-upload-url')]
 #[Title('Create Upload URL')]
-#[Description('Get a short-lived signed URL to PUT a file body to (max 10 MB, pdf/doc/docx/jpeg/png/gif/webp). Then call upload-file with the returned upload_id to finish. Use upload-file directly with source_url or base64 when you can.')]
+#[Description('Get a short-lived signed URL to PUT a file body to (max 10 MB, pdf/doc/docx/xlsx/pptx/jpeg/png/gif/webp). Then call upload-file with the returned upload_id to finish. Use upload-file directly with source_url or base64 when you can.')]
 final class CreateUploadUrlTool extends Tool
 {
     use ChecksTokenAbility;
     use HasExplicitToolAnnotations;
-    use LimitsUploads;
 
     private const int EXPIRY_MINUTES = 5;
 
@@ -68,10 +66,6 @@ final class CreateUploadUrlTool extends Tool
 
         /** @var Workspace $workspace */
         $workspace = $user->currentWorkspace;
-
-        if (($limited = $this->denyIfUploadLimitReached($workspace)) instanceof Response) {
-            return $limited;
-        }
 
         try {
             $uploadId = TemporaryUploads::newName((string) $validated['filename'], (string) $workspace->getKey());

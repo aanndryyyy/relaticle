@@ -21,7 +21,6 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
 mutates(StoreAgentUpload::class, ReceiveUploadController::class, TemporaryUploads::class, CreateUploadUrlTool::class, UploadFileTool::class);
 
 beforeEach(function (): void {
-    Storage::fake('public');
     Storage::fake('local');
     $this->user = User::factory()->withPersonalWorkspace()->create();
     $this->workspace = $this->user->personalWorkspace();
@@ -37,7 +36,7 @@ describe('StoreAgentUpload', function (): void {
         expect($media->collection_name)->toBe(MediaCollection::PendingUploads->value)
             ->and($media->mime_type)->toBe('application/pdf')
             ->and($media->getCustomProperty('source'))->toBe('url')
-            ->and($media->getCustomProperty('original_name'))->toBe('brief.pdf');
+            ->and($media->name)->toBe('brief.pdf');
     });
 
     it('reports an unreachable url', function (): void {
@@ -69,14 +68,14 @@ describe('StoreAgentUpload', function (): void {
 
         expect($media->mime_type)->toBe('image/png')
             ->and($media->getCustomProperty('source'))->toBe('base64')
-            ->and($media->getCustomProperty('original_name'))->toBe('pixel.png');
+            ->and($media->name)->toBe('pixel.png');
     });
 
-    it('rejects base64 over 5 MB decoded', function (): void {
+    it('rejects base64 over 10 MB decoded', function (): void {
         expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->workspace, [
-            'base64' => base64_encode(str_repeat('a', 5 * 1024 * 1024 + 1)),
+            'base64' => base64_encode(str_repeat('a', 10 * 1024 * 1024 + 1)),
             'filename' => 'big.pdf',
-        ]))->toThrow(UploadException::class, __('uploads.errors.too_large', ['max' => 5]));
+        ]))->toThrow(UploadException::class, __('uploads.errors.too_large', ['max' => 10]));
     });
 
     it('rejects malformed base64', function (): void {
@@ -118,7 +117,7 @@ describe('StoreAgentUpload', function (): void {
 
     it('rejects a temp name whose extension is outside the allowlist', function (): void {
         expect(fn (): string => TemporaryUploads::newName('page.html', (string) $this->workspace->getKey()))
-            ->toThrow(UploadException::class, __('uploads.errors.mime_not_allowed', ['mime' => 'html']));
+            ->toThrow(UploadException::class, 'Files of type html are not accepted. Allowed: pdf, doc, docx, xlsx, pptx, jpg, png, gif, webp, jpeg.');
     });
 });
 
@@ -138,7 +137,7 @@ describe('create-upload-url', function (): void {
     it('rejects a filename outside the allowlist', function (): void {
         RelaticleServer::actingAs($this->user)
             ->tool(CreateUploadUrlTool::class, ['filename' => 'page.html'])
-            ->assertHasErrors([__('uploads.errors.mime_not_allowed', ['mime' => 'html'])]);
+            ->assertHasErrors(['Files of type html are not accepted. Allowed: pdf, doc, docx, xlsx, pptx, jpg, png, gif, webp, jpeg.']);
     });
 
     it('requires the create ability', function (): void {
@@ -197,22 +196,30 @@ describe('signed put receiver', function (): void {
 });
 
 describe('upload-file', function (): void {
-    it('stores a base64 file and returns the path to put in a file-upload field', function (): void {
+    it('stores a base64 file and returns the file_id to put in a file-upload field', function (): void {
         RelaticleServer::actingAs($this->user)
             ->tool(UploadFileTool::class, ['base64' => base64_encode(pdfBytes()), 'filename' => 'brief.pdf'])
             ->assertOk()
-            ->assertSee('"path"')
-            ->assertSee('"mime_type"')
-            ->assertSee('[brief.pdf](');
+            ->assertStructuredContent(fn (AssertableJson $json): AssertableJson => $json
+                ->where('file_id', fn (string $id): bool => Media::query()->where('uuid', $id)->exists())
+                ->where('name', 'brief.pdf')
+                ->where('mime_type', 'application/pdf')
+                ->where('url', fn (string $url): bool => str_contains($url, 'signature='))
+                ->where('suggested_markdown', fn (string $markdown): bool => str_starts_with($markdown, '[brief.pdf](') && ! str_contains($markdown, 'signature='))
+                ->etc());
 
         expect(Media::query()->where('collection_name', MediaCollection::PendingUploads->value)->count())->toBe(1);
     });
 
-    it('suggests image markdown for images', function (): void {
-        RelaticleServer::actingAs($this->user)
+    it('suggests image markdown with a stable media link for images', function (): void {
+        $response = RelaticleServer::actingAs($this->user)
             ->tool(UploadFileTool::class, ['base64' => base64_encode(onePixelPng()), 'filename' => 'pixel.png'])
-            ->assertOk()
-            ->assertSee('![pixel.png](');
+            ->assertOk();
+        $media = Media::query()->latest('id')->firstOrFail();
+
+        $response->assertStructuredContent(fn (AssertableJson $json): AssertableJson => $json
+            ->where('suggested_markdown', '![pixel.png]('.route('media.show', ['media' => $media->uuid]).')')
+            ->etc());
     });
 
     it('accepts a completed signed put by upload id', function (): void {
@@ -227,7 +234,7 @@ describe('upload-file', function (): void {
 
         $media = Media::query()->latest('id')->firstOrFail();
         expect($media->mime_type)->toBe('application/pdf')
-            ->and($media->getCustomProperty('original_name'))->toBe('deck.pdf');
+            ->and($media->name)->toBe('deck.pdf');
     });
 
     it('prevents another workspace from finalizing a signed put', function (): void {
@@ -259,7 +266,7 @@ describe('upload-file', function (): void {
     it('returns the translated error for a refused type', function (): void {
         RelaticleServer::actingAs($this->user)
             ->tool(UploadFileTool::class, ['base64' => base64_encode('<svg xmlns="http://www.w3.org/2000/svg"/>'), 'filename' => 'a.svg'])
-            ->assertHasErrors([__('uploads.errors.mime_not_allowed', ['mime' => 'image/svg+xml'])]);
+            ->assertHasErrors(['Files of type image/svg+xml are not accepted. Allowed: pdf, doc, docx, xlsx, pptx, jpg, png, gif, webp, jpeg.']);
     });
 
     it('escapes markdown-breaking characters in the suggested label', function (): void {
@@ -274,18 +281,27 @@ describe('upload-file', function (): void {
                 ->etc());
     });
 
-    it('limits a workspace to 60 uploads per hour across both tools', function (): void {
-        RateLimiter::clear("mcp-uploads:{$this->workspace->getKey()}");
+    it('limits a workspace to 60 uploads per hour', function (): void {
+        $key = "mcp-uploads:{$this->workspace->getKey()}";
+        RateLimiter::clear($key);
 
-        foreach (range(1, 60) as $i) {
-            RelaticleServer::actingAs($this->user)
-                ->tool(CreateUploadUrlTool::class, ['filename' => "f{$i}.pdf"])
-                ->assertOk();
+        foreach (range(1, 59) as $i) {
+            RateLimiter::hit($key, 3600);
         }
+
+        RelaticleServer::actingAs($this->user)
+            ->tool(UploadFileTool::class, ['base64' => base64_encode(pdfBytes()), 'filename' => 'last.pdf'])
+            ->assertOk();
 
         RelaticleServer::actingAs($this->user)
             ->tool(UploadFileTool::class, ['base64' => base64_encode(pdfBytes()), 'filename' => 'late.pdf'])
             ->assertHasErrors([__('uploads.errors.rate_limited')]);
+
+        RelaticleServer::actingAs($this->user)
+            ->tool(CreateUploadUrlTool::class, ['filename' => 'still-fine.pdf'])
+            ->assertOk();
+
+        expect(Media::query()->count())->toBe(1);
     });
 
     it('requires the create ability', function (): void {

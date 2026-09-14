@@ -237,10 +237,10 @@ The server provides 39 tools. They cover account context, cross-entity discovery
 
 | Tool | Description |
 |------|-------------|
-| `upload-file` | Store a file in the workspace from a public https URL, a base64 body with `filename`, or an `upload_id`. Returns `suggested_markdown` to embed an image in a rich-editor field such as a note body, and `path` for a `file-upload` custom field where the workspace has one. Allowed types: pdf, doc, docx, jpeg, png, gif, webp, up to 10 MB. |
+| `upload-file` | Store a file in the workspace from a public https URL, a base64 body with `filename`, or an `upload_id`. Returns `file_id` for a `file-upload` custom field and `suggested_markdown` to embed the file in a rich-editor field such as a note body. Allowed types: pdf, doc, docx, xlsx, pptx, jpeg, png, gif, webp, up to 10 MB. 60 calls per hour per workspace. |
 | `create-upload-url` | Get a five-minute signed URL to `PUT` a file body to, then pass the returned `upload_id` to `upload-file`. |
 
-Uploads stay pending for 24 hours. Saving a record whose rich-editor body embeds the image, or whose `file-upload` field references the path, claims the file; unclaimed files are purged.
+Uploads stay pending for 24 hours. Saving a record whose rich-editor body embeds the file, or whose `file-upload` field carries the `file_id`, claims it; unclaimed files are purged. File fields read back as `{id, name, url}`.
 
 Entity list tools support `search`, `per_page` (default 15, maximum 25), and `page`. They also support date filters, custom-field filters, sorting, and selected relationship includes.
 
