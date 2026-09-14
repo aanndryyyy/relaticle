@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Relaticle\SystemAdmin\Filament\Resources\SystemAdministrators\Tables;
 
 use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\IconColumn;
@@ -13,7 +12,10 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
+use Relaticle\SystemAdmin\Actions\DeleteSystemAdministrator;
 use Relaticle\SystemAdmin\Enums\SystemAdministratorRole;
+use Relaticle\SystemAdmin\Filament\Support\SafeDelete;
+use Relaticle\SystemAdmin\Models\SystemAdministrator;
 
 final class SystemAdministratorsTable
 {
@@ -59,11 +61,13 @@ final class SystemAdministratorsTable
             ])
             ->recordActions([
                 ViewAction::make(),
-                EditAction::make(),
+                EditAction::make()->action(null),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    SafeDelete::bulkAction(function (SystemAdministrator $record): void {
+                        resolve(DeleteSystemAdministrator::class)->execute(auth('sysadmin')->user(), $record);
+                    })->authorizeIndividualRecords('delete'),
                 ]),
             ]);
     }

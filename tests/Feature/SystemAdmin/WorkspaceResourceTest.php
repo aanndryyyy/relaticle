@@ -9,9 +9,13 @@ use App\Models\ActivityLog\Scopes\WorkspaceScope;
 use App\Models\Company;
 use App\Models\User;
 use App\Models\Workspace;
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Laravel\Cashier\Subscription;
+use Relaticle\SystemAdmin\Actions\UpdateCustomerRecord;
+use Relaticle\SystemAdmin\Filament\Pages\EditCustomerRecord;
 use Relaticle\SystemAdmin\Filament\Resources\WorkspaceResource;
+use Relaticle\SystemAdmin\Filament\Resources\WorkspaceResource\Pages\CreateWorkspace;
 use Relaticle\SystemAdmin\Filament\Resources\WorkspaceResource\Pages\EditWorkspace;
 use Relaticle\SystemAdmin\Filament\Resources\WorkspaceResource\Pages\ListWorkspaces;
 use Relaticle\SystemAdmin\Filament\Resources\WorkspaceResource\Pages\ViewWorkspace;
@@ -21,11 +25,94 @@ use Relaticle\SystemAdmin\Filament\Resources\WorkspaceResource\RelationManagers\
 use Relaticle\SystemAdmin\Filament\Support\PivotSafeTableQuery;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
 
-mutates(BillingStatus::class, WorkspaceResource::class, MembersRelationManager::class, CompaniesRelationManager::class, ActivityRelationManager::class, PivotSafeTableQuery::class);
+mutates(UpdateCustomerRecord::class, EditCustomerRecord::class, BillingStatus::class, WorkspaceResource::class, MembersRelationManager::class, CompaniesRelationManager::class, ActivityRelationManager::class, PivotSafeTableQuery::class);
 
 beforeEach(function (): void {
     $this->actingAs(SystemAdministrator::factory()->create(), 'sysadmin');
     Filament::setCurrentPanel(Filament::getPanel('sysadmin'));
+});
+
+it('rejects administrator reassignment of workspace ownership', function (): void {
+    $this->actingAs(SystemAdministrator::factory()->administrator()->create(), 'sysadmin');
+    $workspace = Workspace::factory()->create();
+    $ownerId = $workspace->user_id;
+    $other = User::factory()->create();
+
+    livewire(EditWorkspace::class, ['record' => $workspace->getKey()])
+        ->set('data.user_id', $other->getKey())
+        ->call('save')
+        ->assertForbidden();
+
+    expect($workspace->refresh()->user_id)->toBe($ownerId);
+});
+
+it('does not reassign workspace ownership through navigation actions', function (string $pageClass): void {
+    $this->actingAs(SystemAdministrator::factory()->administrator()->create(), 'sysadmin');
+    $workspace = Workspace::factory()->create();
+    $ownerId = $workspace->user_id;
+    $other = User::factory()->create();
+    $action = TestAction::make('edit');
+
+    if ($pageClass === ListWorkspaces::class) {
+        $action->table($workspace);
+    }
+
+    livewire($pageClass, ['record' => $workspace->getKey()])
+        ->callAction($action, data: ['user_id' => $other->getKey()])
+        ->assertHasNoActionErrors();
+
+    expect($workspace->refresh()->user_id)->toBe($ownerId);
+})->with([ListWorkspaces::class, ViewWorkspace::class]);
+
+it('rejects administrator changes to personal workspace status', function (): void {
+    $this->actingAs(SystemAdministrator::factory()->administrator()->create(), 'sysadmin');
+    $workspace = Workspace::factory()->create(['personal_workspace' => true]);
+
+    livewire(EditWorkspace::class, ['record' => $workspace->getKey()])
+        ->set('data.personal_workspace', false)
+        ->call('save')
+        ->assertForbidden();
+
+    expect($workspace->refresh()->personal_workspace)->toBeTrue();
+});
+
+it('lets administrators edit ordinary workspace details', function (): void {
+    $this->actingAs(SystemAdministrator::factory()->administrator()->create(), 'sysadmin');
+    $workspace = Workspace::factory()->create();
+    $ownerId = $workspace->user_id;
+
+    livewire(EditWorkspace::class, ['record' => $workspace->getKey()])
+        ->fillForm(['name' => 'Updated Workspace'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($workspace->refresh()->name)->toBe('Updated Workspace')
+        ->and($workspace->user_id)->toBe($ownerId);
+});
+
+it('lets super administrators change workspace ownership and personal status', function (): void {
+    $workspace = Workspace::factory()->create(['personal_workspace' => true]);
+    $other = User::factory()->create();
+
+    livewire(EditWorkspace::class, ['record' => $workspace->getKey()])
+        ->fillForm(['user_id' => $other->getKey(), 'personal_workspace' => false])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($workspace->refresh()->user_id)->toBe($other->getKey())
+        ->and($workspace->personal_workspace)->toBeFalse();
+});
+
+it('lets administrators create workspaces', function (): void {
+    $this->actingAs(SystemAdministrator::factory()->administrator()->create(), 'sysadmin');
+    $owner = User::factory()->create();
+
+    livewire(CreateWorkspace::class)
+        ->fillForm(['name' => 'New Workspace', 'slug' => 'new-workspace', 'user_id' => $owner->getKey(), 'personal_workspace' => false])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $this->assertDatabaseHas('workspaces', ['slug' => 'new-workspace', 'user_id' => $owner->getKey()]);
 });
 
 it('links workspace members to the user view page using the user key, not the pivot key', function (): void {

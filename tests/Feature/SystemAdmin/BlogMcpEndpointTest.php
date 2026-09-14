@@ -19,6 +19,32 @@ it('registers the blog mcp endpoint', function (): void {
     ))->toBeTrue();
 });
 
+it('denies blog deletion with a token issued before staff demotion', function (string $model, string $tool): void {
+    $administrator = SystemAdministrator::factory()->create();
+    $token = $administrator->createToken('review-demotion', ['*'])->plainTextToken;
+    $record = $model::factory()->create();
+    $administrator->update(['role' => SystemAdministratorRole::Administrator]);
+
+    $this->withHeader('Authorization', "Bearer {$token}")
+        ->postJson('/mcp/blog', [
+            'jsonrpc' => '2.0',
+            'id' => 1,
+            'method' => 'tools/call',
+            'params' => [
+                'name' => $tool,
+                'arguments' => ['id' => $record->getKey()],
+            ],
+        ])
+        ->assertOk()
+        ->assertJsonPath('result.isError', true)
+        ->assertJsonPath('result.content.0.text', 'This action is unauthorized.');
+
+    expect($record->refresh()->deleted_at)->toBeNull();
+})->with([
+    'posts' => [Post::class, 'delete-post-tool'],
+    'categories' => [Category::class, 'delete-category-tool'],
+]);
+
 it('rejects unauthenticated blog mcp requests', function (): void {
     $this->postJson('/mcp/blog', [
         'jsonrpc' => '2.0',

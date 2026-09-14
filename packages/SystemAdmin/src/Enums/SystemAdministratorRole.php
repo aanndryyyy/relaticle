@@ -45,4 +45,12 @@ enum SystemAdministratorRole: string implements HasColor, HasLabel
             self::Administrator => false,
         };
     }
+
+    public function canManageCustomerAccess(): bool
+    {
+        return match ($this) {
+            self::SuperAdministrator => true,
+            self::Administrator => false,
+        };
+    }
 }

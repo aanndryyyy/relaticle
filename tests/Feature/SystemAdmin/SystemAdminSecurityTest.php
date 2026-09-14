@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
+use Illuminate\Support\Facades\Gate;
 use Laravel\Cashier\Subscription;
 use Laravel\Sanctum\PersonalAccessToken;
 use Relaticle\Chat\Models\AiCreditBalance;
@@ -18,11 +19,37 @@ use Relaticle\Ink\Models\Category;
 use Relaticle\Ink\Models\Post;
 use Relaticle\Ink\Models\Tag;
 use Relaticle\SystemAdmin\Enums\SystemAdministratorRole;
+use Relaticle\SystemAdmin\Filament\Pages\Auth\EditProfile;
 use Relaticle\SystemAdmin\Filament\Pages\Settings\ManageAiSettings;
 use Relaticle\SystemAdmin\Filament\Resources\UserResource\Pages\EditUser;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
 
 mutates(SystemAdministrator::class, SystemAdministratorRole::class);
+
+it('rejects an injected staff role on the administrator profile', function (): void {
+    $administrator = SystemAdministrator::factory()->administrator()->create();
+    $this->actingAs($administrator, 'sysadmin');
+    Filament::setCurrentPanel(Filament::getPanel('sysadmin'));
+
+    livewire(EditProfile::class)
+        ->set('data.role', SystemAdministratorRole::SuperAdministrator->value)
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($administrator->refresh()->role)->toBe(SystemAdministratorRole::Administrator);
+});
+
+it('denies guest and customer blog gates for classes and records in every panel context', function (?string $panel): void {
+    Filament::setCurrentPanel($panel);
+    $customer = User::factory()->make();
+
+    foreach ([Post::class, Category::class, new Post, new Category] as $target) {
+        foreach (['viewAny', 'view', 'create', 'update', 'restore', 'restoreAny', 'delete', 'deleteAny', 'forceDelete', 'forceDeleteAny'] as $ability) {
+            expect(Gate::forUser(null)->allows($ability, $target))->toBeFalse();
+            expect(Gate::forUser($customer)->allows($ability, $target))->toBeFalse();
+        }
+    }
+})->with(['outside a panel' => null, 'customer panel' => 'app', 'staff panel' => 'sysadmin']);
 
 describe('SystemAdmin Security', function () {
     beforeEach(function () {

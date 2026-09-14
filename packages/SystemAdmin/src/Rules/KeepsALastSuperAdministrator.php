@@ -27,7 +27,7 @@ final readonly class KeepsALastSuperAdministrator implements ValidationRule
             return;
         }
 
-        $fail('The last Super Administrator cannot be given another role.');
+        $fail(__('The last Super Administrator cannot be given another role.'));
     }
 
     private function otherSuperAdministratorsExist(): bool
