@@ -91,20 +91,27 @@ final class SystemAdminPanelProvider extends PanelProvider
             ? $schema->defaultDateTimeDisplayFormat(self::DATE_TIME_FORMAT)
             : $schema);
 
-        // PostPolicy/CategoryPolicy type-hint SystemAdministrator, and Gate never
-        // checks a policy method's parameter type before calling it, so a caller of
-        // any other type (e.g. a customer's User model, or an MCP token minted for
-        // one) would hit an uncaught TypeError instead of a clean denial now that
-        // the policies above resolve globally. Intercept before Gate reaches them.
+        // Every policy in this package answers for staff only, but Gate never checks a
+        // policy method's parameter type, so a caller of any other type (a customer's
+        // User, or an MCP token minted for one) is answered by whatever the method
+        // returns. Deny those before Gate reaches the policy: while this panel is
+        // current for any of them, and always for the blog models, which resolve
+        // globally and so are reachable with no panel at all.
         Gate::before(function (Authenticatable $user, string $ability, array $arguments = []): ?bool {
-            $target = $arguments[0] ?? null;
-            $modelClass = is_string($target) ? $target : ($target instanceof Model ? $target::class : null);
+            if ($user instanceof SystemAdministrator) {
+                return null;
+            }
 
-            if ($modelClass !== null && array_key_exists($modelClass, self::BLOG_MODEL_POLICIES) && ! $user instanceof SystemAdministrator) {
+            if ($this->isCurrentPanel()) {
                 return false;
             }
 
-            return null;
+            $target = $arguments[0] ?? null;
+            $modelClass = is_string($target) ? $target : ($target instanceof Model ? $target::class : null);
+
+            return $modelClass !== null && array_key_exists($modelClass, self::BLOG_MODEL_POLICIES)
+                ? false
+                : null;
         });
     }
 

@@ -82,6 +82,22 @@ describe('SystemAdmin Security', function () {
         'users' => '/sysadmin/users',
     ]);
 
+    it('denies a customer every ability the sysadmin policies answer', function (string $model) {
+        $user = User::factory()->create();
+
+        expect($user->can('viewAny', $model))->toBeFalse()
+            ->and($user->can('view', $model))->toBeFalse()
+            ->and($user->can('create', $model))->toBeFalse()
+            ->and($user->can('update', $model))->toBeFalse()
+            ->and($user->can('delete', $model))->toBeFalse();
+    })->with([
+        'companies' => Company::class,
+        'workspaces' => Workspace::class,
+        'users' => User::class,
+        'posts' => Post::class,
+        'tags' => Tag::class,
+    ]);
+
     it('blocks unverified sysadmin from accessing panel routes', function () {
         $unverifiedAdmin = SystemAdministrator::factory()->unverified()->create();
 
