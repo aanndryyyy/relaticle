@@ -198,10 +198,10 @@ it('renders the model-gate message in the user\'s locale and restores English af
     ], JSON_THROW_ON_ERROR));
     resolve(Translator::class)->addJsonPath($directory);
 
-    $user = User::factory()->withPersonalTeam()->create(['locale' => 'da']);
-    $team = $user->currentTeam;
+    $user = User::factory()->withPersonalWorkspace()->create(['locale' => 'da']);
+    $workspace = $user->currentWorkspace;
 
-    AiCreditBalance::query()->updateOrCreate(['team_id' => $team->getKey()], [
+    AiCreditBalance::query()->updateOrCreate(['workspace_id' => $workspace->getKey()], [
         'credits_remaining' => 100,
         'credits_used' => 0,
         'period_starts_at' => now()->startOfMonth(),
@@ -213,7 +213,7 @@ it('renders the model-gate message in the user\'s locale and restores English af
         'id' => $conversationId,
         'participant_type' => 'user',
         'participant_id' => (string) $user->getKey(),
-        'team_id' => $team->getKey(),
+        'workspace_id' => $workspace->getKey(),
         'title' => 'test',
         'created_at' => now(),
         'updated_at' => now(),

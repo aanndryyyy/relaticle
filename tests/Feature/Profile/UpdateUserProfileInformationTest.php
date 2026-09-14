@@ -758,7 +758,7 @@ describe('the raw profile-information route', function () {
 
 describe('locale', function () {
     test('form is prefilled with the stored locale', function () {
-        $user = User::factory()->withTeam()->create(['locale' => 'da']);
+        $user = User::factory()->withWorkspace()->create(['locale' => 'da']);
         $this->actingAs($user);
 
         Livewire::test(UpdateProfileInformationComponent::class)
@@ -766,7 +766,7 @@ describe('locale', function () {
     });
 
     test('a user with no stored locale is shown and saves English', function () {
-        $user = User::factory()->withTeam()->create([
+        $user = User::factory()->withWorkspace()->create([
             'email' => 'locale-default@example.com',
             'locale' => null,
         ]);
@@ -785,7 +785,7 @@ describe('locale', function () {
     });
 
     test('offers every supported locale named in its own language', function () {
-        $user = User::factory()->withTeam()->create();
+        $user = User::factory()->withWorkspace()->create();
         $this->actingAs($user);
 
         Livewire::test(UpdateProfileInformationComponent::class)
@@ -799,7 +799,7 @@ describe('locale', function () {
     });
 
     test('can set a locale through the component', function () {
-        $user = User::factory()->withTeam()->create([
+        $user = User::factory()->withWorkspace()->create([
             'email' => 'locale@example.com',
             'locale' => null,
         ]);
@@ -818,7 +818,7 @@ describe('locale', function () {
     });
 
     test('rejects a locale outside the supported list', function () {
-        $user = User::factory()->withTeam()->create(['email' => 'locale-bad@example.com']);
+        $user = User::factory()->withWorkspace()->create(['email' => 'locale-bad@example.com']);
         $this->actingAs($user);
 
         expect(fn () => $this->action->update($user, [
@@ -831,7 +831,7 @@ describe('locale', function () {
     });
 
     test('rejects an explicitly empty locale', function (?string $submitted) {
-        $user = User::factory()->withTeam()->create([
+        $user = User::factory()->withWorkspace()->create([
             'email' => 'locale-empty@example.com',
             'locale' => 'da',
         ]);
@@ -847,7 +847,7 @@ describe('locale', function () {
     })->with([null, '']);
 
     test('an absent locale key leaves the stored value alone', function () {
-        $user = User::factory()->withTeam()->create([
+        $user = User::factory()->withWorkspace()->create([
             'email' => 'locale-keep@example.com',
             'locale' => 'fr',
         ]);
@@ -865,7 +865,7 @@ describe('locale', function () {
     test('locale survives a deferred email change', function () {
         Notification::fake();
 
-        $user = User::factory()->withTeam()->create([
+        $user = User::factory()->withWorkspace()->create([
             'email' => 'locale-email@example.com',
             'email_verified_at' => now(),
             'locale' => null,

@@ -24,7 +24,7 @@ function loginWithAcceptLanguage(User $user, ?string $header): void
 }
 
 test('first login stores the primary subtag of the preferred browser language', function (): void {
-    $user = User::factory()->withTeam()->create(['locale' => null]);
+    $user = User::factory()->withWorkspace()->create(['locale' => null]);
 
     loginWithAcceptLanguage($user, 'da-DK,da;q=0.9,en;q=0.8');
 
@@ -32,7 +32,7 @@ test('first login stores the primary subtag of the preferred browser language', 
 });
 
 test('a region-tagged first language is reduced to its language', function (string $header, string $expected): void {
-    $user = User::factory()->withTeam()->create(['locale' => null]);
+    $user = User::factory()->withWorkspace()->create(['locale' => null]);
 
     loginWithAcceptLanguage($user, $header);
 
@@ -44,7 +44,7 @@ test('a region-tagged first language is reduced to its language', function (stri
 ]);
 
 test('a stored locale is never overwritten by a later login', function (): void {
-    $user = User::factory()->withTeam()->create(['locale' => 'fr']);
+    $user = User::factory()->withWorkspace()->create(['locale' => 'fr']);
 
     loginWithAcceptLanguage($user, 'da-DK');
 
@@ -52,7 +52,7 @@ test('a stored locale is never overwritten by a later login', function (): void 
 });
 
 test('a wildcard, malformed, missing or unsupported header leaves the column null', function (?string $header): void {
-    $user = User::factory()->withTeam()->create(['locale' => null]);
+    $user = User::factory()->withWorkspace()->create(['locale' => null]);
 
     loginWithAcceptLanguage($user, $header);
 
@@ -67,7 +67,7 @@ test('a wildcard, malformed, missing or unsupported header leaves the column nul
 ]);
 
 test('logging in through the login endpoint seeds the locale from the request', function (): void {
-    $user = User::factory()->withTeam()->create(['locale' => null]);
+    $user = User::factory()->withWorkspace()->create(['locale' => null]);
 
     $this->withHeader('Accept-Language', 'da-DK')
         ->post(route('login.store'), ['email' => $user->email, 'password' => 'password']);

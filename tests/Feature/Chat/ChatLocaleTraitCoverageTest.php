@@ -16,17 +16,17 @@ use Relaticle\Chat\Livewire\Chat\ChatInterface;
 mutates(ChatInterface::class, ChatSidePanel::class, ChatAllChatsPanel::class, ChatSidebarNav::class);
 
 beforeEach(function (): void {
-    $this->user = User::factory()->withPersonalTeam()->create(['locale' => 'da']);
-    $this->team = $this->user->currentTeam;
+    $this->user = User::factory()->withPersonalWorkspace()->create(['locale' => 'da']);
+    $this->workspace = $this->user->currentWorkspace;
     $this->actingAs($this->user);
-    Filament::setTenant($this->team);
+    Filament::setTenant($this->workspace);
 
     $this->conversationId = (string) Str::uuid7();
     DB::table('agent_conversations')->insert([
         'id' => $this->conversationId,
         'participant_type' => 'user',
         'participant_id' => (string) $this->user->getKey(),
-        'team_id' => $this->team->getKey(),
+        'workspace_id' => $this->workspace->getKey(),
         'title' => 'T',
         'created_at' => now(),
         'updated_at' => now(),

@@ -212,10 +212,10 @@ it('persists the failure note in the user\'s locale and restores the worker loca
     ], JSON_THROW_ON_ERROR));
     resolve(Translator::class)->addJsonPath($directory);
 
-    $user = User::factory()->withPersonalTeam()->create(['locale' => 'da']);
-    $team = $user->currentTeam;
+    $user = User::factory()->withPersonalWorkspace()->create(['locale' => 'da']);
+    $workspace = $user->currentWorkspace;
 
-    AiCreditBalance::query()->where('team_id', $team->getKey())
+    AiCreditBalance::query()->where('workspace_id', $workspace->getKey())
         ->update(['credits_remaining' => 100, 'credits_used' => 0]);
 
     $conversationId = (string) Str::uuid7();
@@ -223,7 +223,7 @@ it('persists the failure note in the user\'s locale and restores the worker loca
         'id' => $conversationId,
         'participant_type' => 'user',
         'participant_id' => (string) $user->getKey(),
-        'team_id' => $team->getKey(),
+        'workspace_id' => $workspace->getKey(),
         'title' => 'BR locale failure',
         'created_at' => now(),
         'updated_at' => now(),

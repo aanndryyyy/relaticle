@@ -20,12 +20,12 @@ use Relaticle\Chat\Support\ChatLocale;
 mutates(CrmAssistant::class, ProcessChatMessage::class, ChatLocale::class, ChatInterface::class);
 
 beforeEach(function (): void {
-    $this->user = User::factory()->withPersonalTeam()->create(['locale' => 'da']);
-    $this->team = $this->user->currentTeam;
+    $this->user = User::factory()->withPersonalWorkspace()->create(['locale' => 'da']);
+    $this->workspace = $this->user->currentWorkspace;
     $this->actingAs($this->user);
 
-    AiCreditBalance::query()->updateOrCreate(['team_id' => $this->team->getKey()], [
-        'team_id' => $this->team->getKey(),
+    AiCreditBalance::query()->updateOrCreate(['workspace_id' => $this->workspace->getKey()], [
+        'workspace_id' => $this->workspace->getKey(),
         'credits_remaining' => 100,
         'credits_used' => 0,
         'period_starts_at' => now()->startOfMonth(),
@@ -37,7 +37,7 @@ beforeEach(function (): void {
         'id' => $this->conversationId,
         'participant_type' => 'user',
         'participant_id' => (string) $this->user->getKey(),
-        'team_id' => $this->team->getKey(),
+        'workspace_id' => $this->workspace->getKey(),
         'title' => 'T',
         'created_at' => now(),
         'updated_at' => now(),
@@ -48,7 +48,7 @@ function languageTurn(User $user, string $conversationId, string $message, bool 
 {
     return new ProcessChatMessage(
         user: $user,
-        team: $user->currentTeam,
+        workspace: $user->currentWorkspace,
         message: $message,
         conversationId: $conversationId,
         resolved: ['provider' => 'anthropic', 'model' => 'claude-sonnet-4-6', 'id' => 'claude-sonnet-4-6', 'source' => 'auto'],
