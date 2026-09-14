@@ -8,10 +8,13 @@ use App\Filament\CustomFields\RichEditorComponent;
 use App\Filament\CustomFields\RichEditorFieldType;
 use App\Filament\Resources\CompanyResource\Pages\ViewCompany;
 use App\Filament\Resources\NoteResource\Pages\ManageNotes;
+use App\Filament\Resources\TaskResource\Pages\TasksBoard;
 use App\Models\Company;
 use App\Models\CustomField;
 use App\Models\Note;
+use App\Models\Task;
 use App\Models\User;
+use App\Providers\Filament\AppPanelProvider;
 use App\Support\Media\RichContentAttachments;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
@@ -24,7 +27,7 @@ use Livewire\Features\SupportFileUploads\FileUploadConfiguration;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
-mutates(RichContentAttachments::class, RichContentEntry::class, RichEditorFieldType::class, RichEditorComponent::class);
+mutates(RichContentAttachments::class, RichContentEntry::class, RichEditorFieldType::class, RichEditorComponent::class, AppPanelProvider::class);
 
 beforeEach(function (): void {
     Storage::fake('local');
@@ -33,6 +36,7 @@ beforeEach(function (): void {
     $this->user = User::factory()->withWorkspace()->create();
     $this->actingAs($this->user);
     $this->workspace = $this->user->currentWorkspace;
+    Filament::setCurrentPanel(Filament::getPanel('app'));
     Filament::setTenant($this->workspace);
     $this->body = CustomField::query()
         ->where('tenant_id', $this->workspace->getKey())
@@ -145,6 +149,62 @@ it('releases an image the edited body no longer references', function (): void {
         ->assertHasNoActionErrors();
 
     expect(Media::query()->where('uuid', $id)->exists())->toBeFalse();
+});
+
+it('rolls back a new note when its document belongs to another note', function (): void {
+    $media = $this->workspace->addMediaFromString(pdfBytes())->usingFileName('brief.pdf')
+        ->withAttributes(['workspace_id' => $this->workspace->getKey()])
+        ->toMediaCollection(MediaCollection::PendingUploads->value);
+    $owner = Note::factory()->recycle([$this->user, $this->workspace])->create();
+    $body = '<p><a href="'.route('media.show', ['media' => $media->uuid]).'">Brief</a></p>';
+    $owner->saveCustomFieldValue($this->body, $body);
+
+    livewire(ManageNotes::class)
+        ->callAction('create', ['title' => 'Rejected duplicate', 'custom_fields' => ['body' => $body]])
+        ->assertHasErrors(['custom_fields.body'])
+        ->assertNotified(__('validation.custom_field.upload', ['field' => $this->body->name]));
+
+    expect(Note::query()->where('title', 'Rejected duplicate')->exists())->toBeFalse()
+        ->and($media->refresh()->model_id)->toBe($owner->getKey());
+});
+
+it('rolls back a note title change when its document belongs to another note', function (): void {
+    $media = $this->workspace->addMediaFromString(pdfBytes())->usingFileName('brief.pdf')
+        ->withAttributes(['workspace_id' => $this->workspace->getKey()])
+        ->toMediaCollection(MediaCollection::PendingUploads->value);
+    $owner = Note::factory()->recycle([$this->user, $this->workspace])->create();
+    $body = '<p><a href="'.route('media.show', ['media' => $media->uuid]).'">Brief</a></p>';
+    $owner->saveCustomFieldValue($this->body, $body);
+    $note = Note::factory()->recycle([$this->user, $this->workspace])->create(['title' => 'Original title']);
+
+    livewire(ManageNotes::class)
+        ->callAction(TestAction::make('edit')->table($note), ['title' => 'Rejected title', 'custom_fields' => ['body' => $body]])
+        ->assertHasErrors(['custom_fields.body'])
+        ->assertNotified(__('validation.custom_field.upload', ['field' => $this->body->name]));
+
+    expect($note->refresh()->title)->toBe('Original title')
+        ->and($media->refresh()->model_id)->toBe($owner->getKey());
+});
+
+it('rolls back a board edit when its document belongs to another record', function (): void {
+    $media = $this->workspace->addMediaFromString(pdfBytes())->usingFileName('brief.pdf')
+        ->withAttributes(['workspace_id' => $this->workspace->getKey()])
+        ->toMediaCollection(MediaCollection::PendingUploads->value);
+    $owner = Note::factory()->recycle([$this->user, $this->workspace])->create();
+    $body = '<p><a href="'.route('media.show', ['media' => $media->uuid]).'">Brief</a></p>';
+    $owner->saveCustomFieldValue($this->body, $body);
+    $task = Task::factory()->recycle([$this->user, $this->workspace])->create(['title' => 'Original task']);
+
+    livewire(TasksBoard::class)
+        ->call('mountAction', 'edit', [], ['recordKey' => (string) $task->getKey()])
+        ->set('mountedActions.0.data.title', 'Rejected task')
+        ->set('mountedActions.0.data.custom_fields.description', $body)
+        ->call('callMountedAction')
+        ->assertHasErrors(['custom_fields.description'])
+        ->assertNotified();
+
+    expect($task->refresh()->title)->toBe('Original task')
+        ->and($media->refresh()->model_id)->toBe($owner->getKey());
 });
 
 it('signs document links when opening the note editor', function (): void {

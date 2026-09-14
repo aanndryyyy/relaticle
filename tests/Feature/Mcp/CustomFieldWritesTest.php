@@ -624,7 +624,7 @@ describe('file-upload values', function (): void {
         RelaticleServer::actingAs($this->user)
             ->tool(UpdateNoteTool::class, ['id' => $note->getKey(), 'custom_fields' => ['contract' => $other->uuid]])
             ->assertHasErrors()
-            ->assertSee('Contract: pass a file_id returned by the upload-file tool');
+            ->assertSee(__('validation.custom_field.upload', ['field' => 'Contract']));
 
         expect($note->fresh('customFieldValues.customField.options')->getCustomFieldValue($this->contract))->toBe($fileId);
     });
@@ -636,7 +636,7 @@ describe('file-upload values', function (): void {
         RelaticleServer::actingAs($this->user)
             ->tool(CreateNoteTool::class, ['title' => 'Nope', 'custom_fields' => ['contract' => $fileId]])
             ->assertHasErrors()
-            ->assertSee('Contract: pass a file_id returned by the upload-file tool');
+            ->assertSee(__('validation.custom_field.upload', ['field' => 'Contract']));
     });
 
     it('rejects a path, a traversal string, and an unknown id', function (): void {
@@ -673,7 +673,7 @@ describe('file-upload values', function (): void {
         RelaticleServer::actingAs($this->user)
             ->tool(CreateNoteTool::class, ['title' => 'Second', 'custom_fields' => ['contract' => $fileId]])
             ->assertHasErrors()
-            ->assertSee('Contract: pass a file_id returned by the upload-file tool');
+            ->assertSee(__('validation.custom_field.upload', ['field' => 'Contract']));
 
         expect(Note::query()->where('title', 'Second')->exists())->toBeFalse();
     });
