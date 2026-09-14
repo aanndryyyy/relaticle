@@ -7,10 +7,12 @@ use Illuminate\Support\Facades\Auth;
 use Relaticle\SystemAdmin\Enums\SystemAdministratorRole;
 use Relaticle\SystemAdmin\Filament\Resources\SystemAdministrators\Pages\CreateSystemAdministrator;
 use Relaticle\SystemAdmin\Filament\Resources\SystemAdministrators\Pages\EditSystemAdministrator;
+use Relaticle\SystemAdmin\Filament\Resources\SystemAdministrators\Pages\ListSystemAdministrators;
 use Relaticle\SystemAdmin\Filament\Resources\SystemAdministrators\SystemAdministratorResource;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
+use Relaticle\SystemAdmin\Rules\KeepsALastSuperAdministrator;
 
-mutates(SystemAdministratorResource::class);
+mutates(SystemAdministratorResource::class, KeepsALastSuperAdministrator::class);
 
 beforeEach(function (): void {
     $this->actingAs(
@@ -98,4 +100,17 @@ it('gives a Super Administrator another role once a second one exists', function
         ->assertHasNoFormErrors();
 
     expect($target->refresh()->role)->toBe(SystemAdministratorRole::Administrator);
+});
+
+it('renders each role with its own label and badge colour', function (): void {
+    $superAdministrator = SystemAdministrator::factory()->create();
+    $administrator = SystemAdministrator::factory()->administrator()->create();
+
+    livewire(ListSystemAdministrators::class)
+        ->assertTableColumnFormattedStateSet('role', 'Super Administrator', $superAdministrator)
+        ->assertTableColumnFormattedStateSet('role', 'Administrator', $administrator)
+        ->assertTableColumnStateSet('role', SystemAdministratorRole::Administrator, $administrator);
+
+    expect(SystemAdministratorRole::SuperAdministrator->getColor())->toBe('danger')
+        ->and(SystemAdministratorRole::Administrator->getColor())->toBe('warning');
 });

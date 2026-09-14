@@ -33,9 +33,7 @@ final class SystemAdministratorsTable
                     ->copyable(),
 
                 TextColumn::make('role')
-                    ->badge()
-                    ->formatStateUsing(fn (SystemAdministratorRole $state): string => $state->getLabel())
-                    ->color(fn (SystemAdministratorRole $state): string => $state->getColor()),
+                    ->badge(),
 
                 IconColumn::make('email_verified_at')
                     ->label('Verified')
@@ -53,12 +51,7 @@ final class SystemAdministratorsTable
             ])
             ->filters([
                 SelectFilter::make('role')
-                    ->options(
-                        collect(SystemAdministratorRole::cases())
-                            ->mapWithKeys(fn (SystemAdministratorRole $role): array => [
-                                $role->value => $role->getLabel(),
-                            ])
-                    ),
+                    ->options(SystemAdministratorRole::class),
 
                 TernaryFilter::make('email_verified_at')
                     ->label('Email Verified')

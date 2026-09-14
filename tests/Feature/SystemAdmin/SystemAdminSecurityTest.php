@@ -22,7 +22,7 @@ use Relaticle\SystemAdmin\Filament\Pages\Settings\ManageAiSettings;
 use Relaticle\SystemAdmin\Filament\Resources\UserResource\Pages\EditUser;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
 
-mutates(SystemAdministrator::class);
+mutates(SystemAdministrator::class, SystemAdministratorRole::class);
 
 describe('SystemAdmin Security', function () {
     beforeEach(function () {
@@ -140,11 +140,17 @@ describe('Administrator role', function () {
     ]);
 
     it('writes but never deletes', function (string $model) {
-        expect(auth('sysadmin')->user()->can('viewAny', $model))->toBeTrue()
-            ->and(auth('sysadmin')->user()->can('create', $model))->toBeTrue()
-            ->and(auth('sysadmin')->user()->can('delete', $model))->toBeFalse()
-            ->and(auth('sysadmin')->user()->can('deleteAny', $model))->toBeFalse()
-            ->and(auth('sysadmin')->user()->can('forceDeleteAny', $model))->toBeFalse();
+        $administrator = auth('sysadmin')->user();
+
+        expect($administrator->can('viewAny', $model))->toBeTrue()
+            ->and($administrator->can('view', $model))->toBeTrue()
+            ->and($administrator->can('create', $model))->toBeTrue()
+            ->and($administrator->can('update', $model))->toBeTrue()
+            ->and($administrator->can('restore', $model))->toBeTrue()
+            ->and($administrator->can('delete', $model))->toBeFalse()
+            ->and($administrator->can('deleteAny', $model))->toBeFalse()
+            ->and($administrator->can('forceDelete', $model))->toBeFalse()
+            ->and($administrator->can('forceDeleteAny', $model))->toBeFalse();
     })->with([
         'companies' => Company::class,
         'people' => People::class,
@@ -179,6 +185,8 @@ describe('Administrator role', function () {
 
         expect(auth('sysadmin')->user()->can('update', $this->administrator))->toBeFalse()
             ->and(auth('sysadmin')->user()->can('create', SystemAdministrator::class))->toBeFalse()
+            ->and(auth('sysadmin')->user()->can('delete', $this->administrator))->toBeFalse()
+            ->and(auth('sysadmin')->user()->can('deleteAny', SystemAdministrator::class))->toBeFalse()
             ->and(auth('sysadmin')->user()->can('viewAny', PersonalAccessToken::class))->toBeFalse();
     });
 

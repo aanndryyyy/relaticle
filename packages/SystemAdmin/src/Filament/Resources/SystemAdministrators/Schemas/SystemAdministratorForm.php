@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Relaticle\SystemAdmin\Filament\Resources\SystemAdministrators\Schemas;
 
-use Closure;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -14,6 +13,7 @@ use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Hash;
 use Relaticle\SystemAdmin\Enums\SystemAdministratorRole;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
+use Relaticle\SystemAdmin\Rules\KeepsALastSuperAdministrator;
 
 final class SystemAdministratorForm
 {
@@ -35,32 +35,9 @@ final class SystemAdministratorForm
                             ->unique(ignoreRecord: true),
 
                         Select::make('role')
-                            ->options(
-                                collect(SystemAdministratorRole::cases())
-                                    ->mapWithKeys(fn (SystemAdministratorRole $role): array => [
-                                        $role->value => $role->getLabel(),
-                                    ])
-                            )
+                            ->options(SystemAdministratorRole::class)
                             ->default(SystemAdministratorRole::SuperAdministrator->value)
-                            ->rule(static fn (?SystemAdministrator $record): Closure => static function (string $attribute, mixed $value, Closure $fail) use ($record): void {
-                                if (! $record instanceof SystemAdministrator) {
-                                    return;
-                                }
-
-                                if ($record->role !== SystemAdministratorRole::SuperAdministrator) {
-                                    return;
-                                }
-
-                                if ($value === SystemAdministratorRole::SuperAdministrator->value) {
-                                    return;
-                                }
-
-                                if (SystemAdministrator::query()->where('role', SystemAdministratorRole::SuperAdministrator)->count() > 1) {
-                                    return;
-                                }
-
-                                $fail('The last Super Administrator cannot be given another role.');
-                            })
+                            ->rule(fn (?SystemAdministrator $record): KeepsALastSuperAdministrator => new KeepsALastSuperAdministrator($record))
                             ->required(),
 
                         DateTimePicker::make('email_verified_at')

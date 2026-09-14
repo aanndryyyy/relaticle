@@ -39,14 +39,14 @@ final class SystemAdministratorPolicy
             return Response::deny('You cannot delete your own account.');
         }
 
-        return $admin->role->canAdministerStaff()
+        return $this->deleteAny($admin)
             ? Response::allow()
             : Response::deny('Only Super Administrators can delete system administrators.');
     }
 
     public function deleteAny(SystemAdministrator $admin): bool
     {
-        return $admin->role->canAdministerStaff();
+        return $admin->role->canAdministerStaff() && $admin->role->canDelete();
     }
 
     public function restore(SystemAdministrator $admin): bool
@@ -60,14 +60,14 @@ final class SystemAdministratorPolicy
             return Response::deny('You cannot permanently delete your own account.');
         }
 
-        return $admin->role->canAdministerStaff()
+        return $this->forceDeleteAny($admin)
             ? Response::allow()
             : Response::deny('Only Super Administrators can permanently delete system administrators.');
     }
 
     public function forceDeleteAny(SystemAdministrator $admin): bool
     {
-        return $admin->role->canAdministerStaff();
+        return $admin->role->canAdministerStaff() && $admin->role->canDelete();
     }
 
     public function restoreAny(SystemAdministrator $admin): bool

@@ -4,13 +4,12 @@ declare(strict_types=1);
 
 namespace Relaticle\SystemAdmin\Enums;
 
-/**
- * What each role may do, in one place. Every policy in this package answers from
- * these predicates rather than comparing cases, so a new role is decided here once.
- * They are match expressions on purpose: this package is excluded from PHPStan, so
- * an unhandled case has to fail loudly at runtime instead of defaulting to allowed.
- */
-enum SystemAdministratorRole: string
+use Filament\Support\Contracts\HasColor;
+use Filament\Support\Contracts\HasLabel;
+
+// Match, not a comparison: this package is excluded from PHPStan, so a role added
+// without a decision here has to fail loudly rather than default to allowed.
+enum SystemAdministratorRole: string implements HasColor, HasLabel
 {
     case SuperAdministrator = 'super_administrator';
     case Administrator = 'administrator';
@@ -31,9 +30,6 @@ enum SystemAdministratorRole: string
         };
     }
 
-    /**
-     * Covers delete, deleteAny, forceDelete and forceDeleteAny.
-     */
     public function canDelete(): bool
     {
         return match ($this) {
@@ -42,10 +38,6 @@ enum SystemAdministratorRole: string
         };
     }
 
-    /**
-     * Reading, creating and editing administrator accounts, and the API tokens
-     * that hang off one.
-     */
     public function canAdministerStaff(): bool
     {
         return match ($this) {
