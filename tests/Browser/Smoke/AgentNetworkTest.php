@@ -54,3 +54,24 @@ it('replaces a touch preview and clears it on a repeated tap', function (): void
         ->assertAttribute('[data-network-node="chatgpt"]', 'aria-pressed', 'false')
         ->assertNoJavaScriptErrors();
 });
+
+it('runs a continuous connection loop once the diagram is in view', function (): void {
+    $page = $this->visit('/');
+    $page->script('document.querySelector("[data-agent-network]").scrollIntoView({ block: "center" })');
+    $page->page()->waitForFunction('[...document.querySelectorAll("[data-network-pulse]")].some(comet => comet.getAnimations().length > 0)');
+
+    $page->assertNoJavaScriptErrors();
+});
+
+it('pauses the connection loop while a node is previewed and sweeps only its routes', function (): void {
+    $page = $this->visit('/');
+    $page->script('document.querySelector("[data-agent-network]").scrollIntoView({ block: "center" })');
+    $page->page()->waitForFunction('[...document.querySelectorAll("[data-network-pulse]")].some(comet => comet.getAnimations().length > 0)');
+
+    $page->page()->locator('[data-network-node="people"]')->hover(['force' => true]);
+
+    $page->assertScript('document.querySelector(\'[data-network-pulse="people"]\').getAnimations().length', 1)
+        ->assertScript('document.querySelector(\'[data-network-pulse="deals"]\').getAnimations().length', 0)
+        ->assertScript('[...document.querySelectorAll("[data-network-lines] path[stroke-width=\"1.5\"]")].filter(route => route.style.opacity === "1").length', 5)
+        ->assertNoJavaScriptErrors();
+});
