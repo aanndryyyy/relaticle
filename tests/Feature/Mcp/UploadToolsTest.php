@@ -312,4 +312,18 @@ describe('upload-file', function (): void {
             ->tool(UploadFileTool::class, ['base64' => base64_encode(pdfBytes()), 'filename' => 'a.pdf'])
             ->assertHasErrors(['Invalid ability provided.']);
     });
+    it('counts refused uploads toward the workspace hourly limit', function (): void {
+        $key = "mcp-uploads:{$this->workspace->getKey()}";
+        RateLimiter::increment($key, 3600, 59);
+
+        RelaticleServer::actingAs($this->user)
+            ->tool(UploadFileTool::class, ['base64' => '***', 'filename' => 'bad.pdf'])
+            ->assertHasErrors([__('uploads.errors.invalid_base64')]);
+
+        RelaticleServer::actingAs($this->user)
+            ->tool(UploadFileTool::class, ['base64' => base64_encode(pdfBytes()), 'filename' => 'late.pdf'])
+            ->assertHasErrors([__('uploads.errors.rate_limited')]);
+
+        expect(Media::query()->count())->toBe(0);
+    });
 });

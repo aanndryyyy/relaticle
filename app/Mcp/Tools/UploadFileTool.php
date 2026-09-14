@@ -20,7 +20,6 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Attributes\Name;
 use Laravel\Mcp\Server\Attributes\Title;
 use Laravel\Mcp\Server\Tool;
-use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 #[Name('upload-file')]
 #[Title('Upload File')]
@@ -73,6 +72,13 @@ final class UploadFileTool extends Tool
         /** @var User $user */
         $user = auth()->user();
 
+        /** @var Workspace $workspace */
+        $workspace = $user->currentWorkspace;
+
+        if (RateLimiter::increment("mcp-uploads:{$workspace->getKey()}", 3600) > self::UPLOADS_PER_HOUR) {
+            return Response::error(__('uploads.errors.rate_limited'));
+        }
+
         $validated = $request->validate([
             'source_url' => ['nullable', 'string', 'url:https', 'max:2048', 'required_without_all:base64,upload_id', 'prohibits:base64,upload_id'],
             'base64' => ['nullable', 'string', 'prohibits:upload_id'],
@@ -80,23 +86,11 @@ final class UploadFileTool extends Tool
             'upload_id' => ['nullable', 'string', 'max:64'],
         ]);
 
-        /** @var Workspace $workspace */
-        $workspace = $user->currentWorkspace;
-
         /** @var array{source_url?: ?string, base64?: ?string, filename?: ?string, upload_id?: ?string} $validated */
         try {
-            $media = RateLimiter::attempt(
-                "mcp-uploads:{$workspace->getKey()}",
-                self::UPLOADS_PER_HOUR,
-                fn (): Media => resolve(StoreAgentUpload::class)->execute($user, $workspace, $validated),
-                3600,
-            );
+            $media = resolve(StoreAgentUpload::class)->execute($user, $workspace, $validated);
         } catch (UploadException $exception) {
             return Response::error($exception->getMessage());
-        }
-
-        if (! $media instanceof Media) {
-            return Response::error(__('uploads.errors.rate_limited'));
         }
 
         $label = $this->markdownLabel($media->name);
