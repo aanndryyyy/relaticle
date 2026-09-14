@@ -9,13 +9,17 @@ use App\Models\Company;
 use App\Models\CustomField;
 use App\Models\CustomFieldOption;
 use App\Models\CustomFieldSection;
+use App\Models\CustomFieldValue;
 use App\Models\Note;
 use App\Models\Task;
 use App\Models\User;
 use App\Rules\OwnedUpload;
 use App\Support\Media\MediaLookup;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 
 mutates(BaseCrmEntityRequest::class, OwnedUpload::class, MediaLookup::class);
@@ -253,6 +257,44 @@ describe('file-upload values over rest', function (): void {
         expect($response->json('data.attributes.custom_fields.contract.url'))->toContain('/media/'.$this->pending->uuid);
     });
 
+    it('locks the upload before persisting the field value', function (): void {
+        config()->set('database.connections.upload_race', config('database.connections.pgsql'));
+        $competitor = DB::connection('upload_race');
+        $attributes = $this->pending->getAttributes();
+        unset($attributes['id']);
+        $attributes['uuid'] = (string) Str::uuid();
+        $mediaId = $competitor->table('media')->insertGetId($attributes);
+        $competitor->statement("SET lock_timeout TO '100ms'");
+        $blocked = false;
+
+        $this->beforeApplicationDestroyed(function () use ($competitor, $mediaId): void {
+            $competitor->table('media')->where('id', $mediaId)->delete();
+            DB::purge('upload_race');
+        });
+
+        Event::listen('eloquent.creating: '.CustomFieldValue::class, function (CustomFieldValue $value) use ($competitor, $mediaId, $attributes, &$blocked): void {
+            if ($value->string_value !== $attributes['uuid']) {
+                return;
+            }
+
+            try {
+                $competitor->table('media')->where('id', $mediaId)->update(['collection_name' => 'competing-claim']);
+            } catch (QueryException $exception) {
+                if ($exception->getCode() !== '55P03') {
+                    throw $exception;
+                }
+
+                $blocked = true;
+            }
+        });
+
+        $id = $this->postJson('/api/v1/notes', ['title' => 'Concurrent attachment', 'custom_fields' => ['contract' => $attributes['uuid']]])
+            ->assertCreated()->json('data.id');
+
+        expect($blocked)->toBeTrue();
+        $this->assertDatabaseHas('media', ['id' => $mediaId, 'model_id' => $id, 'collection_name' => MediaCollection::Attachments->value]);
+    });
+
     it('returns 422 for a file id this workspace does not own', function (string $value): void {
         $this->postJson('/api/v1/notes', ['title' => 'Rest bad', 'custom_fields' => ['contract' => $value]])
             ->assertUnprocessable()
@@ -316,6 +358,25 @@ describe('rich editor images over rest', function (): void {
             ->where('code', 'body')
             ->firstOrFail();
     });
+
+    it('refuses to share an image already owned by another note', function (bool $uppercase): void {
+        $media = $this->workspace->addMediaFromString(onePixelPng())->usingFileName('a.png')
+            ->withAttributes(['workspace_id' => $this->workspace->getKey()])
+            ->toMediaCollection(MediaCollection::PendingUploads->value);
+        $body = '<img data-id="'.$media->uuid.'" src="stale">';
+        $id = $this->postJson('/api/v1/notes', ['title' => 'Image owner', 'custom_fields' => ['body' => $body]])
+            ->assertCreated()->json('data.id');
+
+        if ($uppercase) {
+            $body = str_replace($media->uuid, strtoupper($media->uuid), $body);
+        }
+
+        $this->postJson('/api/v1/notes', ['title' => 'Image copy', 'custom_fields' => ['body' => $body]])
+            ->assertUnprocessable()->assertJsonValidationErrors('custom_fields.body');
+
+        $this->assertDatabaseHas('media', ['uuid' => $media->uuid, 'model_id' => $id]);
+        $this->assertDatabaseMissing('notes', ['title' => 'Image copy']);
+    })->with(['lowercase' => false, 'uppercase' => true]);
 
     it('rewrites image sources from the media row on read', function (): void {
         $media = $this->workspace->addMediaFromString(onePixelPng())->usingFileName('a.png')

@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Attributes\ScopedBy;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
 use Relaticle\CustomFields\Models\CustomFieldValue as BaseCustomFieldValue;
 use Relaticle\CustomFields\Models\Scopes\TenantScope;
 
@@ -21,4 +22,18 @@ final class CustomFieldValue extends BaseCustomFieldValue
     use HasFactory;
 
     use HasUlids;
+
+    /** @param array<string, mixed> $options */
+    public function save(array $options = []): bool
+    {
+        return $this->getConnection()->transaction(function () use ($options): bool {
+            $entity = $this->getRelationValue('entity');
+
+            if ($entity instanceof Model) {
+                $entity->newQueryWithoutScopes()->whereKey($entity->getKey())->lockForUpdate()->first();
+            }
+
+            return parent::save($options);
+        });
+    }
 }

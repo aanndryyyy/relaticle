@@ -6,13 +6,14 @@ namespace App\Support\Media;
 
 use App\Enums\CustomFieldType;
 use App\Models\CustomFieldValue;
+use Dom\HTMLDocument;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Str;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 final class MediaLookup
 {
-    private const string IMAGE_ID = '/data-id="([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/';
+    private const string UPLOAD_URL = '#/(?:uploads|media)/([0-9a-f-]{36})(?:/|\?|\#|$)#i';
 
     /** @var array<string, Media|null> */
     private array $byUuid = [];
@@ -51,6 +52,8 @@ final class MediaLookup
 
     public function find(string $workspaceId, string $uuid): ?Media
     {
+        $uuid = strtolower($uuid);
+
         if (! array_key_exists($uuid, $this->byUuid)) {
             $this->byUuid[$uuid] = Str::isUuid($uuid) ? Media::query()->where('uuid', $uuid)->first() : null;
         }
@@ -68,7 +71,7 @@ final class MediaLookup
         }
 
         return match ($fieldType) {
-            CustomFieldType::FILE_UPLOAD->value => Str::isUuid($value) ? [$value] : [],
+            CustomFieldType::FILE_UPLOAD->value => Str::isUuid($value) ? [strtolower($value)] : [],
             CustomFieldType::RICH_EDITOR->value => $this->imageUuids($value),
             default => [],
         };
@@ -77,8 +80,24 @@ final class MediaLookup
     /** @return list<string> */
     public function imageUuids(string $html): array
     {
-        preg_match_all(self::IMAGE_ID, $html, $matches);
+        $document = HTMLDocument::createFromString('<body>'.$html, LIBXML_NOERROR, 'UTF-8');
+        $uuids = [];
 
-        return array_values(array_unique($matches[1]));
+        foreach ($document->querySelectorAll('img, a[href]') as $element) {
+            $uuid = $element->localName === 'img'
+                ? $element->getAttribute('data-id')
+                : $this->uuidFromUrl($element->getAttribute('href') ?? '');
+
+            if (is_string($uuid) && Str::isUuid($uuid)) {
+                $uuids[] = strtolower($uuid);
+            }
+        }
+
+        return array_values(array_unique($uuids));
+    }
+
+    public function uuidFromUrl(string $url): ?string
+    {
+        return preg_match(self::UPLOAD_URL, $url, $match) === 1 && Str::isUuid($match[1]) ? strtolower($match[1]) : null;
     }
 }

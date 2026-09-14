@@ -10,7 +10,6 @@ use App\Models\CustomFieldValue;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Relaticle\CustomFields\Models\CustomField;
 use Spatie\MediaLibrary\HasMedia;
@@ -36,29 +35,44 @@ final readonly class UploadClaims
 
     public function assertClaimable(CustomFieldValue $value): void
     {
-        $uuid = $value->string_value;
-
-        if (! $value->isDirty('string_value') || ! is_string($uuid) || ! Str::isUuid($uuid)) {
+        if (! $value->isDirty(['string_value', 'text_value'])) {
             return;
         }
 
         $field = $value->getRelationValue('customField');
 
-        if (! $field instanceof CustomField || $field->type !== CustomFieldType::FILE_UPLOAD->value) {
+        if (! $field instanceof CustomField) {
             return;
         }
 
-        $claimable = $this->isClaimable(
-            (string) $value->getAttribute('tenant_id'),
-            $uuid,
-            (string) $value->getAttribute('entity_type'),
-            $value->getAttribute('entity_id'),
-            (string) $field->getKey(),
-        );
+        $referenced = $this->lookup->referencedUuids($field->type, $value->getValue());
 
-        throw_unless($claimable, ValidationException::withMessages([
-            "custom_fields.{$field->code}" => __('validation.custom_field.upload', ['field' => $field->name]),
-        ]));
+        if ($referenced === []) {
+            return;
+        }
+
+        $workspaceId = (string) $value->getAttribute('tenant_id');
+        $uploads = Media::query()->where('workspace_id', $workspaceId)
+            ->whereIn('uuid', $referenced)->orderBy('uuid')->lockForUpdate()->get()->keyBy('uuid');
+
+        foreach ($referenced as $uuid) {
+            $media = $uploads->get($uuid);
+
+            if ($field->type === CustomFieldType::RICH_EDITOR->value && ! $media instanceof Media) {
+                continue;
+            }
+
+            $claimable = $media instanceof Media && (
+                $media->collection_name === MediaCollection::PendingUploads->value
+                || ($media->model_type === $value->getAttribute('entity_type')
+                    && (string) $media->model_id === (string) $value->getAttribute('entity_id')
+                    && $media->custom_field_id === $field->getKey())
+            );
+
+            throw_unless($claimable, ValidationException::withMessages([
+                "custom_fields.{$field->code}" => __('validation.custom_field.upload', ['field' => $field->name]),
+            ]));
+        }
     }
 
     public function sync(CustomFieldValue $value): void
