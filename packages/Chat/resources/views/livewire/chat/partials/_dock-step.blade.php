@@ -53,7 +53,7 @@
     @if (! $isPlan)
         {{-- Attio-shaped header: the operation title as a muted eyebrow line
              ("Create Person"), then the record identity on its own row with a
-             colored entity tile. For a batch the identity is the ACTIVE record;
+             neutral entity tile; only a delete tints it. For a batch the identity is the ACTIVE record;
              the footer's pagination says where it sits in the batch. --}}
         <div class="flex items-center gap-2 px-4 pt-3 text-xs font-medium text-gray-500 dark:text-gray-400">
             <span class="min-w-0 flex-1 truncate">{{ $stepTitle }}</span>
@@ -63,10 +63,9 @@
             <div class="flex min-w-0 items-center gap-2.5 px-4 pb-2.5 pt-1.5" data-proposal-record-chip data-record-type="{{ $step['entity_type'] }}">
                 <span
                     @class([
-                        'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-white',
-                        'bg-primary-600' => $step['operation'] === 'create',
-                        'bg-amber-500' => $step['operation'] === 'update',
-                        'bg-red-500' => $step['operation'] === 'delete',
+                        'flex h-6 w-6 shrink-0 items-center justify-center rounded-md',
+                        'bg-red-50 text-red-600 dark:bg-red-400/10 dark:text-red-400' => $step['operation'] === 'delete',
+                        'bg-primary-50 text-primary-600 dark:bg-primary-500/10 dark:text-primary-400' => $step['operation'] !== 'delete',
                     ])
                     aria-hidden="true"
                 >
@@ -87,16 +86,15 @@
             <div class="flex min-w-0 items-center gap-2">
                 @if ($entityIcon && $step['recordLabel'] !== '')
                     {{-- Same identity the standalone header leads with, at row
-                         scale: operation-tinted tile, bold label, muted title.
+                         scale: entity tile, bold label, muted title.
                          No record pill: chips are reserved for inline clickable
                          references. --}}
                     <span class="flex min-w-0 items-center gap-2.5" data-proposal-record-chip data-record-type="{{ $step['entity_type'] }}">
                         <span
                             @class([
-                                'flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-white',
-                                'bg-primary-600' => $step['operation'] === 'create',
-                                'bg-amber-500' => $step['operation'] === 'update',
-                                'bg-red-500' => $step['operation'] === 'delete',
+                                'flex h-6 w-6 shrink-0 items-center justify-center rounded-md',
+                                'bg-red-50 text-red-600 dark:bg-red-400/10 dark:text-red-400' => $step['operation'] === 'delete',
+                                'bg-primary-50 text-primary-600 dark:bg-primary-500/10 dark:text-primary-400' => $step['operation'] !== 'delete',
                             ])
                             aria-hidden="true"
                         >
@@ -107,7 +105,7 @@
                         <span class="min-w-0 truncate text-sm font-semibold leading-5 text-gray-900 dark:text-white">{{ $step['recordLabel'] }}</span>
                     </span>
 
-                    <span class="shrink-0 text-xs font-medium text-gray-500 dark:text-gray-400">{{ $stepTitle }}</span>
+                    <span class="hidden shrink-0 text-xs font-medium text-gray-500 sm:inline dark:text-gray-400">{{ $stepTitle }}</span>
                 @else
                     <p class="min-w-0 truncate text-sm font-semibold leading-5 text-gray-900 dark:text-white">{{ $step['summary'] }}</p>
                 @endif

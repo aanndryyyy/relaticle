@@ -1,7 +1,7 @@
 {{-- Type-aware proposal field row. Expects Alpine scope var `field`:
      {label, value?|new?, old?, type?, values?} --}}
 <div class="flex items-start gap-3">
-    <span class="w-32 shrink-0 truncate text-sm leading-5 text-gray-700 sm:w-40 dark:text-gray-300" x-text="field.label"></span>
+    <span class="w-32 shrink-0 truncate text-sm leading-5 text-gray-700 sm:w-36 dark:text-gray-300" x-text="field.label"></span>
 
     <span class="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-sm">
         <template x-if="field.old">

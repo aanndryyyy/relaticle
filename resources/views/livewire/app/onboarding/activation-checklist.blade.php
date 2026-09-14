@@ -10,7 +10,7 @@
 
         <div
             x-data="activationChecklist()"
-            class="relative px-4 pb-2"
+            class="relative mb-2 border-b border-gray-200 px-4 pb-2 dark:border-white/10"
         >
             {{-- The expanded card floats above the pill rather than pushing the
                  sidebar taller, so opening it never scrolls the nav. --}}

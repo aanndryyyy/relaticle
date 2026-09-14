@@ -82,20 +82,25 @@ it('opens the fields from anywhere on the row and reaches the record only from t
 
     $page = ChatBrowser::logIn($user, $workspace->slug, $conversationId)
         ->assertSee('Sam')
-        ->assertSee('Create')
+        ->assertSee('Created')
         ->assertMissing('[data-proposal-details]')
         ->assertVisible('[data-proposal-record-chip]')
         ->assertVisible('[data-proposal-record-link]');
 
-    // The toggle covers the row, and the record link is the only interactive
+    // The toggle covers the row, and the record chip is the only interactive
     // element the pointer can reach on top of it.
     $hitTest = $page->script(<<<'JS'
         (() => {
             const row = document.querySelector('[data-proposal-row]');
             const link = document.querySelector('[data-proposal-record-link]');
             const chip = document.querySelector('[data-proposal-record-chip]');
+            const pill = Array.from(row.parentElement.querySelectorAll('span'))
+                .find((el) => el.textContent.trim() === 'Created');
+            const chevron = document.querySelector('[data-proposal-toggle-icon]');
             const rowBox = row.getBoundingClientRect();
             const linkBox = link.getBoundingClientRect();
+            const pillBox = pill.getBoundingClientRect();
+            const chevronBox = chevron.getBoundingClientRect();
 
             const at = (x, y) => {
                 const el = document.elementFromPoint(x, y);
@@ -111,9 +116,10 @@ it('opens the fields from anywhere on the row and reaches the record only from t
                 chipType: chip.dataset.recordType,
                 expanded: row.getAttribute('aria-expanded'),
                 anchorsInsideToggle: row.querySelectorAll('a').length,
-                atSummary: at(rowBox.left + 40, rowBox.top + rowBox.height / 2),
-                atStatusPill: at(rowBox.right - 90, rowBox.top + rowBox.height / 2),
+                atSummary: at(rowBox.left + rowBox.width / 2, rowBox.top + rowBox.height / 2),
+                atStatusPill: at(pillBox.left + pillBox.width / 2, pillBox.top + pillBox.height / 2),
                 atLink: at(linkBox.left + linkBox.width / 2, linkBox.top + linkBox.height / 2),
+                atChevron: at(chevronBox.left + chevronBox.width / 2, chevronBox.top + chevronBox.height / 2),
                 rowWidth: Math.round(rowBox.width),
                 linkWidth: Math.round(linkBox.width),
             };
@@ -129,6 +135,7 @@ it('opens the fields from anywhere on the row and reaches the record only from t
         ->and($hitTest['atSummary'])->toBe('row')
         ->and($hitTest['atStatusPill'])->toBe('row')
         ->and($hitTest['atLink'])->toBe('link')
+        ->and($hitTest['atChevron'])->toBe('row')
         ->and($hitTest['rowWidth'])->toBeGreaterThan($hitTest['linkWidth'] * 5);
 
     // Clicking the row opens the fields and stays in the conversation.

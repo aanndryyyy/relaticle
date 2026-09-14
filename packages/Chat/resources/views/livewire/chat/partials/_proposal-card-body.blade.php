@@ -14,7 +14,8 @@
 @php
     $inPlan = $inPlan ?? false;
     $operationLabels = ['create' => __('Create'), 'update' => __('Update'), 'delete' => __('Delete')];
-    $outcomeLabels = ['approved' => __('Approved'), 'rejected' => __('Rejected'), 'expired' => __('Expired'), 'superseded' => __('Replaced')];
+    $outcomeLabels = ['rejected' => __('Rejected'), 'expired' => __('Expired'), 'superseded' => __('Replaced')];
+    $approvedLabels = ['create' => __('Created'), 'update' => __('Updated'), 'delete' => __('Deleted')];
     $summaryExpression = "action.display?.summary ?? ((".\Illuminate\Support\Js::from($operationLabels).")[action.operation] ?? action.operation)";
 @endphp
 {{-- COMPACT progress view while the batch is still docked. Gated on there being
@@ -57,17 +58,13 @@
                 <template x-if="window.ChatModules.recordChipIcon(action.entity_type) && proposalRecordLabel(action)">
                     <span class="flex min-w-0 items-center gap-2.5" data-proposal-record-chip :data-record-type="action.entity_type">
                         <span
-                            class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-white"
-                            :class="{
-                                'bg-primary-600': action.operation === 'create',
-                                'bg-amber-500': action.operation === 'update',
-                                'bg-red-500': action.operation === 'delete',
-                            }"
+                            class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md"
+                            :class="action.operation === 'delete'
+                                ? 'bg-red-50 text-red-600 dark:bg-red-400/10 dark:text-red-400'
+                                : 'bg-primary-50 text-primary-600 dark:bg-primary-500/10 dark:text-primary-400'"
                             aria-hidden="true"
                         >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="h-3.5 w-3.5" aria-hidden="true">
-                                <path stroke-linecap="round" stroke-linejoin="round" :d="window.ChatModules.recordChipIcon(action.entity_type)"></path>
-                            </svg>
+                            @include('chat::livewire.chat.partials._record-glyph', ['class' => 'h-3.5 w-3.5'])
                         </span>
                         <span class="min-w-0 truncate text-sm font-semibold leading-5 text-gray-900 dark:text-white" x-text="proposalRecordLabel(action)"></span>
                     </span>
@@ -79,7 +76,7 @@
 
                 <template x-if="window.ChatModules.recordChipIcon(action.entity_type) && proposalRecordLabel(action)">
                     <span
-                        class="shrink-0 text-xs font-medium text-gray-500 dark:text-gray-400"
+                        class="hidden shrink-0 text-xs font-medium text-gray-500 sm:inline dark:text-gray-400"
                         x-text="action.display?.title ?? ((@js($operationLabels))[action.operation] ?? action.operation)"
                     ></span>
                 </template>
@@ -121,26 +118,34 @@
             ></button>
 
             <span class="pointer-events-none relative flex min-w-0 flex-1 items-center gap-2">
-                {{-- The dock's identity, folded onto one line: operation-tinted
-                     entity tile, bold record label, then the card title as muted
-                     context ("Create Person"). No record pill here: chips are
-                     reserved for inline clickable references. --}}
-                <template x-if="window.ChatModules.recordChipIcon(action.entity_type) && proposalRecordLabel(action)">
-                    <span class="flex min-w-0 items-center gap-2.5" data-proposal-record-chip :data-record-type="action.entity_type">
-                        <span
-                            class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-white"
-                            :class="{
-                                'bg-primary-600': action.operation === 'create',
-                                'bg-amber-500': action.operation === 'update',
-                                'bg-red-500': action.operation === 'delete',
-                            }"
-                            aria-hidden="true"
-                        >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="h-3.5 w-3.5" aria-hidden="true">
-                                <path stroke-linecap="round" stroke-linejoin="round" :d="window.ChatModules.recordChipIcon(action.entity_type)"></path>
-                            </svg>
-                        </span>
-                        <span class="min-w-0 truncate text-sm font-semibold leading-5 text-gray-900 dark:text-white" x-text="proposalRecordLabel(action)"></span>
+                {{-- A record that exists is the same chip a table cell or a
+                     citation renders, and the chip is the link: it is the one
+                     thing that takes the pointer back from the row toggle. A
+                     record that never existed or is gone (rejected, expired,
+                     replaced, deleted) is a plain label with the entity glyph,
+                     never a chip, because the chip is this transcript's link
+                     treatment and a chip that opens nothing is a false
+                     affordance. The operation is not repeated here; the
+                     outcome at the end of the row names it. --}}
+                <template x-if="window.ChatModules.recordChipIcon(action.entity_type) && proposalRecordLabel(action) && action.status === 'approved' && action.record && action.record.url">
+                    <a
+                        class="chat-chip pointer-events-auto min-w-0"
+                        data-proposal-record-chip
+                        data-proposal-record-link
+                        :data-record-type="action.entity_type"
+                        :href="action.record.url"
+                        wire:navigate
+                        :title="@js(__('View :label')).replace(':label', proposalRecordLabel(action))"
+                    >
+                        @include('chat::livewire.chat.partials._record-glyph', ['class' => 'h-3 w-3'])
+                        <span class="chat-chip-label" x-text="proposalRecordLabel(action)"></span>
+                    </a>
+                </template>
+
+                <template x-if="window.ChatModules.recordChipIcon(action.entity_type) && proposalRecordLabel(action) && !(action.status === 'approved' && action.record && action.record.url)">
+                    <span class="flex min-w-0 items-center gap-1.5 text-sm text-gray-600 dark:text-gray-400" data-proposal-record-chip :data-record-type="action.entity_type">
+                        @include('chat::livewire.chat.partials._record-glyph', ['class' => 'h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-gray-500'])
+                        <span class="min-w-0 truncate font-medium" x-text="proposalRecordLabel(action)"></span>
                     </span>
                 </template>
 
@@ -148,28 +153,6 @@
                     <span class="min-w-0 truncate text-sm font-medium text-gray-900 dark:text-white" x-text="{{ $summaryExpression }}"></span>
                 </template>
 
-                <template x-if="window.ChatModules.recordChipIcon(action.entity_type) && proposalRecordLabel(action)">
-                    <span
-                        class="shrink-0 text-xs font-medium text-gray-500 dark:text-gray-400"
-                        x-text="action.display?.title ?? ((@js($operationLabels))[action.operation] ?? action.operation)"
-                    ></span>
-                </template>
-
-                {{-- The record, one click away and never in the row's own click
-                     path: opening the page you just wrote to should not be
-                     something you do by aiming at a line you meant to expand. --}}
-                <template x-if="action.status === 'approved' && action.record && action.record.url">
-                    <a
-                        :href="action.record.url"
-                        wire:navigate
-                        data-proposal-record-link
-                        :aria-label="action.record.label ? @js(__('View :label')).replace(':label', action.record.label) : @js(__('View'))"
-                        :title="action.record.label ? @js(__('View :label')).replace(':label', action.record.label) : @js(__('View'))"
-                        class="pointer-events-auto inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-400 transition hover:bg-gray-100 hover:text-primary-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 dark:hover:bg-white/10 dark:hover:text-primary-400"
-                    >
-                        <x-heroicon-o-arrow-top-right-on-square class="h-3.5 w-3.5" aria-hidden="true" />
-                    </a>
-                </template>
             </span>
 
             {{-- A finalized batch reports what actually happened per item: its
@@ -177,55 +160,72 @@
                  so the receipt is derived from itemResults ("2 created", "1
                  skipped") instead of echoing it. --}}
             <template x-if="batchOutcome(action)">
-                <span class="pointer-events-none relative inline-flex shrink-0 items-center gap-1">
+                <span class="pointer-events-none relative inline-flex shrink-0 items-center gap-2.5">
                     <template x-if="batchOutcome(action).done > 0">
-                        <span
-                            class="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-[length:var(--text-micro)] font-medium text-green-700 dark:bg-green-400/10 dark:text-green-400"
-                            x-text="batchOutcome(action).doneLabel"
-                        ></span>
+                        <span class="inline-flex items-center gap-1.5 text-[length:var(--text-micro)] font-medium text-gray-500 dark:text-gray-400">
+                            <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500" aria-hidden="true"></span>
+                            <span x-text="batchOutcome(action).doneLabel"></span>
+                        </span>
                     </template>
                     <template x-if="batchOutcome(action).skipped > 0">
-                        <span
-                            class="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[length:var(--text-micro)] font-medium text-gray-500 dark:bg-white/10 dark:text-gray-400"
-                            x-text="batchOutcome(action).skippedLabel"
-                        ></span>
+                        <span class="inline-flex items-center gap-1.5 text-[length:var(--text-micro)] font-medium text-gray-500 dark:text-gray-400">
+                            <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-gray-400 dark:bg-gray-500" aria-hidden="true"></span>
+                            <span x-text="batchOutcome(action).skippedLabel"></span>
+                        </span>
                     </template>
                 </span>
             </template>
 
-            {{-- Translated label map, not charAt-capitalized enum values:
-                 'superseded' also reads as jargon, so it shows as Replaced. --}}
+            {{-- An approved row names the effect (Created, Updated, Deleted),
+                 the same verbs a batch receipt uses, so the outcome is the one
+                 place the operation is stated. A dot carries the colour, so
+                 the tile stays the row's only tinted surface. The other outcomes come from a
+                 translated map rather than the raw status: 'superseded' reads
+                 as jargon, so it shows as Replaced. --}}
             <template x-if="!batchOutcome(action)">
-                <span
-                    class="pointer-events-none relative inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[length:var(--text-micro)] font-medium"
-                    :class="{
-                        'bg-green-50 text-green-700 dark:bg-green-400/10 dark:text-green-400': action.status === 'approved',
-                        'bg-red-50 text-red-700 dark:bg-red-400/10 dark:text-red-400': action.status === 'rejected',
-                        'bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-400': action.status === 'expired' || action.status === 'superseded',
-                    }"
-                    x-text="(@js($outcomeLabels))[action.status] ?? action.status"
-                ></span>
+                <span class="pointer-events-none relative inline-flex shrink-0 items-center gap-1.5 text-[length:var(--text-micro)] font-medium text-gray-500 dark:text-gray-400">
+                    <span
+                        class="h-1.5 w-1.5 shrink-0 rounded-full"
+                        :class="{
+                            'bg-green-500': action.status === 'approved',
+                            'bg-red-500': action.status === 'rejected',
+                            'bg-gray-400 dark:bg-gray-500': action.status === 'expired' || action.status === 'superseded',
+                        }"
+                        aria-hidden="true"
+                    ></span>
+                    <span
+                        x-text="action.status === 'approved'
+                            ? ((@js($approvedLabels))[action.operation] ?? @js(__('Approved')))
+                            : ((@js($outcomeLabels))[action.status] ?? action.status)"
+                    ></span>
+                </span>
             </template>
 
-            {{-- The affordance is labelled rather than a bare chevron: on touch
-                 there is no hover to reveal that the row does anything at all. --}}
+            {{-- The chevron is decoration for the toggle underneath, which
+                 carries the accessible label; it ignores the pointer so a
+                 click on it lands on the toggle. It turns and darkens while
+                 the fields are open, so the state reads at rest, not only
+                 mid-motion. --}}
             <span
-                class="pointer-events-none relative inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[length:var(--text-micro)] font-medium text-gray-400 transition group-hover:bg-gray-100 group-hover:text-gray-600 dark:group-hover:bg-white/10 dark:group-hover:text-gray-300"
+                data-proposal-toggle-icon
+                class="pointer-events-none relative inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition group-hover:bg-gray-100 dark:group-hover:bg-white/10"
+                :class="open ? 'text-gray-600 dark:text-gray-300' : 'text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300'"
                 aria-hidden="true"
             >
-                <span>{{ __('Details') }}</span>
-                <x-heroicon-o-chevron-down class="h-3 w-3 transition-transform" ::class="open ? 'rotate-180' : ''" />
+                <x-heroicon-o-chevron-down class="h-3.5 w-3.5 transition-transform duration-200" ::class="open ? 'rotate-180' : ''" />
             </span>
         </div>
 
-        <div x-show="open" x-cloak data-proposal-details @class([
+        {{-- Same collapse the sidebar groups use, so every disclosure in the
+             panel opens at one speed. --}}
+        <div x-show="open" x-cloak x-collapse.duration.200ms data-proposal-details @class([
             'border-t border-gray-100 dark:border-white/5',
             'ps-7' => $inPlan,
         ])>
             <template x-if="Array.isArray(action.display?.fields) && action.display.fields.length > 0">
                 <div class="divide-y divide-gray-100 dark:divide-white/5">
                     <template x-for="(field, fieldIdx) in (action.display?.fields || [])" :key="fieldIdx">
-                        <div class="px-4 py-2.5" data-proposal-field-row>
+                        <div class="px-4 py-2" data-proposal-field-row>
                             @include('chat::livewire.chat.partials._proposal-field')
                         </div>
                     </template>
