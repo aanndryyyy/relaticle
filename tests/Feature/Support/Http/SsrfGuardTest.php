@@ -59,6 +59,9 @@ test('rejects shared, translated and reserved ranges filter_var calls public', f
     'benchmarking' => ['198.18.0.1'],
     '6to4 relay anycast' => ['192.88.99.1'],
     'multicast' => ['224.0.0.1'],
+    'teredo embedding loopback' => ['[2001::7f00:1]'],
+    'local-use nat64' => ['[64:ff9b:1::7f00:1]'],
+    'orchidv2' => ['[2001:20::1]'],
 ]);
 
 test('rejects hostnames that resolve to private addresses', function (): void {
