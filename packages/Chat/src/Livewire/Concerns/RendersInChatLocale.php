@@ -13,6 +13,10 @@ use Illuminate\Support\Facades\Date;
  */
 trait RendersInChatLocale
 {
+    /**
+     * Captured, not read back from config on restore: Application::setLocale()
+     * rewrites app.locale, so config reports the chat locale, not the original.
+     */
     private ?string $appLocaleBeforeChat = null;
 
     private ?string $dateLocaleBeforeChat = null;

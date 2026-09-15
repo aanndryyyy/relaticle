@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use App\Models\User;
-use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -16,6 +15,7 @@ use Relaticle\Chat\Models\AiCreditBalance;
 use Relaticle\Chat\Services\CreditService;
 use Relaticle\Chat\Services\TurnContinuationService;
 use Relaticle\Chat\Support\ChatLocale;
+use Tests\Helpers\FakeTranslations;
 
 mutates(CrmAssistant::class, ProcessChatMessage::class, ChatLocale::class, ChatInterface::class);
 
@@ -54,16 +54,6 @@ function languageTurn(User $user, string $conversationId, string $message, bool 
         resolved: ['provider' => 'anthropic', 'model' => 'claude-sonnet-4-6', 'id' => 'claude-sonnet-4-6', 'source' => 'auto'],
         isContinuation: $isContinuation,
     );
-}
-
-function fakeChatTranslationFromJsonFile(string $locale, string $key, string $value): void
-{
-    $directory = sys_get_temp_dir().'/chat-locale-test-'.Str::random(8);
-
-    mkdir($directory);
-    file_put_contents($directory.'/'.$locale.'.json', json_encode([$key => $value], JSON_THROW_ON_ERROR));
-
-    resolve(Translator::class)->addJsonPath($directory);
 }
 
 it('names the user\'s language in the prompt of a typed turn', function (): void {
@@ -127,7 +117,7 @@ it('restores the worker locale when the turn throws', function (): void {
 });
 
 it('renders the chat surface in the user\'s locale and hands the request back in English', function (): void {
-    fakeChatTranslationFromJsonFile('da', 'Ask anything...', 'Skriv her...');
+    FakeTranslations::inLocale('da', ['Ask anything...' => 'Skriv her...']);
 
     Livewire::test(ChatInterface::class, ['conversationId' => $this->conversationId])
         ->assertSee('Skriv her...')
@@ -138,7 +128,7 @@ it('renders the chat surface in the user\'s locale and hands the request back in
 
 it('renders English chrome for a user whose language has no translations', function (): void {
     $this->user->forceFill(['locale' => 'ne'])->save();
-    fakeChatTranslationFromJsonFile('da', 'Ask anything...', 'Skriv her...');
+    FakeTranslations::inLocale('da', ['Ask anything...' => 'Skriv her...']);
 
     Livewire::test(ChatInterface::class, ['conversationId' => $this->conversationId])
         ->assertSee('Ask anything...');

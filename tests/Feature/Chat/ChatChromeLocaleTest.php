@@ -2,18 +2,22 @@
 
 declare(strict_types=1);
 
+use App\Livewire\App\Profile\UpdateProfileInformation;
 use App\Models\User;
 use Filament\Facades\Filament;
-use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Lang;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
 use Relaticle\Chat\Livewire\App\Chat\ChatAllChatsPanel;
 use Relaticle\Chat\Livewire\App\Chat\ChatSidebarNav;
 use Relaticle\Chat\Livewire\App\Chat\ChatSidePanel;
 use Relaticle\Chat\Livewire\Chat\ChatInterface;
+use Relaticle\Chat\Livewire\Chat\ProposalCard;
+use Tests\Helpers\FakeTranslations;
+use Tests\Helpers\ProposalCardFixture;
 
-mutates(ChatInterface::class, ChatSidePanel::class, ChatAllChatsPanel::class, ChatSidebarNav::class);
+mutates(ChatInterface::class, ProposalCard::class, ChatSidePanel::class, ChatAllChatsPanel::class, ChatSidebarNav::class);
 
 beforeEach(function (): void {
     $this->user = User::factory()->withPersonalWorkspace()->create(['locale' => 'da']);
@@ -33,18 +37,8 @@ beforeEach(function (): void {
     ]);
 });
 
-function fakeChatChromeTranslation(string $locale, string $key, string $value): void
-{
-    $directory = sys_get_temp_dir().'/chat-locale-test-'.Str::random(8);
-
-    mkdir($directory);
-    file_put_contents($directory.'/'.$locale.'.json', json_encode([$key => $value], JSON_THROW_ON_ERROR));
-
-    resolve(Translator::class)->addJsonPath($directory);
-}
-
 it('renders chat chrome in the user\'s locale and restores English after', function (string $class, string $key, string $translatedText): void {
-    fakeChatChromeTranslation('da', $key, $translatedText);
+    FakeTranslations::inLocale('da', [$key => $translatedText]);
 
     $params = $class === ChatInterface::class ? ['conversationId' => $this->conversationId] : [];
 
@@ -57,3 +51,25 @@ it('renders chat chrome in the user\'s locale and restores English after', funct
     'ChatAllChatsPanel' => [ChatAllChatsPanel::class, 'All chats', 'Alle chats'],
     'ChatSidebarNav' => [ChatSidebarNav::class, 'Chats', 'Samtaler'],
 ]);
+
+it('renders an active proposal card in the user\'s locale', function (): void {
+    FakeTranslations::inLocale('da', ['Discard' => 'Kassere']);
+
+    $action = ProposalCardFixture::proposal($this->user,
+        ['name' => 'Acme Corp'],
+        ['title' => 'Create Company', 'summary' => 'Create company "Acme Corp"', 'fields' => [['label' => 'Name', 'value' => 'Acme Corp']]],
+    );
+
+    Livewire::test(ProposalCard::class, ['context' => 'conversation'])
+        ->dispatch('proposal:set-active', id: $action->getKey(), context: 'conversation')
+        ->assertSee('Kassere')
+        ->assertDontSee('Discard');
+});
+
+it('leaves a non-chat component in the app locale', function (): void {
+    Lang::addLines(['profile.actions.save' => 'Gem'], 'da');
+
+    Livewire::test(UpdateProfileInformation::class)->assertDontSee('Gem');
+
+    expect(__('profile.actions.save', [], 'da'))->toBe('Gem');
+});
