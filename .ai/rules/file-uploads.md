@@ -41,9 +41,15 @@ model (`App\Enums\MediaCollection`). Two exemptions: import CSVs under
   --force` moves those onto their records.
 - Never call `Media::move()`. It copies and deletes, changing `uuid` and path.
   Ownership changes are attribute writes on the existing row.
-- `logo` collections stay on the public disk. Everything else follows
-  `MEDIA_DISK`, default `local`, which must name a disk in
+- `logo` collections stay on the public disk, and `chat-attachments` pins `local`.
+  Everything else follows `MEDIA_DISK`, default `local`, which must name a disk in
   `config/filesystems.php`. A row keeps the disk it was uploaded to.
+- A chat CSV attachment is a transient working file, not a record attachment: it is
+  parsed by path, handed to the import wizard, never served, and pruned after 24
+  hours by `chat:prune-attachments`. That is why it pins `local` (the CSV readers
+  take a filesystem path) and stays out of `pending-uploads`, whose allowlist is
+  documents and images. It still carries `workspace_id`, so workspace deletion
+  sweeps it with everything else.
 - Do not add a `FileUpload::make(` or configure rich editor attachments with
   `fileAttachmentsDisk(` / `fileAttachmentsDirectory(` outside
   `app/Filament/CustomFields/RichEditorFieldType.php` and

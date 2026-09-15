@@ -101,7 +101,7 @@ final class Workspace extends Model implements HasAvatar, HasMedia, Onboardable
 
     public const int LOGO_MAX_KILOBYTES = 2048;
 
-    public const string CHAT_ATTACHMENTS_MEDIA_COLLECTION = 'chat-attachments';
+    public const string CHAT_ATTACHMENTS_MEDIA_COLLECTION = MediaCollection::ChatAttachments->value;
 
     /** @var list<string> */
     public const array CHAT_ATTACHMENT_MIME_TYPES = ['text/csv', 'text/plain', 'application/csv'];

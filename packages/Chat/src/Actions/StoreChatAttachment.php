@@ -51,6 +51,7 @@ final readonly class StoreChatAttachment
             $media = $workspace->addMedia($file)
                 ->usingFileName(Str::ulid().'.csv')
                 ->usingName(pathinfo($originalName, PATHINFO_FILENAME))
+                ->withAttributes(['workspace_id' => $workspace->getKey()])
                 ->withCustomProperties([
                     'uploaded_by' => (string) $user->getKey(),
                     'original_name' => $originalName,

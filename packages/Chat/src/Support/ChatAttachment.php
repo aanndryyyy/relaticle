@@ -6,7 +6,7 @@ namespace Relaticle\Chat\Support;
 
 use App\Models\User;
 use App\Models\Workspace;
-use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Storage;
 use Relaticle\ImportWizard\Enums\ImportEntityType;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
@@ -15,10 +15,17 @@ final readonly class ChatAttachment
 {
     public function __construct(public Media $media) {}
 
-    /** @return MorphMany<Media, Workspace> */
-    public static function query(Workspace $workspace, User $user): MorphMany
+    /**
+     * Scoped on the media row's own workspace_id column, as every media query
+     * is; the uploader property narrows it further, since an attachment is
+     * private to the person who sent it.
+     *
+     * @return Builder<Media>
+     */
+    public static function query(Workspace $workspace, User $user): Builder
     {
-        return $workspace->media()
+        return Media::query()
+            ->where('workspace_id', $workspace->getKey())
             ->where('collection_name', Workspace::CHAT_ATTACHMENTS_MEDIA_COLLECTION)
             ->where('custom_properties->uploaded_by', (string) $user->getKey());
     }

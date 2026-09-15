@@ -2,8 +2,9 @@
 
 declare(strict_types=1);
 
+use App\Actions\Jetstream\DeleteWorkspace;
+use App\Enums\MediaCollection;
 use App\Models\User;
-use App\Models\Workspace;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -60,13 +61,27 @@ it('stores a csv as a media row on the team and reports its header and row count
     $attachment = ChatAttachment::find($this->workspace, $this->user, $response->json('id'));
 
     expect($attachment)->toBeInstanceOf(ChatAttachment::class)
-        ->and($attachment->media->collection_name)->toBe(Workspace::CHAT_ATTACHMENTS_MEDIA_COLLECTION)
+        ->and($attachment->media->collection_name)->toBe(MediaCollection::ChatAttachments->value)
+        ->and($attachment->media->workspace_id)->toBe($this->workspace->getKey())
         ->and($attachment->media->disk)->toBe('local')
         ->and($attachment->name())->toBe('contacts.csv')
         ->and($attachment->header())->toBe(['Name', 'Email', 'Company'])
         ->and($attachment->rowCount())->toBe(3)
         ->and($attachment->isConsumed())->toBeFalse()
         ->and($attachment->fileExists())->toBeTrue();
+});
+
+it('sweeps attachments with the workspace that owns them', function (): void {
+    $this->postJson(route('chat.attachments.store'), ['file' => csvUpload(2)])->assertOk();
+
+    $media = Media::query()
+        ->where('collection_name', MediaCollection::ChatAttachments->value)
+        ->sole();
+
+    resolve(DeleteWorkspace::class)->delete($this->workspace);
+
+    expect(Media::query()->whereKey($media->getKey())->exists())->toBeFalse()
+        ->and(Storage::disk('local')->exists($media->getPathRelativeToRoot()))->toBeFalse();
 });
 
 it('hides an attachment from other members of the same team', function (): void {
