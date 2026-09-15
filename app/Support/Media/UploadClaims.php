@@ -58,16 +58,14 @@ final readonly class UploadClaims
         foreach ($referenced as $uuid) {
             $media = $uploads->get($uuid);
 
-            if ($field->type === CustomFieldType::RICH_EDITOR->value && ! $media instanceof Media) {
+            if (! $media instanceof Media) {
                 continue;
             }
 
-            $claimable = $media instanceof Media && (
-                $media->collection_name === MediaCollection::PendingUploads->value
+            $claimable = $media->collection_name === MediaCollection::PendingUploads->value
                 || ($media->model_type === $value->getAttribute('entity_type')
                     && (string) $media->model_id === (string) $value->getAttribute('entity_id')
-                    && $media->custom_field_id === $field->getKey())
-            );
+                    && $media->custom_field_id === $field->getKey());
 
             throw_unless($claimable, ValidationException::withMessages([
                 "custom_fields.{$field->code}" => __('validation.custom_field.upload', ['field' => $field->name]),
@@ -83,7 +81,7 @@ final readonly class UploadClaims
             return;
         }
 
-        if (! in_array($field->type, [CustomFieldType::FILE_UPLOAD->value, CustomFieldType::RICH_EDITOR->value], true)) {
+        if ($field->type !== CustomFieldType::RICH_EDITOR->value) {
             return;
         }
 

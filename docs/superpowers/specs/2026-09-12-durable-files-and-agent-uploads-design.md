@@ -18,7 +18,7 @@ Recorded 2026-09-12 with the founder, revised 2026-09-14 after a decision-by-dec
 6. The stored `file-upload` value is the Media `uuid`. Paths are derived from the row, never stored.
 7. One `attachments` collection per record. The field a file belongs to is `custom_field_id`, which survives a field code rename.
 8. Uploads are private by default. `MEDIA_DISK` names an existing disk from `config/filesystems.php`, default `local`. `logo` collections stay on `public`.
-9. `file-upload` ships enabled. Chat still defers the type (no upload tool there yet).
+9. There is no `file-upload` custom field type. The components are removed and the type is disabled in config; rich-editor attachments and the MCP upload tools are the file surface. `CustomFieldType::FILE_UPLOAD` stays so code that excludes the type still compiles.
 10. The agent contract returns a stable, unsigned `/media/{uuid}` link in `suggested_markdown`. Only rendering surfaces sign.
 11. `SsrfGuard` and `HostResolver` live in `App\Support\Http`, shared by favicon fetching and agent uploads.
 

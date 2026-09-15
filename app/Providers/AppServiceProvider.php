@@ -10,7 +10,6 @@ use App\Enums\Plan;
 use App\Events\WorkspaceCreated;
 use App\Filament\CustomFields\DateFieldType;
 use App\Filament\CustomFields\DateTimeFieldType;
-use App\Filament\CustomFields\FileUploadFieldType;
 use App\Filament\CustomFields\RichEditorFieldType;
 use App\Http\Responses\LoginResponse;
 use App\Listeners\Billing\SyncPlanOnStripeSubscriptionChange;
@@ -521,7 +520,6 @@ final class AppServiceProvider extends ServiceProvider
         CustomFieldsType::register([
             'date-time' => DateTimeFieldType::class,
             'date' => DateFieldType::class,
-            'file-upload' => FileUploadFieldType::class,
             'rich-editor' => RichEditorFieldType::class,
         ]);
 

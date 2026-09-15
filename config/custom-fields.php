@@ -70,7 +70,7 @@ return [
         // Control which field types are available globally
         ->enabled([]) // Empty = all enabled, or specify: ['text', 'email', 'select']
         // A disabled type no longer resolves, so migrate its existing fields to another type first.
-        ->disabled(['markdown-editor'])
+        ->disabled(['file-upload', 'markdown-editor'])
         ->discover(true)
         ->cache(enabled: true, ttl: 3600),
 

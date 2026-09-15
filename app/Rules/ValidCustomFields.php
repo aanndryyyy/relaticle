@@ -65,15 +65,6 @@ final readonly class ValidCustomFields implements ValidationRule
                 if ($customField->type === CustomFieldType::RECORD->value) {
                     $rules["custom_fields.{$customField->code}"][] = new OwnedLookupRecords($this->tenantId, (string) $customField->lookup_type, $customField->name);
                 }
-
-                if ($customField->type === CustomFieldType::FILE_UPLOAD->value) {
-                    $rules["custom_fields.{$customField->code}"][] = new OwnedUpload(
-                        $this->tenantId,
-                        $this->entityType,
-                        $customField,
-                        $this->ignoreEntityId,
-                    );
-                }
             }
         }
 

@@ -408,14 +408,18 @@ function customFieldHintRows(): array
         ['date', 'ISO 8601 date"'],
         ['date-time', 'ISO 8601 datetime string'],
         ['record', 'array of record IDs of the lookup entity'],
-        ['file-upload', 'read back as {id, name, url}'],
     ];
 }
 
 it('exercises the hint of every custom field type a tenant can create', function (): void {
     $exercised = array_column(customFieldHintRows(), 0);
 
-    $creatable = array_map(fn (CustomFieldType $case): string => $case->value, CustomFieldType::cases());
+    $configurator = config('custom-fields.field_type_configuration');
+
+    $creatable = array_values(array_filter(
+        array_map(fn (CustomFieldType $case): string => $case->value, CustomFieldType::cases()),
+        fn (string $type): bool => $configurator->isFieldTypeAllowed($type),
+    ));
 
     expect($exercised)->toEqualCanonicalizing($creatable);
 });

@@ -71,7 +71,6 @@ final class MediaLookup
         }
 
         return match ($fieldType) {
-            CustomFieldType::FILE_UPLOAD->value => Str::isUuid($value) ? [strtolower($value)] : [],
             CustomFieldType::RICH_EDITOR->value => $this->attachmentUuids($value),
             default => [],
         };

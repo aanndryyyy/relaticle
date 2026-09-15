@@ -258,7 +258,7 @@ describe('upload-file', function (): void {
         expect(mb_strlen(Media::query()->latest('id')->firstOrFail()->name))->toBeLessThanOrEqual(255);
     });
 
-    it('stores a base64 file and returns the file_id to put in a file-upload field', function (): void {
+    it('stores a base64 file and returns its file_id and markdown', function (): void {
         RelaticleServer::actingAs($this->user)
             ->tool(UploadFileTool::class, ['base64' => base64_encode(pdfBytes()), 'filename' => 'brief.pdf'])
             ->assertOk()

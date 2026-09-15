@@ -53,10 +53,6 @@ trait FormatsCustomFields
             return $this->resolveRecordValue($customField, $rawValue);
         }
 
-        if ($customField->type === CustomFieldType::FILE_UPLOAD->value) {
-            return $this->resolveFileValue($fieldValue, $rawValue);
-        }
-
         if ($customField->type === CustomFieldType::RICH_EDITOR->value && is_string($rawValue)) {
             return RichContentAttachments::forWorkspace((string) $fieldValue->getAttribute('tenant_id'))->rewriteAttachmentUrls($rawValue);
         }
@@ -121,23 +117,5 @@ trait FormatsCustomFields
         }
 
         return resolve(RecordNameResolver::class)->resolve((string) $customField->lookup_type, $rawValue);
-    }
-
-    /**
-     * @return array{id: string, name: string, url: string}|null
-     */
-    private function resolveFileValue(CustomFieldValue $fieldValue, mixed $rawValue): ?array
-    {
-        if (! is_string($rawValue) || $rawValue === '') {
-            return null;
-        }
-
-        $media = resolve(MediaLookup::class)->find((string) $fieldValue->getAttribute('tenant_id'), $rawValue);
-
-        if ($media === null) {
-            return null;
-        }
-
-        return ['id' => $rawValue, 'name' => $media->name, 'url' => $media->getUrl()];
     }
 }

@@ -2,28 +2,21 @@
 
 declare(strict_types=1);
 
-use App\Enums\CrmEntity;
 use App\Enums\MediaCollection;
 use App\Http\Requests\Api\V1\BaseCrmEntityRequest;
 use App\Models\Company;
 use App\Models\CustomField;
 use App\Models\CustomFieldOption;
 use App\Models\CustomFieldSection;
-use App\Models\CustomFieldValue;
-use App\Models\Note;
 use App\Models\Task;
 use App\Models\User;
-use App\Rules\OwnedUpload;
 use App\Support\Media\MediaLookup;
-use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 use Laravel\Sanctum\Sanctum;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
-mutates(BaseCrmEntityRequest::class, OwnedUpload::class, MediaLookup::class);
+mutates(BaseCrmEntityRequest::class, MediaLookup::class);
 
 beforeEach(function (): void {
     $this->user = User::factory()->withPersonalWorkspace()->create();
@@ -191,163 +184,6 @@ it('resolves record names with a constant number of lookups, not one per row', f
 
     expect($names)->toHaveCount(12)
         ->and($large)->toBe($small);
-});
-
-it('claims file uploads for every CRM entity over rest', function (CrmEntity $entity, string $endpoint, string $titleKey): void {
-    Storage::fake('local');
-    $field = CustomField::factory()->create([
-        'tenant_id' => $this->workspace->getKey(),
-        'entity_type' => $entity->value,
-        'code' => 'contract',
-        'name' => 'Contract',
-        'type' => 'file-upload',
-        'validation_rules' => [],
-        'active' => true,
-        'system_defined' => false,
-    ]);
-    $pending = $this->workspace->addMediaFromString(pdfBytes())
-        ->usingFileName("{$entity->value}.pdf")
-        ->withAttributes(['workspace_id' => $this->workspace->getKey()])
-        ->toMediaCollection(MediaCollection::PendingUploads->value);
-
-    $response = $this->postJson("/api/v1/{$endpoint}", [
-        $titleKey => "File {$entity->value}",
-        'custom_fields' => [$field->code => $pending->uuid],
-    ])->assertCreated();
-
-    $modelClass = $entity->model();
-    $record = $modelClass::query()->findOrFail($response->json('data.id'));
-
-    expect($pending->refresh()->model_type)->toBe($record->getMorphClass())
-        ->and($pending->model_id)->toBe($record->getKey())
-        ->and($pending->collection_name)->toBe(MediaCollection::Attachments->value)
-        ->and($pending->custom_field_id)->toBe($field->getKey());
-})->with([
-    'company' => [CrmEntity::Company, 'companies', 'name'],
-    'people' => [CrmEntity::People, 'people', 'name'],
-    'opportunity' => [CrmEntity::Opportunity, 'opportunities', 'name'],
-    'task' => [CrmEntity::Task, 'tasks', 'title'],
-    'note' => [CrmEntity::Note, 'notes', 'title'],
-]);
-
-describe('file-upload values over rest', function (): void {
-    beforeEach(function (): void {
-        Storage::fake('local');
-        $this->contract = CustomField::factory()->create([
-            'tenant_id' => $this->workspace->getKey(),
-            'entity_type' => 'note',
-            'code' => 'contract',
-            'name' => 'Contract',
-            'type' => 'file-upload',
-            'validation_rules' => [],
-            'active' => true,
-            'system_defined' => false,
-        ]);
-        $this->pending = $this->workspace->addMediaFromString(pdfBytes())->usingFileName('01ARZ3NDEKTSV4RRFFQ69G5FAV.pdf')
-            ->usingName('Contract.pdf')
-            ->withAttributes(['workspace_id' => $this->workspace->getKey()])
-            ->toMediaCollection(MediaCollection::PendingUploads->value);
-    });
-
-    it('stores an owned pending file id and returns id, name and url', function (): void {
-        $response = $this->postJson('/api/v1/notes', ['title' => 'Rest file', 'custom_fields' => ['contract' => $this->pending->uuid]])
-            ->assertCreated()
-            ->assertJsonPath('data.attributes.custom_fields.contract.id', $this->pending->uuid)
-            ->assertJsonPath('data.attributes.custom_fields.contract.name', 'Contract.pdf');
-
-        expect($response->json('data.attributes.custom_fields.contract.url'))->toContain('/media/'.$this->pending->uuid);
-    });
-
-    it('locks the upload before persisting the field value', function (): void {
-        config()->set('database.connections.upload_race', config('database.connections.pgsql'));
-        $competitor = DB::connection('upload_race');
-        $attributes = $this->pending->getAttributes();
-        unset($attributes['id']);
-        $attributes['uuid'] = (string) Str::uuid();
-        $mediaId = $competitor->table('media')->insertGetId($attributes);
-        $competitor->statement("SET lock_timeout TO '100ms'");
-        $blocked = false;
-
-        $this->beforeApplicationDestroyed(function () use ($competitor, $mediaId): void {
-            $competitor->table('media')->where('id', $mediaId)->delete();
-            DB::purge('upload_race');
-        });
-
-        Event::listen('eloquent.creating: '.CustomFieldValue::class, function (CustomFieldValue $value) use ($competitor, $mediaId, $attributes, &$blocked): void {
-            if ($value->string_value !== $attributes['uuid']) {
-                return;
-            }
-
-            try {
-                $competitor->table('media')->where('id', $mediaId)->update(['collection_name' => 'competing-claim']);
-            } catch (QueryException $exception) {
-                if ($exception->getCode() !== '55P03') {
-                    throw $exception;
-                }
-
-                $blocked = true;
-            }
-        });
-
-        $id = $this->postJson('/api/v1/notes', ['title' => 'Concurrent attachment', 'custom_fields' => ['contract' => $attributes['uuid']]])
-            ->assertCreated()->json('data.id');
-
-        expect($blocked)->toBeTrue();
-        $this->assertDatabaseHas('media', ['id' => $mediaId, 'model_id' => $id, 'collection_name' => MediaCollection::Attachments->value]);
-    });
-
-    it('returns 422 for a file id this workspace does not own', function (string $value): void {
-        $this->postJson('/api/v1/notes', ['title' => 'Rest bad', 'custom_fields' => ['contract' => $value]])
-            ->assertUnprocessable()
-            ->assertJsonValidationErrors(['custom_fields.contract']);
-    })->with([
-        'unknown uuid' => '00000000-0000-0000-0000-000000000000',
-        'path' => 'uploads/00000000-0000-0000-0000-000000000000/x.pdf',
-        'traversal' => '../.env',
-    ]);
-
-    it('returns null for an empty file field', function (): void {
-        $note = Note::factory()->create(['workspace_id' => $this->workspace->getKey()]);
-        $note->saveCustomFieldValue($this->contract, null);
-
-        $this->getJson("/api/v1/notes/{$note->getKey()}")
-            ->assertOk()
-            ->assertJsonPath('data.attributes.custom_fields.contract', null);
-    });
-
-    it('resolves file urls with a constant number of media lookups', function (): void {
-        $attach = function (int $count): void {
-            Note::factory()->count($count)->create(['workspace_id' => $this->workspace->getKey()])
-                ->each(function (Note $note): void {
-                    $media = $this->workspace->addMediaFromString(pdfBytes())
-                        ->usingFileName("{$note->getKey()}.pdf")
-                        ->withAttributes(['workspace_id' => $this->workspace->getKey()])
-                        ->toMediaCollection(MediaCollection::PendingUploads->value);
-                    $note->saveCustomFieldValue($this->contract, $media->uuid);
-                });
-        };
-
-        $lookupCount = function (): int {
-            DB::flushQueryLog();
-            DB::enableQueryLog();
-            $this->getJson('/api/v1/notes?per_page=50')->assertOk();
-            $count = collect(DB::getQueryLog())->filter(
-                fn (array $query): bool => str_contains($query['query'], 'from "media"'),
-            )->count();
-            DB::disableQueryLog();
-
-            return $count;
-        };
-
-        $attach(3);
-        $small = $lookupCount();
-
-        $attach(9);
-        $large = $lookupCount();
-
-        expect($small)->toBeGreaterThan(0)
-            ->and($large)->toBe($small);
-    });
 });
 
 describe('rich editor images over rest', function (): void {
