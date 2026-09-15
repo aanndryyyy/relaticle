@@ -21,9 +21,7 @@ final readonly class DeleteWorkspace implements DeletesTeams
         $workspace->purge();
 
         DB::afterCommit(function () use ($workspace): void {
-            foreach (Media::query()->where('workspace_id', $workspace->getKey())->lazyById() as $media) {
-                $media->delete();
-            }
+            Media::query()->where('workspace_id', $workspace->getKey())->lazyById()->each->delete();
         });
     }
 }

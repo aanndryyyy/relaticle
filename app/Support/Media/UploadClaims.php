@@ -7,7 +7,6 @@ namespace App\Support\Media;
 use App\Enums\CustomFieldType;
 use App\Enums\MediaCollection;
 use App\Models\CustomFieldValue;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Relaticle\CustomFields\Models\CustomField;
@@ -104,7 +103,7 @@ final readonly class UploadClaims
                     ->where('custom_field_id', $field->getKey())
                     ->whereNotIn('uuid', $referenced)
                     ->get()
-                    ->each(fn (Model $media): ?bool => $media->delete());
+                    ->each->delete();
             });
         });
     }
