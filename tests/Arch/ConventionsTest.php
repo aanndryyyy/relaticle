@@ -40,6 +40,33 @@ it('keeps migrations forward-only (no down methods)', function (): void {
     );
 });
 
+it('queues only commands that exist from migrations', function (): void {
+    $declared = [];
+
+    foreach (glob(dirname(__DIR__, 2).'/app/Console/Commands/*.php') ?: [] as $file) {
+        if (preg_match('/#\[Signature\(\s*\'([a-z0-9:_-]+)/i', (string) file_get_contents($file), $match) === 1) {
+            $declared[] = $match[1];
+        }
+    }
+
+    $offenders = [];
+
+    foreach (migrationFiles() as $file) {
+        preg_match_all('/Artisan::queue\(\s*\'([^\']+)\'/', (string) file_get_contents($file), $matches);
+
+        foreach ($matches[1] as $name) {
+            if (! in_array($name, $declared, true)) {
+                $offenders[] = basename($file).': '.$name;
+            }
+        }
+    }
+
+    expect($offenders)->toBe(
+        [],
+        'A migration outlives the command it queues (.ai/guidelines/relaticle/core.md). Restore or rename: '.implode(', ', $offenders),
+    );
+});
+
 it('keeps migrations off the database clock (no useCurrent, CURRENT_TIMESTAMP, or raw now())', function (): void {
     $grandfathered = [
         '0001_01_01_000002_create_jobs_table.php',
