@@ -134,7 +134,11 @@ final readonly class StoreAgentUpload
 
         throw_if($stream === null, UploadException::notFound());
 
-        file_put_contents($temp, $stream);
+        try {
+            file_put_contents($temp, $stream);
+        } finally {
+            fclose($stream);
+        }
 
         return $upload;
     }
