@@ -57,13 +57,16 @@ final readonly class CustomFieldSchema
         $result = [];
 
         foreach ($fields as $field) {
-            $type = CustomFieldType::from($field->type);
+            $type = CustomFieldType::tryFrom($field->type);
 
-            // The package owns this predicate. Three hand-rolled copies of it
-            // existed and only some were right: validation_rules casts to a
-            // key-value collection (['required' => true]), so the older
-            // ['name' => 'required'] scan matched nothing and told every agent
-            // no custom field was ever required.
+            // A retired type keeps its stored rows but loses its case, so it has no
+            // write vocabulary to publish. Skipping beats throwing the whole schema away.
+            if (! $type instanceof CustomFieldType) {
+                continue;
+            }
+
+            // validation_rules casts to ['required' => true], so a ['name' => 'required']
+            // scan matches nothing and tells every agent no field was ever required.
             $required = resolve(ValidationService::class)->isRequired($field);
 
             $entry = [

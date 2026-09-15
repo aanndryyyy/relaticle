@@ -434,3 +434,36 @@ it('has a custom field type case for every type the package registers', function
 
     expect($missing)->toBe([], 'Every enabled package field type needs an App\\Enums\\CustomFieldType case, or the MCP schema throws on it.');
 });
+
+it('serves the schema when a stored field carries a retired type with no enum case', function (): void {
+    $workspace = $this->user->personalWorkspace();
+
+    CustomField::query()->create([
+        'tenant_id' => $workspace->id,
+        'entity_type' => 'company',
+        'code' => 'legacy_brief',
+        'name' => 'Legacy Brief',
+        'type' => 'markdown-editor',
+        'sort_order' => 1,
+        'active' => true,
+        'validation_rules' => [],
+    ]);
+
+    CustomField::query()->create([
+        'tenant_id' => $workspace->id,
+        'entity_type' => 'company',
+        'code' => 'live_note',
+        'name' => 'Live Note',
+        'type' => 'text',
+        'sort_order' => 2,
+        'active' => true,
+        'validation_rules' => [],
+    ]);
+
+    RelaticleServer::actingAs($this->user)
+        ->resource(CompanySchemaResource::class)
+        ->assertOk()
+        ->assertHasNoErrors()
+        ->assertSee('live_note')
+        ->assertDontSee('legacy_brief');
+});
