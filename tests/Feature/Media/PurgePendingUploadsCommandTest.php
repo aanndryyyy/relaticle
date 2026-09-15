@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Actions\Upload\PurgeExpiredUploads;
 use App\Console\Commands\PurgePendingUploadsCommand;
 use App\Enums\MediaCollection;
 use App\Models\User;
@@ -12,7 +11,7 @@ use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\Storage;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
-mutates(PurgeExpiredUploads::class, PurgePendingUploadsCommand::class);
+mutates(PurgePendingUploadsCommand::class);
 
 beforeEach(function (): void {
     Storage::fake('local');

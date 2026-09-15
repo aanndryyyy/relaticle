@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use App\Actions\Upload\BackfillRichEditorAttachments;
 use App\Console\Commands\BackfillRichEditorAttachmentsCommand;
 use App\Enums\MediaCollection;
 use App\Models\CustomField;
@@ -13,7 +12,7 @@ use Relaticle\CustomFields\Services\TenantContextService;
 use Spatie\Activitylog\Models\Activity;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
-mutates(BackfillRichEditorAttachments::class, BackfillRichEditorAttachmentsCommand::class);
+mutates(BackfillRichEditorAttachmentsCommand::class);
 
 beforeEach(function (): void {
     $this->freezeTime();
