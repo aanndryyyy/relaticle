@@ -19,9 +19,7 @@ final readonly class RetryFailedEmailImportsAction
     {
         $count = $this->failedImports->retryAll($account);
 
-        if ($count === 0) {
-            throw new RuntimeException('No failed email imports to retry for this account.');
-        }
+        throw_if($count === 0, RuntimeException::class, 'No failed email imports to retry for this account.');
 
         $account->update([
             'status' => EmailAccountStatus::ACTIVE,
