@@ -7,6 +7,7 @@ return [
         'busy' => 'The upload is being processed. Try again shortly.',
         'too_large' => 'The file is larger than :max MB.',
         'mime_not_allowed' => 'Files of type :mime are not accepted. Allowed: :allowed.',
+        'extension_missing' => 'Give the file name an extension. Allowed: :allowed.',
         'unreachable' => 'The URL could not be fetched.',
         'url_not_allowed' => 'Only public https URLs on port 443 can be fetched.',
         'not_found' => 'The upload was not found or has expired.',

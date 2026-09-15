@@ -194,6 +194,12 @@ describe('create-upload-url', function (): void {
             ->assertHasErrors(['Files of type html are not accepted. Allowed: pdf, doc, docx, xlsx, pptx, jpg, png, gif, webp, jpeg.']);
     });
 
+    it('names the missing extension instead of an empty type', function (): void {
+        RelaticleServer::actingAs($this->user)
+            ->tool(CreateUploadUrlTool::class, ['filename' => 'report'])
+            ->assertHasErrors(['Give the file name an extension. Allowed: pdf, doc, docx, xlsx, pptx, jpg, png, gif, webp, jpeg.']);
+    });
+
     it('requires the create ability', function (): void {
         $token = $this->user->createToken('test', ['read']);
         $this->user->withAccessToken($token->accessToken);

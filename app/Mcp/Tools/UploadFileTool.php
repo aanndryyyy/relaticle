@@ -24,7 +24,7 @@ use Laravel\Mcp\Server\Tool;
 
 #[Name('upload-file')]
 #[Title('Upload File')]
-#[Description('Store a file in this workspace. Returns suggested_markdown to embed the file in a rich-editor field (note body, task description), and file_id to refer to the stored file. Pass exactly one of: source_url (public https), base64 with filename, or upload_id from create-upload-url. filename is optional with upload_id but recommended. Allowed types: pdf, doc, docx, xlsx, pptx, jpeg, png, gif, webp; 10 MB max. Limited to 60 calls per hour per workspace, refused files included.')]
+#[Description('Store a file in this workspace. Returns suggested_markdown to embed the file in a rich-editor field (note body, task description), and file_id to refer to the stored file. Pass exactly one of: source_url (public https), base64 with filename, or upload_id from create-upload-url. filename is optional with upload_id but recommended. Allowed types: pdf, doc, docx, xlsx, pptx, jpg, jpeg, png, gif, webp; 10 MB max. Limited to 60 calls per hour per workspace, refused files included.')]
 final class UploadFileTool extends Tool
 {
     use ChecksTokenAbility;

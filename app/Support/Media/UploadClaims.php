@@ -7,7 +7,6 @@ namespace App\Support\Media;
 use App\Enums\CustomFieldType;
 use App\Enums\MediaCollection;
 use App\Models\CustomFieldValue;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -18,20 +17,6 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
 final readonly class UploadClaims
 {
     public function __construct(private MediaLookup $lookup) {}
-
-    public function isClaimable(string $workspaceId, string $uuid, string $entityType, string|int|null $entityId, string $customFieldId): bool
-    {
-        return Media::query()
-            ->where('workspace_id', $workspaceId)
-            ->where('uuid', $uuid)
-            ->where(fn (Builder $query): Builder => $query
-                ->where('collection_name', MediaCollection::PendingUploads->value)
-                ->orWhere(fn (Builder $owned): Builder => $owned
-                    ->where('model_type', $entityType)
-                    ->where('model_id', $entityId)
-                    ->where('custom_field_id', $customFieldId)))
-            ->exists();
-    }
 
     public function assertClaimable(CustomFieldValue $value): void
     {

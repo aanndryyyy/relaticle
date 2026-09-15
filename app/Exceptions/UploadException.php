@@ -16,6 +16,10 @@ final class UploadException extends RuntimeException
 
     public static function mimeNotAllowed(string $mime): self
     {
+        if ($mime === '') {
+            return new self(__('uploads.errors.extension_missing', ['allowed' => implode(', ', UploadAllowlist::extensions())]));
+        }
+
         return new self(__('uploads.errors.mime_not_allowed', ['mime' => $mime, 'allowed' => implode(', ', UploadAllowlist::extensions())]));
     }
 
@@ -32,11 +36,6 @@ final class UploadException extends RuntimeException
     public static function notFound(): self
     {
         return new self(__('uploads.errors.not_found'));
-    }
-
-    public static function rateLimited(): self
-    {
-        return new self(__('uploads.errors.rate_limited'));
     }
 
     public static function invalidBase64(): self

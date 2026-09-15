@@ -325,7 +325,7 @@ it('keeps new file uploads on medialibrary', function (): void {
 
             $source = (string) file_get_contents($file->getPathname());
 
-            if (preg_match('/\bFileUpload::make\(|->attachFiles\(|->fileAttachmentsDisk\(|->fileAttachmentsDirectory\(/', $source) === 1) {
+            if (preg_match('/\bFileUpload::make\(|->fileAttachments\(|->fileAttachmentsDisk\(|->fileAttachmentsDirectory\(/', $source) === 1) {
                 $offenders[] = $relative;
             }
         }
