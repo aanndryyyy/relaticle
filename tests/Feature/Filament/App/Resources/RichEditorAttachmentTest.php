@@ -345,3 +345,22 @@ it('does not rewrite a body document link when the note is saved untouched', fun
     expect($before)->not->toContain('signature=')
         ->and(storedNoteBody($note, $this->body))->toBe($before);
 });
+
+it('drops the src of an image whose id this workspace cannot resolve', function (): void {
+    $stranger = User::factory()->withPersonalWorkspace()->create()->personalWorkspace();
+    $foreign = $stranger->addMediaFromString(onePixelPng())->usingFileName('a.png')
+        ->withAttributes(['workspace_id' => $stranger->getKey()])
+        ->toMediaCollection(MediaCollection::PendingUploads->value);
+
+    livewire(ManageNotes::class)
+        ->callAction('create', [
+            'title' => 'Foreign image',
+            'custom_fields' => ['body' => '<p><img data-id="'.$foreign->uuid.'" src="'.e($foreign->getUrl()).'"></p>'],
+        ])
+        ->assertHasNoActionErrors();
+
+    $note = Note::query()->where('title', 'Foreign image')->firstOrFail();
+
+    expect(storedNoteBody($note, $this->body))->not->toContain('signature=')
+        ->and($foreign->refresh()->model_id)->toBe($stranger->getKey());
+});
