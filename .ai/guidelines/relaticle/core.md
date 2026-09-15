@@ -9,6 +9,11 @@ Treat every change like it's going through senior code review:
 - Handle errors and edge cases properly
 - Write code that won't embarrass you in 6 months
 
+A rule that cannot name the artifact failing when you break it is decoration. Every
+rule here names a class, a test, or a command, because the one abstract rule this file
+used to carry ("never store the same fact in two places") was in force for the three
+months two copies of the same field vocabulary drifted apart.
+
 ## Database
 
 - This project uses **PostgreSQL exclusively**. Do not add SQLite/MySQL compatibility layers, driver checks, or conditional SQL

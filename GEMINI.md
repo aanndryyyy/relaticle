@@ -73,7 +73,25 @@ final readonly class CreateOpportunity
 - Use `App\Data` (spatie/laravel-data) objects for structured payloads where they
   already exist; don't introduce new patterns
 - Name domain concepts plainly (`Plan`, not `AiPlan`). Context comes from the
-  namespace. Never store the same fact in two places; pick one source of truth
+  namespace
+
+## One fact, one owner
+
+A fact more than one surface publishes gets an owner class, and every surface reads it.
+The working examples: `CustomFieldFilterSchema` owns filter operators,
+`App\Mcp\Schema\CustomFieldSchema` plus `CustomFieldType::inputFormat()` own how a
+custom field is described to an agent, `CrmEntity::titleColumn()` owns the name column.
+Facts that are a pure function of an enum case (a label, a format, a capability) live on
+the enum, never in a private `match` inside a consumer.
+
+The measurement that produced this rule: of four cross-surface axes, the two with an
+owner class had zero drift and the two without had three, including a company owner the
+REST API silently dropped while MCP and chat both wrote it.
+
+`tests/Feature/CRM/SurfaceParityTest.php` is the gate for the surfaces that still carry
+a per-entity copy: API form request, MCP tool, chat tool, MCP schema resource. Adding a
+writable field or a relation include to one of them fails that test until the others
+follow.
 
 ## i18n enforcement
 
@@ -158,6 +176,11 @@ Treat every change like it's going through senior code review:
 - No lazy shortcuts or placeholder code
 - Handle errors and edge cases properly
 - Write code that won't embarrass you in 6 months
+
+A rule that cannot name the artifact failing when you break it is decoration. Every
+rule here names a class, a test, or a command, because the one abstract rule this file
+used to carry ("never store the same fact in two places") was in force for the three
+months two copies of the same field vocabulary drifted apart.
 
 ## Database
 
@@ -284,6 +307,7 @@ is the exception that admits the code could not.
 - `CustomFieldValidationService` intentionally uses explicit `where('tenant_id', ...)` with `withoutGlobalScopes()`. This is defensive and correct; don't change it to rely on ambient state
 - Every write path that is NOT a Filament panel request or behind `SetApiWorkspaceContext` (chat action approval, queued jobs, webhooks, commands) must set `TenantContextService::setTenantId()` before saving custom fields. Otherwise `saveCustomFields` iterates every tenant (gateway timeouts + cross-tenant writes). Wrap manual calls in try/finally restoring the previous tenant id (mirror `SetApiWorkspaceContext`)
 - Writing null/empty for a custom field is how a value is cleared. Never skip or filter out "empty" values on save; only keys absent from the payload are left untouched. Verify any persistence change in both directions (set a value AND clear it), through both the panel form and the chat/API path
+- Retire a field type through `config('custom-fields.field_type_configuration')->disabled()` and keep its `CustomFieldType` case. Stored rows still need a type name and a write format when a schema lists them, and `CustomFieldType::from()` throws without the case. `FILE_UPLOAD` is the precedent
 
 === .ai/relaticle/testing rules ===
 
