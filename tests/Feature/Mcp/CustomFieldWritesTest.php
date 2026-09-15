@@ -567,7 +567,6 @@ describe('rich editor images', function (): void {
 
         expect($media->refresh()->model_id)->toBe($note->getKey())
             ->and($media->collection_name)->toBe(MediaCollection::Attachments->value)
-            ->and($media->custom_field_id)->toBe($this->body->getKey())
             ->and((string) $note->getCustomFieldValue($this->body))->toContain("data-id=\"{$media->uuid}\"");
     });
 

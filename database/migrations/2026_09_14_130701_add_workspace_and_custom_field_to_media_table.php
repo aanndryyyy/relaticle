@@ -13,7 +13,6 @@ return new class extends Migration
     {
         Schema::table('media', function (Blueprint $table): void {
             $table->ulid('workspace_id')->nullable()->after('id')->index();
-            $table->ulid('custom_field_id')->nullable()->after('collection_name');
         });
 
         DB::table('media')

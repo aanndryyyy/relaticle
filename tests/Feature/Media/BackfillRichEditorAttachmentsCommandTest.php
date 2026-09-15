@@ -58,7 +58,6 @@ it('creates a media row on the record and rewrites the image with --force, outsi
 
     expect($media->model_id)->toBe($this->note->getKey())
         ->and($media->collection_name)->toBe(MediaCollection::Attachments->value)
-        ->and($media->custom_field_id)->toBe($this->body->getKey())
         ->and($media->workspace_id)->toBe($this->workspace->getKey())
         ->and($media->disk)->toBe('local')
         ->and($html)->toContain("data-id=\"{$media->uuid}\"")

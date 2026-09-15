@@ -59,7 +59,6 @@ it('stores a pending upload under uploads/{uuid} with its provenance', function 
         ->and($media->mime_type)->toBe('application/pdf')
         ->and($media->name)->toBe('Contract v2.pdf')
         ->and($media->workspace_id)->toBe($this->workspace->getKey())
-        ->and($media->custom_field_id)->toBeNull()
         ->and($media->getCustomProperty('uploaded_by'))->toBe($this->user->getKey())
         ->and($media->getCustomProperty('source'))->toBe('panel');
 

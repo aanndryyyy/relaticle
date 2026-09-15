@@ -13,10 +13,10 @@ Recorded 2026-09-12 with the founder, revised 2026-09-14 after a decision-by-dec
 1. One PR, one plan. Phase 1 (#686) and Phase 2 (agent uploads) ship together on `feat/agent-file-uploads`.
 2. Build on relaticle/custom-fields 3.9.1. The 4.0 program (#597) has no code timeline.
 3. Rich editor attachments use the component closure hooks, not Filament's `HasRichContent` provider route. Note body and task description are custom-field values, not model attributes, so the provider has nothing to attach to.
-4. An upload is owned by the `Workspace` while pending and moves to the record when a saved value references it. One field, one owner.
-5. `media` carries two real columns, `workspace_id` (indexed) and `custom_field_id`. Tenant scoping never reads a JSON property. `custom_field_id` needs no index of its own: every query that filters on it is already narrowed by the model morph index or by `workspace_id`.
+4. An upload is owned by the `Workspace` while pending and moves to the record when a saved value references it. One record, one owner.
+5. `media` carries one real column, `workspace_id` (indexed). Tenant scoping never reads a JSON property. A `custom_field_id` column was dropped after review: with one rich-editor field per entity today it discriminated nothing, and scoping the release to a single field made a release bug delete a sibling field's files. The release now reads every rich-editor value on the record.
 6. A stored reference to a file is the Media `uuid`. Paths are derived from the row, never stored.
-7. One `attachments` collection per record. The field a file belongs to is `custom_field_id`, which survives a field code rename.
+7. One `attachments` collection per record. A file belongs to the record, not to a field, so the same image can appear in two rich-editor fields and survives until no value names it.
 8. Uploads are private by default. `MEDIA_DISK` names an existing disk from `config/filesystems.php`, default `local`. `logo` collections stay on `public`.
 9. There is no `file-upload` custom field type. The components are removed and the type is disabled in config; rich-editor attachments and the MCP upload tools are the file surface. `CustomFieldType::FILE_UPLOAD` stays so code that excludes the type still compiles.
 10. The agent contract returns a stable, unsigned `/media/{uuid}` link in `suggested_markdown`. Only rendering surfaces sign.
@@ -41,13 +41,13 @@ Verified 2026-09-12 in this checkout and in production.
 
 ### Columns and collections
 
-`media.workspace_id` is set on every upload this design creates. `media.custom_field_id` is set when a value claims the row. Logo rows keep both null.
+`media.workspace_id` is set on every upload this design creates. Logo rows keep it null.
 
 | Owner | Collection | Holds |
 |---|---|---|
 | `Company`, `Workspace` | `logo` | unchanged, public disk |
 | `Workspace` | `pending-uploads` | every upload before a saved value claims it |
-| record (`Company`, `People`, `Opportunity`, `Task`, `Note`) | `attachments` | the inline images and linked documents of a rich-editor value, keyed to the field by `custom_field_id` |
+| record (`Company`, `People`, `Opportunity`, `Task`, `Note`) | `attachments` | the inline images and linked documents of every rich-editor value on the record |
 
 ### Paths
 
@@ -56,9 +56,9 @@ Verified 2026-09-12 in this checkout and in production.
 ### Lifecycle
 
 1. Upload. Any entry point (panel `FileUpload`, panel rich editor, MCP `upload-file`) creates a Media row in the caller's workspace `pending-uploads` collection. `name` is the original file name; custom properties carry `uploaded_by` and `source` (`panel`, `url`, `base64`, `signed_put`). medialibrary `max_file_size` (10 MB) is the size gate on every source.
-2. Validate. `UploadClaims::assertClaimable()` runs from the `saving` observer hook. A referenced uuid must be pending in the caller's workspace or already owned by this record and field, so a race between two saves cannot persist a value that names a file another record claimed.
-3. Claim. The `saved` observer hook reassigns every referenced pending row in place: `model_type`, `model_id`, `custom_field_id`, `collection_name`. `uuid` and file do not change. A rich-editor image another workspace owns is left where it is.
-4. Release. After commit, media on the record for the same field that the new value no longer references is deleted. Deleting the record deletes its media through `InteractsWithMedia`.
+2. Validate. `UploadClaims::assertClaimable()` runs from the `saving` observer hook. A referenced uuid must be pending in the caller's workspace or already an attachment on this record, so a race between two saves cannot persist a value that names a file another record claimed.
+3. Claim. The `saved` observer hook reassigns every referenced pending row in place: `model_type`, `model_id`, `collection_name`. `uuid` and file do not change. A rich-editor image another workspace owns is left where it is.
+4. Release. After commit, the record's `attachments` that no rich-editor value on it still references are deleted. Deleting the record deletes its media through `InteractsWithMedia`.
 5. Purge. `app:purge-pending-uploads` deletes `pending-uploads` rows older than 24 hours and signed-PUT temp files under `tmp/` on the `local` disk. Hourly.
 
 ## Rich editor attachments
@@ -88,6 +88,6 @@ The native alternative is `Storage::temporaryUrl()`. It skips the PHP round trip
 ## Outside this PR
 
 - Chat gets no upload tool. The rich editor is the only file surface in the panel, and chat cannot set a rich-editor attachment.
-- Deleting a custom field leaves its media on the record with a dangling `custom_field_id`. A field-deleted hook that releases them is a follow-up.
+- Deleting a rich-editor custom field releases its images on the next save of any rich-editor value on that record, because the deleted field's value no longer contributes references.
 - Logo rows keep `workspace_id` null, so the column cannot become `NOT NULL` without a backfill.
 - Deployment check: a 10 MB base64 payload is a 14 MB request body. nginx `client_max_body_size` and PHP `post_max_size` on the MCP host must allow at least 14 MB.

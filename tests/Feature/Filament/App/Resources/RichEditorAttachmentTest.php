@@ -135,8 +135,7 @@ it('claims the image when the note is created', function (): void {
 
     expect($media->model_id)->toBe($note->getKey())
         ->and($media->model_type)->toBe($note->getMorphClass())
-        ->and($media->collection_name)->toBe(MediaCollection::Attachments->value)
-        ->and($media->custom_field_id)->toBe($this->body->getKey());
+        ->and($media->collection_name)->toBe(MediaCollection::Attachments->value);
 });
 
 it('releases an image the edited body no longer references', function (): void {

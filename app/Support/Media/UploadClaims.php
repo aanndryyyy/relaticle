@@ -7,6 +7,8 @@ namespace App\Support\Media;
 use App\Enums\CustomFieldType;
 use App\Enums\MediaCollection;
 use App\Models\CustomFieldValue;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Relaticle\CustomFields\Models\CustomField;
@@ -47,9 +49,9 @@ final readonly class UploadClaims
             }
 
             $claimable = $media->collection_name === MediaCollection::PendingUploads->value
-                || ($media->model_type === $value->getAttribute('entity_type')
-                    && (string) $media->model_id === (string) $value->getAttribute('entity_id')
-                    && $media->custom_field_id === $field->getKey());
+                || ($media->collection_name === MediaCollection::Attachments->value
+                    && $media->model_type === $value->getAttribute('entity_type')
+                    && (string) $media->model_id === (string) $value->getAttribute('entity_id'));
 
             throw_unless($claimable, ValidationException::withMessages([
                 "custom_fields.{$field->code}" => __('validation.custom_field.upload', ['field' => $field->name]),
@@ -85,26 +87,47 @@ final readonly class UploadClaims
                 'model_type' => $entity->getMorphClass(),
                 'model_id' => $entity->getKey(),
                 'collection_name' => MediaCollection::Attachments->value,
-                'custom_field_id' => $field->getKey(),
             ]);
 
-        DB::afterCommit(function () use ($entity, $field, $value): void {
-            DB::transaction(function () use ($entity, $field, $value): void {
+        DB::afterCommit(function () use ($entity, $value): void {
+            DB::transaction(function () use ($entity, $value): void {
                 $entity->newQueryWithoutScopes()->whereKey($entity->getKey())->lockForUpdate()->first();
-                $current = CustomFieldValue::query()->withoutGlobalScopes()
-                    ->where('tenant_id', $value->getAttribute('tenant_id'))
-                    ->where('entity_type', $entity->getMorphClass())
-                    ->where('entity_id', $entity->getKey())
-                    ->where('custom_field_id', $field->getKey())
-                    ->first();
-                $referenced = $this->lookup->referencedUuids($field->type, $current?->getValue());
 
                 $entity->media()
-                    ->where('custom_field_id', $field->getKey())
-                    ->whereNotIn('uuid', $referenced)
+                    ->where('collection_name', MediaCollection::Attachments->value)
+                    ->whereNotIn('uuid', $this->referencedAcrossRecord($entity, (string) $value->getAttribute('tenant_id')))
                     ->get()
                     ->each->delete();
             });
         });
+    }
+
+    /**
+     * Attachments belong to the record, not to one field, so a release has to read every
+     * rich editor value on it. Reading one would delete the other fields' files.
+     *
+     * @return list<string>
+     */
+    private function referencedAcrossRecord(HasMedia $entity, string $workspaceId): array
+    {
+        $values = CustomFieldValue::query()->withoutGlobalScopes()
+            ->where('tenant_id', $workspaceId)
+            ->where('entity_type', $entity->getMorphClass())
+            ->where('entity_id', $entity->getKey())
+            ->whereHas('customField', fn (Builder $query): Builder => $query->withoutGlobalScopes()->where('type', CustomFieldType::RICH_EDITOR->value))
+            ->with(['customField' => fn (Relation $query): Relation => $query->withoutGlobalScopes()])
+            ->get();
+
+        $uuids = [];
+
+        foreach ($values as $each) {
+            $field = $each->getRelationValue('customField');
+
+            if ($field instanceof CustomField) {
+                array_push($uuids, ...$this->lookup->referencedUuids($field->type, $each->getValue()));
+            }
+        }
+
+        return array_values(array_unique($uuids));
     }
 }

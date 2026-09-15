@@ -16,8 +16,9 @@ Durable user files go through medialibrary with a named collection on the owning
 model (`App\Enums\MediaCollection`). Two exemptions: import CSVs under
 `storage/app/imports` (transient) and Jetstream profile photos (framework-owned).
 
-- `media.workspace_id` and `media.custom_field_id` are real columns. Scope every
-  media query on them, never on a `custom_properties` JSON path.
+- `media.workspace_id` is a real column. Scope every media query on it, never on a
+  `custom_properties` JSON path. There is deliberately no `media.custom_field_id`:
+  an attachment belongs to the record, not to one field.
 - There is no `file-upload` custom field type. Rich-editor attachments and the
   MCP upload tools are the only ways a user file reaches a record; the type is
   listed in `->disabled()` in `config/custom-fields.php` so the package's own
@@ -25,9 +26,11 @@ model (`App\Enums\MediaCollection`). Two exemptions: import CSVs under
 - Every upload lands in the workspace's `pending-uploads` collection first
   (`App\Actions\Upload\StorePendingUpload`); `logo` collections are written
   directly. `App\Support\Media\UploadClaims` claims a pending row into the
-  record's `attachments` collection when a saved value references it, and
-  releases rows for the same `custom_field_id` the value no longer names. The
-  `saving` observer hook refuses a body embedding an image another record owns.
+  record's `attachments` collection when a saved value references it, and releases
+  the record's attachments that NO rich-editor value on it still names. A release
+  must therefore read every rich-editor value on the record: scoping it to the one
+  being saved deletes the other fields' files. The `saving` observer hook refuses a
+  body embedding an image another record owns.
 - Rich-editor images go through `App\Support\Media\RichContentAttachments`,
   the Filament `FileAttachmentProvider` behind `RichEditorFieldType` and
   `RichContentEntry`. `data-id` is the Media `uuid`; reads rewrite `src` from the

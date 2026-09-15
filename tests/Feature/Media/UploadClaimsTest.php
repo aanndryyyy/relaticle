@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Actions\Upload\StorePendingUpload;
 use App\Enums\MediaCollection;
 use App\Enums\UploadSource;
+use App\Models\Company;
 use App\Models\CustomField;
 use App\Models\CustomFieldValue;
 use App\Models\Note;
@@ -61,7 +62,6 @@ it('claims a pending upload onto the record without moving the file', function (
     expect($media->model_type)->toBe($note->getMorphClass())
         ->and($media->model_id)->toBe($note->getKey())
         ->and($media->collection_name)->toBe(MediaCollection::Attachments->value)
-        ->and($media->custom_field_id)->toBe($this->body->getKey())
         ->and($media->getPathRelativeToRoot())->toBe($path);
     Storage::disk('local')->assertExists($path);
 });
@@ -73,7 +73,6 @@ it('claims every image a rich editor body references and releases the ones it dr
     $note->saveCustomFieldValue($this->body, bodyEmbedding($kept, $dropped));
 
     expect($kept->refresh()->collection_name)->toBe(MediaCollection::Attachments->value)
-        ->and($kept->custom_field_id)->toBe($this->body->getKey())
         ->and($dropped->refresh()->model_id)->toBe($note->getKey());
 
     $note->saveCustomFieldValue($this->body, bodyEmbedding($kept));
@@ -156,7 +155,7 @@ it('keeps releasing after the field code is renamed', function (): void {
     $note->saveCustomFieldValue($summary->refresh(), bodyEmbedding($second));
 
     expect(Media::query()->find($first->getKey()))->toBeNull()
-        ->and($second->refresh()->custom_field_id)->toBe($summary->getKey());
+        ->and($second->refresh()->collection_name)->toBe(MediaCollection::Attachments->value);
 });
 
 it('deletes claimed media with the record', function (): void {
@@ -167,4 +166,79 @@ it('deletes claimed media with the record', function (): void {
     $note->forceDelete();
 
     expect(Media::query()->find($media->getKey()))->toBeNull();
+});
+
+it('keeps a second rich editor field attachments when the first field is saved', function (): void {
+    $summary = CustomField::factory()->create([
+        'tenant_id' => $this->workspace->getKey(),
+        'entity_type' => 'note',
+        'code' => 'summary',
+        'name' => 'Summary',
+        'type' => 'rich-editor',
+        'validation_rules' => [],
+        'active' => true,
+        'system_defined' => false,
+    ]);
+    $inBody = pendingUpload($this->user, onePixelPng(), 'body.png');
+    $inSummary = pendingUpload($this->user, onePixelPng(), 'summary.png');
+    $note = Note::factory()->create(['workspace_id' => $this->workspace->getKey()]);
+
+    $note->saveCustomFieldValue($summary, bodyEmbedding($inSummary));
+    $note->saveCustomFieldValue($this->body, bodyEmbedding($inBody));
+
+    expect(Media::query()->find($inSummary->getKey()))->not->toBeNull()
+        ->and(Media::query()->find($inBody->getKey()))->not->toBeNull();
+
+    $note->saveCustomFieldValue($this->body, '<p>no image</p>');
+
+    expect(Media::query()->find($inBody->getKey()))->toBeNull()
+        ->and(Media::query()->find($inSummary->getKey()))->not->toBeNull();
+});
+
+it('keeps the company logo when a rich editor field on it is cleared', function (): void {
+    $brief = CustomField::factory()->create([
+        'tenant_id' => $this->workspace->getKey(),
+        'entity_type' => 'company',
+        'code' => 'brief',
+        'name' => 'Brief',
+        'type' => 'rich-editor',
+        'validation_rules' => [],
+        'active' => true,
+        'system_defined' => false,
+    ]);
+    $company = Company::factory()->create(['workspace_id' => $this->workspace->getKey()]);
+    $logoPath = tempnam(sys_get_temp_dir(), 'logo');
+    file_put_contents($logoPath, onePixelPng());
+    $logo = $company->addMedia($logoPath)->usingFileName('logo.png')->toMediaCollection(Company::LOGO_MEDIA_COLLECTION);
+
+    $attachment = pendingUpload($this->user, onePixelPng(), 'brief.png');
+    $company->saveCustomFieldValue($brief, bodyEmbedding($attachment));
+    $company->saveCustomFieldValue($brief, '<p>cleared</p>');
+
+    expect(Media::query()->find($attachment->getKey()))->toBeNull()
+        ->and(Media::query()->find($logo->getKey()))->not->toBeNull();
+});
+
+it('accepts the same image in a second rich editor field on the same record', function (): void {
+    $summary = CustomField::factory()->create([
+        'tenant_id' => $this->workspace->getKey(),
+        'entity_type' => 'note',
+        'code' => 'summary',
+        'name' => 'Summary',
+        'type' => 'rich-editor',
+        'validation_rules' => [],
+        'active' => true,
+        'system_defined' => false,
+    ]);
+    $media = pendingUpload($this->user, onePixelPng(), 'shared.png');
+    $note = Note::factory()->create(['workspace_id' => $this->workspace->getKey()]);
+
+    $note->saveCustomFieldValue($this->body, bodyEmbedding($media));
+    $note->saveCustomFieldValue($summary, bodyEmbedding($media));
+
+    expect(Media::query()->find($media->getKey()))->not->toBeNull();
+
+    $note->saveCustomFieldValue($this->body, '<p>gone from the body</p>');
+
+    expect(Media::query()->find($media->getKey()))->not->toBeNull();
 });

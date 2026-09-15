@@ -115,7 +115,6 @@ final class BackfillRichEditorAttachmentsCommand extends Command
                 ->usingName(basename($legacyPath))
                 ->withAttributes([
                     'workspace_id' => $value->getAttribute('tenant_id'),
-                    'custom_field_id' => $value->customField->getKey(),
                 ])
                 ->withCustomProperties(['source' => UploadSource::Panel->value])
                 ->toMediaCollection(MediaCollection::Attachments->value);
