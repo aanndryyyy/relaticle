@@ -14,7 +14,7 @@ Recorded 2026-09-12 with the founder, revised 2026-09-14 after a decision-by-dec
 2. Build on relaticle/custom-fields 3.9.1. The 4.0 program (#597) has no code timeline.
 3. Rich editor attachments use the component closure hooks, not Filament's `HasRichContent` provider route. Note body and task description are custom-field values, not model attributes, so the provider has nothing to attach to.
 4. An upload is owned by the `Workspace` while pending and moves to the record when a saved value references it. One field, one owner.
-5. `media` carries two real columns, `workspace_id` and `custom_field_id`, both indexed ulids. Tenant scoping never reads a JSON property.
+5. `media` carries two real columns, `workspace_id` (indexed) and `custom_field_id`. Tenant scoping never reads a JSON property. `custom_field_id` needs no index of its own: every query that filters on it is already narrowed by the model morph index or by `workspace_id`.
 6. A stored reference to a file is the Media `uuid`. Paths are derived from the row, never stored.
 7. One `attachments` collection per record. The field a file belongs to is `custom_field_id`, which survives a field code rename.
 8. Uploads are private by default. `MEDIA_DISK` names an existing disk from `config/filesystems.php`, default `local`. `logo` collections stay on `public`.

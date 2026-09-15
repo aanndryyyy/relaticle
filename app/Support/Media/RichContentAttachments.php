@@ -71,9 +71,9 @@ final readonly class RichContentAttachments implements FileAttachmentProvider
         }
     }
 
-    public function getDefaultFileAttachmentVisibility(): ?string
+    public function getDefaultFileAttachmentVisibility(): string
     {
-        return null;
+        return 'private';
     }
 
     public function isExistingRecordRequiredToSaveNewFileAttachments(): bool
