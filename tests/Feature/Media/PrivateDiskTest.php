@@ -88,6 +88,18 @@ it('serves agent files with a safe original download name', function (): void {
     expect($media->name)->toBe('brief.pdf');
 });
 
+it('serves a file whose name has no ascii characters', function (): void {
+    RelaticleServer::actingAs($this->user)
+        ->tool(UploadFileTool::class, [
+            'base64' => base64_encode(pdfBytes()),
+            'filename' => '報告書',
+        ])
+        ->assertOk();
+    $media = Media::query()->latest('id')->firstOrFail();
+
+    $this->get($media->getUrl())->assertOk();
+});
+
 it('refuses an unsigned or expired private url', function (): void {
     $media = uploadPdf($this->user);
 
