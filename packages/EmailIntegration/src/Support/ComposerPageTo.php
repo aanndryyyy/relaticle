@@ -15,6 +15,6 @@ final readonly class ComposerPageTo
 
     public static function email(): ?string
     {
-        return app()->bound(self::class) ? app(self::class)->email : null;
+        return app()->bound(self::class) ? resolve(self::class)->email : null;
     }
 }
