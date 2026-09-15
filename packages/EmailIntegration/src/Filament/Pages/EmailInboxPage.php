@@ -197,9 +197,7 @@ final class EmailInboxPage extends Page
             ->forWorkspace($user->current_workspace_id)
             ->withGlobalScope('visible', new VisibleEmailScope($user));
 
-        if ($this->accountId !== '' && $this->accountId !== 'all') {
-            $query->where('connected_account_id', $this->accountId);
-        }
+        $this->applyAccountScope($query, $user);
 
         if ($this->folder === EmailFolder::Sent) {
             $query->sent();
@@ -274,9 +272,7 @@ final class EmailInboxPage extends Page
             ->withGlobalScope('visible', new VisibleEmailScope($user))
             ->unreadFor($user->getKey());
 
-        if ($this->accountId !== '' && $this->accountId !== 'all') {
-            $query->where('connected_account_id', $this->accountId);
-        }
+        $this->applyAccountScope($query, $user);
 
         return $query->count();
     }
@@ -775,6 +771,26 @@ final class EmailInboxPage extends Page
     public function showAccountSwitcher(): bool
     {
         return $this->userActiveAccounts()->count() > 1;
+    }
+
+    /**
+     * @param  Builder<Email>  $query
+     */
+    private function applyAccountScope(Builder $query, User $user): void
+    {
+        if ($this->accountId === '' || $this->accountId === 'all') {
+            return;
+        }
+
+        $query->where(function (Builder $accountQuery) use ($user): void {
+            $accountQuery->where('connected_account_id', $this->accountId)
+                ->orWhere(function (Builder $forwarded) use ($user): void {
+                    $forwarded
+                        ->whereNull('connected_account_id')
+                        ->where('user_id', $user->getKey())
+                        ->where('creation_source', EmailCreationSource::BCC_INBOUND);
+                });
+        });
     }
 
     private function authUser(): User

@@ -44,6 +44,8 @@ final class EmailIntegrationServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
+        $this->mergeConfigFrom(__DIR__.'/../config/inbound-email.php', 'inbound-email');
+
         $this->app->bind(CalendarServiceFactoryInterface::class, CalendarServiceFactory::class);
         $this->app->bind(MailServiceFactoryInterface::class, MailServiceFactory::class);
 

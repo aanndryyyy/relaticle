@@ -418,6 +418,8 @@ final class AppServiceProvider extends ServiceProvider
             return $limits;
         });
 
+        RateLimiter::for('inbound-email', fn (Request $request) => Limit::perMinute(120)->by($request->ip()));
+
         RateLimiter::for('mcp', fn (Request $request) => Limit::perMinute(120)->by($request->user()?->id ?: $request->ip()));
 
         RateLimiter::for(

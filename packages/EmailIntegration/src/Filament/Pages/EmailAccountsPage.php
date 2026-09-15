@@ -4,18 +4,24 @@ declare(strict_types=1);
 
 namespace Relaticle\EmailIntegration\Filament\Pages;
 
+use App\Models\User;
+use App\Models\Workspace;
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Enums\Size;
+use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Support\HtmlString;
+use Relaticle\EmailIntegration\Actions\EnsureWorkspaceInboundAddressAction;
 use Relaticle\EmailIntegration\Filament\Clusters\EmailSettings;
 use Relaticle\EmailIntegration\Filament\Concerns\HasConnectedAccountActions;
 use Relaticle\EmailIntegration\Filament\Concerns\HasConnectMailboxActions;
 use Relaticle\EmailIntegration\Filament\Concerns\HasEmailFeatureFlag;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
+use Relaticle\EmailIntegration\Models\WorkspaceInboundAddress;
 
 final class EmailAccountsPage extends Page
 {
@@ -38,11 +44,6 @@ final class EmailAccountsPage extends Page
         return __('filament/pages/email-accounts.title');
     }
 
-    /**
-     * Heading and subheading are rendered inside the content column (see the page
-     * view) so they sit with the accounts panel under the cluster tabs. The page
-     * header itself stays empty.
-     */
     public function getHeading(): string
     {
         return '';
@@ -59,9 +60,6 @@ final class EmailAccountsPage extends Page
     }
 
     /**
-     * Keep the "Accounts" cluster item highlighted while a single account's
-     * settings page, a child of this one, is open.
-     *
      * @return array<int, string>
      */
     public static function getNavigationItemActiveRoutePattern(): array
@@ -69,6 +67,7 @@ final class EmailAccountsPage extends Page
         return [
             self::getRouteName(),
             EmailAccountSettingsPage::getRouteName(),
+            ForwardingAddressSettingsPage::getRouteName(),
         ];
     }
 
@@ -77,11 +76,21 @@ final class EmailAccountsPage extends Page
      */
     public Collection $connectedAccounts;
 
-    public function mount(): void
+    public WorkspaceInboundAddress $forwardingAddress;
+
+    public function mount(EnsureWorkspaceInboundAddressAction $ensureForwardingAddress): void
     {
         $this->sendSuccessNotification();
         $this->sendErrorNotification();
         $this->connectedAccounts = $this->getAccounts();
+
+        /** @var User $user */
+        $user = auth()->user();
+        $workspace = $user->currentWorkspace;
+
+        abort_unless($workspace instanceof Workspace, 404);
+
+        $this->forwardingAddress = $ensureForwardingAddress->execute($workspace);
     }
 
     /**
@@ -90,6 +99,23 @@ final class EmailAccountsPage extends Page
     private function getAccounts(): Collection
     {
         return $this->ownedAccountsQuery()->defaultFirst()->get();
+    }
+
+    public function forwardingActions(): ActionGroup
+    {
+        return ActionGroup::make([
+            Action::make('forwardingSettings')
+                ->label(__('filament/pages/email-accounts.actions.manage'))
+                ->icon('heroicon-o-cog-6-tooth')
+                ->color('gray')
+                ->size(Size::Small)
+                ->url(fn (): string => ForwardingAddressSettingsPage::getUrl()),
+        ])
+            ->label(__('filament/pages/email-accounts.actions.manage'))
+            ->icon(Heroicon::EllipsisVertical)
+            ->color('gray')
+            ->size(Size::Small)
+            ->iconButton();
     }
 
     public function editSettingsAction(): Action

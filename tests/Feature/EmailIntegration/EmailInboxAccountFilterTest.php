@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Models\User;
 use Filament\Facades\Filament;
+use Relaticle\EmailIntegration\Enums\EmailCreationSource;
 use Relaticle\EmailIntegration\Filament\Pages\EmailInboxPage;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Email;
@@ -48,6 +49,21 @@ it('lands on the default account and shows only its emails', function (): void {
     expect($page->instance()->accountId)->toBe($this->defaultAccount->getKey());
     expect($page->instance()->emails()->pluck('id')->all())
         ->toBe([$this->defaultEmail->getKey()]);
+});
+
+it('includes the viewers forwarded inbound mail when scoped to a connected account', function (): void {
+    $forwarded = Email::factory()->inbound()->full()->create([
+        'workspace_id' => $this->workspace->id,
+        'user_id' => $this->owner->id,
+        'connected_account_id' => null,
+        'creation_source' => EmailCreationSource::BCC_INBOUND,
+        'sent_at' => now()->subMinutes(30),
+    ]);
+
+    $page = livewire(EmailInboxPage::class);
+
+    expect($page->instance()->emails()->pluck('id')->all())
+        ->toEqualCanonicalizing([$this->defaultEmail->getKey(), $forwarded->getKey()]);
 });
 
 it('shows every account when switched to "all"', function (): void {

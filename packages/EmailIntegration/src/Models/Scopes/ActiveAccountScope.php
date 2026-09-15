@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Scope;
 
 /**
  * Hides emails whose connected account has been disconnected (soft-deleted).
+ * Inbound forwarding rows have no account and stay visible.
  *
  * The whereHas runs against the ConnectedAccount relation, so its own
  * SoftDeletingScope applies automatically: a trashed account fails the
@@ -27,6 +28,9 @@ final readonly class ActiveAccountScope implements Scope
      */
     public function apply(Builder $builder, Model $model): void
     {
-        $builder->whereHas('connectedAccount');
+        $builder->where(function (Builder $query) use ($model): void {
+            $query->whereNull($model->qualifyColumn('connected_account_id'))
+                ->orWhereHas('connectedAccount');
+        });
     }
 }

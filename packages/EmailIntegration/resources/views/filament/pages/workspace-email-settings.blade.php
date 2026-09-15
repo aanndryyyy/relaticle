@@ -23,6 +23,7 @@
         >
             {{ __('filament/pages/email-privacy-settings.tabs.record_creation') }}
         </x-filament::tabs.item>
+
     </x-filament::tabs>
 
     {{ $this->form }}

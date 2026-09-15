@@ -76,7 +76,8 @@
         "symfony/html-sanitizer": "^7.2|^8.0",
         "symfony/http-client": "^8.1",
         "symfony/postmark-mailer": "^8.1",
-        "symfony/yaml": "^8.1"
+        "symfony/yaml": "^8.1",
+        "zbateson/mail-mime-parser": "^3.0"
     },
     "require-dev": {
         "driftingly/rector-laravel": "^2.0",
