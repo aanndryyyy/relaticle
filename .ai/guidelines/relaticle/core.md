@@ -13,6 +13,25 @@ Treat every change like it's going through senior code review:
 
 - This project uses **PostgreSQL exclusively**. Do not add SQLite/MySQL compatibility layers, driver checks, or conditional SQL
 - Migrations must only have `up()` methods. Never write a `down()` method
+- A data backfill the query builder can express belongs in the migration, chunked with
+  `eachById`: no models, no file access, no app code. This is the only shape that reaches a
+  self-hosted install unaided. `2026_09_10_000000_convert_markdown_editor_custom_fields_to_rich_editor`
+  is the worked example, and Spatie ships the same shape in `laravel-activitylog` UPGRADING.md
+- A backfill that needs models, files, or another service is a command instead: it reports by
+  default, writes only on `--force`, and re-runs after a partial failure. A migration can do
+  none of that, because we never write `down()`
+- A self-hosted upgrade is `docker compose pull && up -d`: migrations run, nothing else, so no
+  command of ours ever runs there. Ship a change of storage shape behind a read-path shim that
+  keeps the old shape working (`RichContentAttachments::getFileAttachmentUrl()` still serves a
+  legacy bare-filename `data-id`), then queue the command from a migration, as
+  `2026_09_15_150837_queue_rich_editor_attachment_backfill` does:
+  `Artisan::queue($command, ['--force' => true])->onQueue('imports')->afterCommit()`. Pgsql
+  wraps every migration in a transaction, so without `afterCommit` a worker can start before the
+  DDL lands. `imports` is the long lane (300s, 2 tries, 256MB) where `default` allows 60s and one
+  try, and `QUEUE_CONNECTION=sync` runs the command inline, so it stays chunked and idempotent
+  either way. Never `Artisan::call()` in `up()`: the container entrypoint runs under `set -e`, so
+  a throw there crash-loops the app and takes Horizon down with it. `tests/Arch/ConventionsTest.php`
+  fails when a migration names a command that no longer exists
 - Every datetime column is `timestamp without time zone` holding **UTC**. Never write one from
   the database clock. That rules out `DB::raw('now()')`, `CURRENT_TIMESTAMP`, and `->useCurrent()` /
   `->useCurrentOnUpdate()` column defaults. Those resolve against the *session* timezone and

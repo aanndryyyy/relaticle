@@ -32,10 +32,11 @@ anatomy mirrors a Laravel app: `src/`, `config/`, `routes/`, `resources/`,
 
 ## Actions (the write path)
 
-All write operations (create, update, delete) go through action classes in
-`app/Actions/<Domain>/`. Never inline business logic in controllers, MCP tools,
-Livewire components, or Filament resources. Actions are the single source of
-truth for business logic and side effects (notifications, syncs, etc.).
+Write operations (create, update, delete) that reach the domain from a transport
+surface go through action classes in `app/Actions/<Domain>/`. Never inline business
+logic in controllers, MCP tools, Livewire components, or Filament resources.
+Actions are the single source of truth for business logic and side effects
+(notifications, syncs, etc.).
 
 The canonical shape is `final readonly`, with a single `execute()` method and
 authorization plus tenant-ownership checks inside the action itself:
@@ -61,6 +62,10 @@ final readonly class CreateOpportunity
   plain `Model::create()`/`->update()` with no extra logic. Side effects
   (e.g., notifications) must still be triggered via `->after()` hooks calling the
   appropriate action
+- An action exists to keep business logic out of transport surfaces and to share one
+  write between callers. A console command is neither: it has no `$user`, so the
+  canonical `abort_unless` plus `assertOwned` shape does not apply. Give a command an
+  action when a second caller shares the write, otherwise the logic lives in `handle()`
 - When reviewing or refactoring code, extract inline business logic into action classes
 - Use `App\Data` (spatie/laravel-data) objects for structured payloads where they
   already exist; don't introduce new patterns
