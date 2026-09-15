@@ -27,7 +27,7 @@ final readonly class ShowMediaController
             'X-Content-Type-Options' => 'nosniff',
             'Content-Security-Policy' => "default-src 'none'; style-src 'unsafe-inline'; sandbox",
             'Content-Disposition' => HeaderUtils::makeDisposition($disposition, (string) $media->name, $this->fallbackName($media)),
-        ], $disposition);
+        ]);
     }
 
     /**

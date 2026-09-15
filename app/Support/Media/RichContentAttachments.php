@@ -130,12 +130,6 @@ final readonly class RichContentAttachments implements FileAttachmentProvider
 
     private function bodyHtml(HTMLDocument $document): string
     {
-        $html = '';
-
-        foreach ($document->body->childNodes as $node) {
-            $html .= $document->saveHtml($node);
-        }
-
-        return $html;
+        return $document->body->innerHTML;
     }
 }

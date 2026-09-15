@@ -37,7 +37,7 @@ final class BackfillRichEditorAttachmentsCommand extends Command
             ->whereHas('customField', fn (Builder $query): Builder => $query->withoutGlobalScopes()->where('type', CustomFieldType::RICH_EDITOR->value))
             ->where('text_value', 'like', '%<img%')
             ->with(['entity', 'customField' => fn (Relation $query): Relation => $query->withoutGlobalScopes()])
-            ->get();
+            ->lazyById();
 
         foreach ($values as $value) {
             $html = (string) $value->text_value;
@@ -101,13 +101,7 @@ final class BackfillRichEditorAttachmentsCommand extends Command
 
             $value->text_value = $html;
 
-            activity()->disableLogging();
-
-            try {
-                $value->save();
-            } finally {
-                activity()->enableLogging();
-            }
+            activity()->withoutLogging(fn (): bool => $value->save());
         }
 
         $this->comment($write

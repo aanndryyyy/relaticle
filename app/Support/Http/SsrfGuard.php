@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Http;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\UriInterface;
+use Symfony\Component\HttpFoundation\IpUtils;
 
 final readonly class SsrfGuard
 {
@@ -158,41 +159,6 @@ final readonly class SsrfGuard
             FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE,
         ) !== false;
 
-        if (! $public) {
-            return false;
-        }
-
-        return ! array_any(
-            self::DENIED_RANGES,
-            fn (string $range): bool => self::withinRange($address, $range),
-        );
-    }
-
-    private static function withinRange(string $address, string $range): bool
-    {
-        [$subnet, $prefix] = explode('/', $range);
-
-        $packed = inet_pton($address);
-        $packedSubnet = inet_pton($subnet);
-
-        if ($packed === false || $packedSubnet === false || strlen($packed) !== strlen($packedSubnet)) {
-            return false;
-        }
-
-        $wholeBytes = intdiv((int) $prefix, 8);
-
-        if (strncmp($packed, $packedSubnet, $wholeBytes) !== 0) {
-            return false;
-        }
-
-        $remainingBits = (int) $prefix % 8;
-
-        if ($remainingBits === 0) {
-            return true;
-        }
-
-        $mask = chr(0xFF << (8 - $remainingBits) & 0xFF);
-
-        return ($packed[$wholeBytes] & $mask) === ($packedSubnet[$wholeBytes] & $mask);
+        return $public && ! IpUtils::checkIp($address, self::DENIED_RANGES);
     }
 }
