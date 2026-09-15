@@ -71,12 +71,17 @@ final class UserResource extends Resource
                     ->required()
                     ->maxLength(255),
                 TextInput::make('email')
+                    ->disabled(fn (string $operation): bool => $operation === 'edit' && ! auth('sysadmin')->user()?->role->canManageCustomerAccess())
+                    ->dehydrated()
                     ->email()
                     ->required()
                     ->maxLength(255)
                     ->unique(ignoreRecord: true),
-                DateTimePicker::make('email_verified_at'),
+                DateTimePicker::make('email_verified_at')
+                    ->disabled(fn (string $operation): bool => $operation === 'edit' && ! auth('sysadmin')->user()?->role->canManageCustomerAccess())
+                    ->dehydrated(),
                 TextInput::make('password')
+                    ->disabled(fn (string $operation): bool => $operation === 'edit' && ! auth('sysadmin')->user()?->role->canManageCustomerAccess())
                     ->password()
                     ->maxLength(255)
                     ->dehydrated(fn (?string $state): bool => filled($state))
@@ -221,7 +226,7 @@ final class UserResource extends Resource
             ])
             ->recordActions([
                 ViewAction::make(),
-                EditAction::make(),
+                EditAction::make()->action(null),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([

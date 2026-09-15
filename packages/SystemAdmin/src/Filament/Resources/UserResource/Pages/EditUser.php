@@ -6,12 +6,12 @@ namespace Relaticle\SystemAdmin\Filament\Resources\UserResource\Pages;
 
 use App\Models\User;
 use Filament\Actions\ViewAction;
-use Filament\Resources\Pages\EditRecord;
 use Laravel\Jetstream\Contracts\DeletesUsers;
+use Relaticle\SystemAdmin\Filament\Pages\EditCustomerRecord;
 use Relaticle\SystemAdmin\Filament\Resources\UserResource;
 use Relaticle\SystemAdmin\Filament\Support\SafeDelete;
 
-final class EditUser extends EditRecord
+final class EditUser extends EditCustomerRecord
 {
     protected static string $resource = UserResource::class;
 

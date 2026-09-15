@@ -5,30 +5,29 @@ declare(strict_types=1);
 namespace Relaticle\SystemAdmin\Policies;
 
 use App\Models\PersonalAccessToken;
-use Relaticle\SystemAdmin\Enums\SystemAdministratorRole;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
 
 final class PersonalAccessTokenPolicy
 {
     public function viewAny(SystemAdministrator $admin): bool
     {
-        return $admin->role === SystemAdministratorRole::SuperAdministrator;
+        return $admin->role->canAdministerStaff();
     }
 
     public function view(SystemAdministrator $admin, PersonalAccessToken $token): bool
     {
-        return $admin->role === SystemAdministratorRole::SuperAdministrator
+        return $admin->role->canAdministerStaff()
             && $this->ownsToken($admin, $token);
     }
 
     public function create(SystemAdministrator $admin): bool
     {
-        return $admin->role === SystemAdministratorRole::SuperAdministrator;
+        return $admin->role->canAdministerStaff();
     }
 
     public function delete(SystemAdministrator $admin, PersonalAccessToken $token): bool
     {
-        return $admin->role === SystemAdministratorRole::SuperAdministrator
+        return $admin->role->canAdministerStaff()
             && $this->ownsToken($admin, $token);
     }
 

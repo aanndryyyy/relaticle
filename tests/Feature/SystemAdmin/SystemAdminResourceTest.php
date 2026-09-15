@@ -9,24 +9,36 @@ use App\Models\People;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\Workspace;
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Relaticle\ImportWizard\Enums\ImportEntityType;
 use Relaticle\ImportWizard\Enums\ImportStatus;
 use Relaticle\ImportWizard\Models\Import;
+use Relaticle\SystemAdmin\Actions\UpdateCustomerRecord;
+use Relaticle\SystemAdmin\Filament\Pages\EditCustomerRecord;
+use Relaticle\SystemAdmin\Filament\Resources\CompanyResource\Pages\EditCompany;
 use Relaticle\SystemAdmin\Filament\Resources\CompanyResource\Pages\ListCompanies;
 use Relaticle\SystemAdmin\Filament\Resources\CompanyResource\Pages\ViewCompany;
 use Relaticle\SystemAdmin\Filament\Resources\ImportResource\Pages\ListImports;
+use Relaticle\SystemAdmin\Filament\Resources\NoteResource\Pages\EditNote;
 use Relaticle\SystemAdmin\Filament\Resources\NoteResource\Pages\ListNotes;
+use Relaticle\SystemAdmin\Filament\Resources\NoteResource\Pages\ViewNote;
+use Relaticle\SystemAdmin\Filament\Resources\OpportunityResource\Pages\EditOpportunity;
 use Relaticle\SystemAdmin\Filament\Resources\OpportunityResource\Pages\ListOpportunities;
+use Relaticle\SystemAdmin\Filament\Resources\OpportunityResource\Pages\ViewOpportunity;
+use Relaticle\SystemAdmin\Filament\Resources\PeopleResource\Pages\EditPeople;
 use Relaticle\SystemAdmin\Filament\Resources\PeopleResource\Pages\ListPeople;
+use Relaticle\SystemAdmin\Filament\Resources\PeopleResource\Pages\ViewPeople;
+use Relaticle\SystemAdmin\Filament\Resources\TaskResource\Pages\EditTask;
 use Relaticle\SystemAdmin\Filament\Resources\TaskResource\Pages\ListTasks;
+use Relaticle\SystemAdmin\Filament\Resources\TaskResource\Pages\ViewTask;
 use Relaticle\SystemAdmin\Filament\Resources\UserResource;
 use Relaticle\SystemAdmin\Filament\Resources\UserResource\Pages\ListUsers;
 use Relaticle\SystemAdmin\Filament\Resources\WorkspaceResource;
 use Relaticle\SystemAdmin\Filament\Resources\WorkspaceResource\Pages\ListWorkspaces;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
 
-mutates(User::class, Workspace::class, Company::class, People::class, Task::class, Note::class, Opportunity::class);
+mutates(UpdateCustomerRecord::class, EditCustomerRecord::class, User::class, Workspace::class, Company::class, People::class, Task::class, Note::class, Opportunity::class);
 
 beforeEach(function () {
     $this->admin = SystemAdministrator::factory()->create();
@@ -36,6 +48,75 @@ beforeEach(function () {
     $this->workspaceOwner = User::factory()->withWorkspace()->create();
     $this->workspace = $this->workspaceOwner->currentWorkspace;
 });
+
+dataset('customer record edit pages', [
+    'company' => [Company::class, EditCompany::class, 'name'],
+    'person' => [People::class, EditPeople::class, 'name'],
+    'opportunity' => [Opportunity::class, EditOpportunity::class, 'name'],
+    'task' => [Task::class, EditTask::class, 'title'],
+    'note' => [Note::class, EditNote::class, 'title'],
+]);
+
+it('rejects administrator moves of customer records between workspaces', function (string $modelClass, string $pageClass): void {
+    $this->actingAs(SystemAdministrator::factory()->administrator()->create(), 'sysadmin');
+    $record = $modelClass::factory()->for($this->workspace)->create(['creator_id' => $this->workspaceOwner->getKey()]);
+    $target = Workspace::factory()->create();
+
+    livewire($pageClass, ['record' => $record->getKey()])
+        ->set('data.workspace_id', $target->getKey())
+        ->call('save')
+        ->assertForbidden();
+
+    expect($record->refresh()->workspace_id)->toBe($this->workspace->getKey());
+})->with('customer record edit pages');
+
+it('lets administrators edit ordinary customer records', function (string $modelClass, string $pageClass, string $field): void {
+    $this->actingAs(SystemAdministrator::factory()->administrator()->create(), 'sysadmin');
+    $record = $modelClass::factory()->for($this->workspace)->create(['creator_id' => $this->workspaceOwner->getKey()]);
+
+    livewire($pageClass, ['record' => $record->getKey()])
+        ->fillForm([$field => 'Updated Customer Record'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($record->refresh()->getAttribute($field))->toBe('Updated Customer Record')
+        ->and($record->workspace_id)->toBe($this->workspace->getKey());
+})->with('customer record edit pages');
+
+it('lets super administrators move customer records between workspaces', function (string $modelClass, string $pageClass): void {
+    $record = $modelClass::factory()->for($this->workspace)->create(['creator_id' => $this->workspaceOwner->getKey()]);
+    $target = Workspace::factory()->create();
+
+    livewire($pageClass, ['record' => $record->getKey()])
+        ->fillForm(['workspace_id' => $target->getKey()])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($record->refresh()->workspace_id)->toBe($target->getKey());
+})->with('customer record edit pages');
+
+it('does not move customer records through navigation actions', function (string $modelClass, string $listPageClass, string $viewPageClass, bool $fromTable): void {
+    $this->actingAs(SystemAdministrator::factory()->administrator()->create(), 'sysadmin');
+    $record = $modelClass::factory()->for($this->workspace)->create(['creator_id' => $this->workspaceOwner->getKey()]);
+    $target = Workspace::factory()->create();
+    $action = TestAction::make('edit');
+
+    if ($fromTable) {
+        $action->table($record);
+    }
+
+    livewire($fromTable ? $listPageClass : $viewPageClass, ['record' => $record->getKey()])
+        ->callAction($action, data: ['workspace_id' => $target->getKey()])
+        ->assertHasNoActionErrors();
+
+    expect($record->refresh()->workspace_id)->toBe($this->workspace->getKey());
+})->with([
+    'company' => [Company::class, ListCompanies::class, ViewCompany::class],
+    'person' => [People::class, ListPeople::class, ViewPeople::class],
+    'opportunity' => [Opportunity::class, ListOpportunities::class, ViewOpportunity::class],
+    'task' => [Task::class, ListTasks::class, ViewTask::class],
+    'note' => [Note::class, ListNotes::class, ViewNote::class],
+])->with(['list' => true, 'view' => false]);
 
 it('can render the users list page', function () {
     $users = User::factory(3)->withWorkspace()->create();

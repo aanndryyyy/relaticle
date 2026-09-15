@@ -36,6 +36,16 @@ final class SystemAdministratorFactory extends Factory
     }
 
     /**
+     * Indicate that the administrator may write everything but delete nothing.
+     */
+    public function administrator(): static
+    {
+        return $this->state(fn (array $attributes): array => [
+            'role' => SystemAdministratorRole::Administrator,
+        ]);
+    }
+
+    /**
      * Indicate that the model's email address should be unverified.
      */
     public function unverified(): static

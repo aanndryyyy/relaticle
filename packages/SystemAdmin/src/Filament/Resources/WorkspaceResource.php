@@ -92,6 +92,8 @@ final class WorkspaceResource extends Resource
             ->components([
                 Select::make('user_id')
                     ->relationship('owner', 'name')
+                    ->disabled(fn (string $operation): bool => $operation === 'edit' && ! auth('sysadmin')->user()?->role->canManageCustomerAccess())
+                    ->dehydrated()
                     ->label('Owner')
                     ->searchable()
                     ->required(),
@@ -104,6 +106,8 @@ final class WorkspaceResource extends Resource
                     ->unique(ignoreRecord: true)
                     ->maxLength(255),
                 Toggle::make('personal_workspace')
+                    ->disabled(fn (string $operation): bool => $operation === 'edit' && ! auth('sysadmin')->user()?->role->canManageCustomerAccess())
+                    ->dehydrated()
                     ->required(),
             ]);
     }
@@ -225,7 +229,7 @@ final class WorkspaceResource extends Resource
             ])
             ->recordActions([
                 ViewAction::make(),
-                EditAction::make(),
+                EditAction::make()->action(null),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([

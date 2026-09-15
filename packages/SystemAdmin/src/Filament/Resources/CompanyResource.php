@@ -60,6 +60,8 @@ final class CompanyResource extends Resource
             ->components([
                 Select::make('workspace_id')
                     ->relationship('workspace', 'name')
+                    ->disabled(fn (string $operation): bool => $operation === 'edit' && ! auth('sysadmin')->user()?->role->canManageCustomerAccess())
+                    ->dehydrated()
                     ->searchable()
                     ->required(),
                 TextInput::make('name')
@@ -129,7 +131,7 @@ final class CompanyResource extends Resource
             ])
             ->recordActions([
                 ViewAction::make(),
-                EditAction::make(),
+                EditAction::make()->action(null),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
