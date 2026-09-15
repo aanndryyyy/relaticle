@@ -1,7 +1,7 @@
 {{-- Static twin of the real composer. Every control below mirrors
      packages/Chat/resources/views/livewire/chat/partials/_composer-bar.blade.php
-     and _composer.blade.php: rounded-2xl container, model picker with a
-     chevron-up-down, the push-to-talk mic, and a ROUND send button that reads
+     and _composer.blade.php: rounded-2xl container, model picker and attach
+     on the lead side, the push-to-talk mic, and a ROUND send button that reads
      gray while the composer is empty. --}}
 
 @php
@@ -131,15 +131,21 @@
                 <span id="hero-composer-cursor" class="hero-composer-cursor inline-block w-px h-4 align-middle bg-primary/60 dark:bg-primary/80 ml-px" aria-hidden="true"></span>
             </div>
 
-            {{-- Controls row: model picker, mic, send. Grouped at the end, same
-                 order and spacing as _composer-bar. --}}
+            {{-- Controls row: model picker and attach lead, mic and send trail,
+                 same order and spacing as _composer-bar. --}}
             <div class="flex items-center gap-2 px-3 pb-2">
-                <div class="ms-auto flex items-center gap-1.5">
+                <div class="flex items-center gap-1.5">
                     <span class="inline-flex h-7 items-center gap-1 rounded-md border border-transparent px-2 text-xs font-medium text-gray-600 dark:text-gray-300">
                         <span>Auto</span>
                         <x-heroicon-o-chevron-up-down class="h-3 w-3" aria-hidden="true"/>
                     </span>
 
+                    <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-gray-500 dark:text-gray-400">
+                        <x-heroicon-o-paper-clip class="h-4 w-4" aria-hidden="true"/>
+                    </span>
+                </div>
+
+                <div class="ms-auto flex items-center gap-1.5">
                     {{-- Push-to-talk. Present in the real composer whenever a
                          transcription provider key is configured. --}}
                     <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-gray-500 dark:text-gray-400">
