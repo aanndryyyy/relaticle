@@ -129,6 +129,33 @@ it('omits lastmod for a help page with no updated front matter', function (): vo
         ->and($xml)->not->toMatch('#no-date/undated-page</loc>\s*<lastmod>#');
 });
 
+it('excludes query string variants of a page already in the sitemap', function (): void {
+    fakeSitemapCrawl([
+        config('app.url') => '<html><body><a href="'.url('/contact').'">Contact</a>'
+            .'<a href="'.url('/contact?plan=enterprise').'">Enterprise</a></body></html>',
+        url('/contact') => '<html><body>contact</body></html>',
+        url('/contact?plan=enterprise') => '<html><body>contact</body></html>',
+    ]);
+
+    $this->artisan('app:generate-sitemap')->assertSuccessful();
+
+    $xml = File::get($this->sitemap);
+
+    expect($xml)->toContain('<loc>'.url('/contact').'</loc>')
+        ->and($xml)->not->toContain('plan=enterprise');
+});
+
+it('excludes non-html assets from the sitemap', function (): void {
+    fakeSitemapCrawl([
+        config('app.url') => '<html><body><a href="'.url('/llms.txt').'">llms.txt</a></body></html>',
+        url('/llms.txt') => 'plain text',
+    ]);
+
+    $this->artisan('app:generate-sitemap')->assertSuccessful();
+
+    expect(File::get($this->sitemap))->not->toContain('llms.txt');
+});
+
 it('excludes auth and utility redirect urls from the sitemap', function (): void {
     $realHomepageWithLinksToLoginRegisterAndDiscord = (string) $this->get('/')->getContent();
 
