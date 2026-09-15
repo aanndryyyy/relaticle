@@ -62,7 +62,7 @@ it('creates a media row on the record and rewrites the image with --force, outsi
         ->and($media->workspace_id)->toBe($this->workspace->getKey())
         ->and($media->disk)->toBe('local')
         ->and($html)->toContain("data-id=\"{$media->uuid}\"")
-        ->and($html)->toContain('src="'.e($media->getUrl()).'"')
+        ->and($html)->not->toContain('signature=')
         ->and($html)->toContain('alt="old"')
         ->and($html)->not->toContain('data-id="legacy.png"')
         ->and($html)->not->toContain('storage/legacy.png')
@@ -87,7 +87,7 @@ it('tags an untagged public-disk image with its new media uuid and leaves extern
     $html = (string) TenantContextService::withTenant($this->workspace->getKey(), fn (): mixed => $this->untagged->refresh()->getCustomFieldValue($this->body));
 
     expect($media->name)->toBe('untagged.jpg')
-        ->and($html)->toBe('<p><img src="'.e($media->getUrl()).'" data-id="'.$media->uuid.'"><img src="https://cdn.example.com/external.png"></p>');
+        ->and($html)->toBe('<p><img data-id="'.$media->uuid.'"><img src="https://cdn.example.com/external.png"></p>');
 });
 
 it('skips an image whose file is gone from the public disk', function (): void {

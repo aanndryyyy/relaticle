@@ -11,6 +11,7 @@ use App\Filament\Resources\NoteResource\Pages\ManageNotes;
 use App\Filament\Resources\TaskResource\Pages\TasksBoard;
 use App\Models\Company;
 use App\Models\CustomField;
+use App\Models\CustomFieldValue;
 use App\Models\Note;
 use App\Models\Task;
 use App\Models\User;
@@ -25,6 +26,7 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use Livewire\Features\SupportFileUploads\FileUploadConfiguration;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
+use Spatie\Activitylog\Models\Activity;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 mutates(RichContentAttachments::class, RichContentEntry::class, RichEditorFieldType::class, RichEditorComponent::class, AppPanelProvider::class);
@@ -266,4 +268,56 @@ it('keeps every slash-menu block when rendering a body', function (): void {
     foreach (['<h2', '<blockquote', '<ul', '<ol', '<pre', '<table', '<details', '<summary', '<hr'] as $tag) {
         $page->assertSeeHtml($tag);
     }
+});
+
+function storedNoteBody(Note $note, CustomField $field): string
+{
+    return (string) CustomFieldValue::query()
+        ->withoutGlobalScopes()
+        ->where('entity_type', $note->getMorphClass())
+        ->where('entity_id', $note->getKey())
+        ->where('custom_field_id', $field->getKey())
+        ->value('text_value');
+}
+
+it('stores a body image without its expiring signature', function (): void {
+    $id = noteBodyEditor()->saveUploadedFileAttachment(livewireTemporaryUpload(onePixelPng(), 'shot.png'));
+    $media = Media::query()->where('uuid', $id)->firstOrFail();
+
+    livewire(ManageNotes::class)
+        ->callAction('create', [
+            'title' => 'Signed body',
+            'custom_fields' => ['body' => '<p><img data-id="'.$id.'" src="'.e($media->getUrl()).'"></p>'],
+        ])
+        ->assertHasNoActionErrors();
+
+    $note = Note::query()->where('title', 'Signed body')->firstOrFail();
+
+    expect(storedNoteBody($note, $this->body))->toBe('<p><img data-id="'.$id.'"></p>');
+});
+
+it('does not rewrite a body image when the note is saved untouched', function (): void {
+    $id = noteBodyEditor()->saveUploadedFileAttachment(livewireTemporaryUpload(onePixelPng(), 'shot.png'));
+    $media = Media::query()->where('uuid', $id)->firstOrFail();
+
+    livewire(ManageNotes::class)
+        ->callAction('create', [
+            'title' => 'Untouched',
+            'custom_fields' => ['body' => '<p><img data-id="'.$id.'" src="'.e($media->getUrl()).'"></p>'],
+        ])
+        ->assertHasNoActionErrors();
+
+    $note = Note::query()->where('title', 'Untouched')->firstOrFail();
+    $before = storedNoteBody($note, $this->body);
+    $activities = Activity::query()->count();
+
+    $this->travelTo(now()->addMinutes(7));
+
+    livewire(ManageNotes::class)
+        ->mountAction(TestAction::make('edit')->table($note))
+        ->callMountedAction()
+        ->assertHasNoActionErrors();
+
+    expect(storedNoteBody($note, $this->body))->toBe($before)
+        ->and(Activity::query()->count())->toBe($activities);
 });

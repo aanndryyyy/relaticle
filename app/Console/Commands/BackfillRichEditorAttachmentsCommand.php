@@ -101,7 +101,7 @@ final class BackfillRichEditorAttachmentsCommand extends Command
                     ->toMediaCollection(MediaCollection::Attachments->value);
 
                 $rewritten = (string) preg_replace(['/\ssrc="[^"]*"/i', '/\sdata-id="[^"]*"/i'], '', $tag);
-                $html = str_replace($tag, '<img src="'.e($media->getUrl()).'" data-id="'.$media->uuid.'"'.substr($rewritten, 4), $html);
+                $html = str_replace($tag, '<img data-id="'.$media->uuid.'"'.substr($rewritten, 4), $html);
             }
 
             if (! $write || $html === (string) $value->text_value) {
