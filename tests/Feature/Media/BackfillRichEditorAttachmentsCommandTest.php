@@ -113,3 +113,16 @@ it('skips a legacy image whose type the attachments collection refuses', functio
     expect(Media::query()->count())->toBe(2)
         ->and(Media::query()->where('model_id', $this->note->getKey())->exists())->toBeFalse();
 });
+
+it('keeps going and still succeeds when one value cannot be migrated', function (): void {
+    Media::creating(function (Media $media): void {
+        if ($media->name === 'legacy.png') {
+            throw new RuntimeException('disk unavailable');
+        }
+    });
+
+    $this->artisan('media:backfill-rich-editor-attachments --force')->assertSuccessful();
+
+    expect(Media::query()->where('model_id', $this->second->getKey())->count())->toBe(1)
+        ->and(Media::query()->where('model_id', $this->note->getKey())->count())->toBe(0);
+});

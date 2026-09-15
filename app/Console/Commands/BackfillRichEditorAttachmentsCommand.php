@@ -16,6 +16,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Storage;
 use Spatie\MediaLibrary\HasMedia;
+use Throwable;
 
 #[Description('Move legacy rich editor images from bare public-disk paths into media rows on their records')]
 #[Signature('media:backfill-rich-editor-attachments {--force : Write changes instead of reporting them}')]
@@ -30,7 +31,6 @@ final class BackfillRichEditorAttachmentsCommand extends Command
     public function handle(): int
     {
         $write = (bool) $this->option('force');
-        $public = Storage::disk('public');
         $migrated = 0;
 
         $values = CustomFieldValue::query()
@@ -41,76 +41,13 @@ final class BackfillRichEditorAttachmentsCommand extends Command
             ->lazyById();
 
         foreach ($values as $value) {
-            $html = (string) $value->text_value;
-
-            $legacy = [];
-
-            preg_match_all(self::IMAGE, $html, $tags);
-
-            foreach ($tags[0] as $tag) {
-                $legacyPath = $this->legacyPath($tag);
-
-                if ($legacyPath !== null) {
-                    $legacy[$tag] = $legacyPath;
-                }
+            try {
+                $migrated += $this->migrateValue($value, $write);
+            } catch (Throwable $exception) {
+                // A throw here escapes the migration that queues this command, which then
+                // never logs and re-runs on every container start.
+                $this->warn("Value {$value->getKey()}: {$exception->getMessage()}, skipped.");
             }
-
-            if ($legacy === []) {
-                continue;
-            }
-
-            $entity = $value->entity;
-
-            if (! $entity instanceof HasMedia) {
-                $this->warn("Value {$value->getKey()}: record is missing, skipped.");
-
-                continue;
-            }
-
-            foreach ($legacy as $tag => $legacyPath) {
-                if (! $public->exists($legacyPath)) {
-                    $this->warn("Value {$value->getKey()}: {$legacyPath} is missing on the public disk, skipped.");
-
-                    continue;
-                }
-
-                $mime = (string) $public->mimeType($legacyPath);
-
-                if (! in_array($mime, UploadAllowlist::mimeTypes(), true) || $public->size($legacyPath) > UploadAllowlist::maxBytes()) {
-                    $this->warn("Value {$value->getKey()}: {$legacyPath} is a [{$mime}] the attachments collection refuses, skipped.");
-
-                    continue;
-                }
-
-                $this->info("Value {$value->getKey()}: {$legacyPath}");
-
-                $migrated++;
-
-                if (! $write) {
-                    continue;
-                }
-
-                $media = $entity->addMediaFromDisk($legacyPath, 'public')
-                    ->preservingOriginal()
-                    ->usingName(basename($legacyPath))
-                    ->withAttributes([
-                        'workspace_id' => $value->getAttribute('tenant_id'),
-                        'custom_field_id' => $value->customField->getKey(),
-                    ])
-                    ->withCustomProperties(['source' => UploadSource::Panel->value])
-                    ->toMediaCollection(MediaCollection::Attachments->value);
-
-                $rewritten = (string) preg_replace(['/\ssrc="[^"]*"/i', '/\sdata-id="[^"]*"/i'], '', $tag);
-                $html = str_replace($tag, '<img data-id="'.$media->uuid.'"'.substr($rewritten, 4), $html);
-            }
-
-            if (! $write || $html === (string) $value->text_value) {
-                continue;
-            }
-
-            $value->text_value = $html;
-
-            activity()->withoutLogging(fn (): bool => $value->save());
         }
 
         $this->comment($write
@@ -118,6 +55,84 @@ final class BackfillRichEditorAttachmentsCommand extends Command
             : "{$migrated} image(s) would be migrated. Re-run with --force to write.");
 
         return self::SUCCESS;
+    }
+
+    private function migrateValue(CustomFieldValue $value, bool $write): int
+    {
+        $public = Storage::disk('public');
+        $migrated = 0;
+        $html = (string) $value->text_value;
+
+        $legacy = [];
+
+        preg_match_all(self::IMAGE, $html, $tags);
+
+        foreach ($tags[0] as $tag) {
+            $legacyPath = $this->legacyPath($tag);
+
+            if ($legacyPath !== null) {
+                $legacy[$tag] = $legacyPath;
+            }
+        }
+
+        if ($legacy === []) {
+            return 0;
+        }
+
+        $entity = $value->entity;
+
+        if (! $entity instanceof HasMedia) {
+            $this->warn("Value {$value->getKey()}: record is missing, skipped.");
+
+            return 0;
+        }
+
+        foreach ($legacy as $tag => $legacyPath) {
+            if (! $public->exists($legacyPath)) {
+                $this->warn("Value {$value->getKey()}: {$legacyPath} is missing on the public disk, skipped.");
+
+                continue;
+            }
+
+            $mime = (string) $public->mimeType($legacyPath);
+
+            if (! in_array($mime, UploadAllowlist::mimeTypes(), true) || $public->size($legacyPath) > UploadAllowlist::maxBytes()) {
+                $this->warn("Value {$value->getKey()}: {$legacyPath} is a [{$mime}] the attachments collection refuses, skipped.");
+
+                continue;
+            }
+
+            $this->info("Value {$value->getKey()}: {$legacyPath}");
+
+            $migrated++;
+
+            if (! $write) {
+                continue;
+            }
+
+            $media = $entity->addMediaFromDisk($legacyPath, 'public')
+                ->preservingOriginal()
+                ->usingName(basename($legacyPath))
+                ->withAttributes([
+                    'workspace_id' => $value->getAttribute('tenant_id'),
+                    'custom_field_id' => $value->customField->getKey(),
+                ])
+                ->withCustomProperties(['source' => UploadSource::Panel->value])
+                ->toMediaCollection(MediaCollection::Attachments->value);
+
+            $rewritten = (string) preg_replace(['/\ssrc="[^"]*"/i', '/\sdata-id="[^"]*"/i'], '', $tag);
+            $html = str_replace($tag, '<img data-id="'.$media->uuid.'"'.substr($rewritten, 4), $html);
+        }
+
+        if (! $write || $html === (string) $value->text_value) {
+            return $migrated;
+        }
+
+        $value->text_value = $html;
+
+        activity()->withoutLogging(fn (): bool => $value->save());
+
+        return $migrated;
     }
 
     private function legacyPath(string $tag): ?string
