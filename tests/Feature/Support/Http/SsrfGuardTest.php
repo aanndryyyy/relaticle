@@ -47,6 +47,20 @@ test('rejects ipv6 loopback and link-local', function (): void {
     })->toThrow(SsrfGuardException::class);
 });
 
+test('rejects shared, translated and reserved ranges filter_var calls public', function (string $address): void {
+    expect(function () use ($address): void {
+        SsrfGuard::assertPublicHost("http://{$address}/");
+    })->toThrow(SsrfGuardException::class);
+})->with([
+    'carrier-grade nat' => ['100.64.0.1'],
+    'nat64 mapping loopback' => ['[64:ff9b::7f00:1]'],
+    '6to4 embedding loopback' => ['[2002:7f00:1::]'],
+    'ietf protocol assignments' => ['192.0.0.1'],
+    'benchmarking' => ['198.18.0.1'],
+    '6to4 relay anycast' => ['192.88.99.1'],
+    'multicast' => ['224.0.0.1'],
+]);
+
 test('rejects hostnames that resolve to private addresses', function (): void {
     // localhost resolves to 127.0.0.1 on every OS we run on.
     expect(function (): void {

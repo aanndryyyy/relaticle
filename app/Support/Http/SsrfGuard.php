@@ -15,6 +15,24 @@ use Psr\Http\Message\UriInterface;
 
 final readonly class SsrfGuard
 {
+    /**
+     * Ranges PHP's own filter reports as public. The translation prefixes matter
+     * most: 2002::/16 and 64:ff9b::/96 each embed an IPv4 address, so they reach
+     * loopback and RFC1918 on any host with IPv6.
+     *
+     * @var list<string>
+     */
+    private const array DENIED_RANGES = [
+        '100.64.0.0/10',
+        '192.0.0.0/24',
+        '192.88.99.0/24',
+        '198.18.0.0/15',
+        '224.0.0.0/4',
+        '2002::/16',
+        '64:ff9b::/96',
+        '2001:db8::/32',
+    ];
+
     public static function isAllowed(string $url): bool
     {
         try {
@@ -134,10 +152,47 @@ final readonly class SsrfGuard
 
     private static function isPublicAddress(string $address): bool
     {
-        return filter_var(
+        $public = filter_var(
             $address,
             FILTER_VALIDATE_IP,
             FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE,
         ) !== false;
+
+        if (! $public) {
+            return false;
+        }
+
+        return ! array_any(
+            self::DENIED_RANGES,
+            fn (string $range): bool => self::withinRange($address, $range),
+        );
+    }
+
+    private static function withinRange(string $address, string $range): bool
+    {
+        [$subnet, $prefix] = explode('/', $range);
+
+        $packed = inet_pton($address);
+        $packedSubnet = inet_pton($subnet);
+
+        if ($packed === false || $packedSubnet === false || strlen($packed) !== strlen($packedSubnet)) {
+            return false;
+        }
+
+        $wholeBytes = intdiv((int) $prefix, 8);
+
+        if (strncmp($packed, $packedSubnet, $wholeBytes) !== 0) {
+            return false;
+        }
+
+        $remainingBits = (int) $prefix % 8;
+
+        if ($remainingBits === 0) {
+            return true;
+        }
+
+        $mask = chr(0xFF << (8 - $remainingBits) & 0xFF);
+
+        return ($packed[$wholeBytes] & $mask) === ($packedSubnet[$wholeBytes] & $mask);
     }
 }
