@@ -16,6 +16,7 @@ use Spatie\MediaLibrary\MediaCollections\Models\Media;
 mutates(BackfillRichEditorAttachments::class, BackfillRichEditorAttachmentsCommand::class);
 
 beforeEach(function (): void {
+    $this->freezeTime();
     Storage::fake('local');
     Storage::fake('public');
     $this->workspace = User::factory()->withPersonalWorkspace()->create()->personalWorkspace();
