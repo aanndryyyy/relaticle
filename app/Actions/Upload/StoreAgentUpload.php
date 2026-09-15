@@ -80,7 +80,9 @@ final readonly class StoreAgentUpload
 
         if (filled($input['upload_id'] ?? null)) {
             $upload = $this->takeTemporary((string) $input['upload_id'], $workspaceId, $temp);
-            $name = filled($input['filename'] ?? null) ? (string) $input['filename'] : $upload;
+            $name = filled($input['filename'] ?? null)
+                ? (string) $input['filename']
+                : TemporaryUploads::displayName($upload);
 
             return [$name, UploadSource::SignedPut];
         }

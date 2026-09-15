@@ -11,7 +11,9 @@ use Illuminate\Support\Str;
 
 final readonly class TemporaryUploads
 {
-    public const string NAME_PATTERN = '/^[0-9A-HJKMNP-TV-Z]{26}\.[0-9A-HJKMNP-TV-Z]{26}\.[a-z0-9]{2,5}\z/i';
+    public const string NAME_PATTERN = '/^[0-9A-HJKMNP-TV-Z]{26}\.[0-9A-HJKMNP-TV-Z]{26}\.[a-z0-9-]{1,60}\.[a-z0-9]{2,5}\z/i';
+
+    public const int MAX_NAME_LENGTH = 120;
 
     public const string DIRECTORY = 'tmp';
 
@@ -29,7 +31,21 @@ final readonly class TemporaryUploads
 
         throw_unless(in_array($extension, UploadAllowlist::extensions(), true), UploadException::mimeNotAllowed($extension));
 
-        return strtoupper($workspaceId).'.'.Str::ulid().'.'.$extension;
+        return strtoupper($workspaceId).'.'.Str::ulid().'.'.self::slug($filename).'.'.$extension;
+    }
+
+    public static function displayName(string $upload): string
+    {
+        $parts = explode('.', $upload);
+
+        return $parts[2].'.'.$parts[3];
+    }
+
+    private static function slug(string $filename): string
+    {
+        $slug = rtrim(Str::limit(Str::slug(pathinfo($filename, PATHINFO_FILENAME)), 60, ''), '-');
+
+        return $slug === '' ? 'file' : $slug;
     }
 
     public static function path(string $upload): string

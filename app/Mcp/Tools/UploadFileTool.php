@@ -10,6 +10,7 @@ use App\Mcp\Tools\Concerns\ChecksTokenAbility;
 use App\Mcp\Tools\Concerns\HasExplicitToolAnnotations;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Support\Media\TemporaryUploads;
 use App\Support\Media\UploadAllowlist;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\RateLimiter;
@@ -46,7 +47,7 @@ final class UploadFileTool extends Tool
         return [
             'source_url' => $schema->string()->description('A public https URL to fetch. No redirects are followed.'),
             'base64' => $schema->string()->description('The file body, base64 encoded. Requires filename.'),
-            'filename' => $schema->string()->description('The original file name. Required with base64, optional with upload_id.'),
+            'filename' => $schema->string()->description('The original file name. Required with base64. Optional with upload_id, where the name is otherwise rebuilt from the id, losing capitals and spaces.'),
             'upload_id' => $schema->string()->description('The upload_id from create-upload-url after the PUT succeeded.'),
         ];
     }
@@ -83,7 +84,7 @@ final class UploadFileTool extends Tool
             'source_url' => ['nullable', 'string', 'url:https', 'max:2048', 'required_without_all:base64,upload_id', 'prohibits:base64,upload_id'],
             'base64' => ['nullable', 'string', 'prohibits:upload_id'],
             'filename' => ['nullable', 'string', 'max:255', 'required_with:base64'],
-            'upload_id' => ['nullable', 'string', 'max:64'],
+            'upload_id' => ['nullable', 'string', 'max:'.TemporaryUploads::MAX_NAME_LENGTH],
         ]);
 
         /** @var array{source_url?: ?string, base64?: ?string, filename?: ?string, upload_id?: ?string} $validated */

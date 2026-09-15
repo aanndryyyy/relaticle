@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Str;
 use Illuminate\Testing\Fluent\AssertableJson;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
@@ -115,6 +116,57 @@ describe('StoreAgentUpload', function (): void {
 
         expect(fn (): Media => resolve(StoreAgentUpload::class)->execute($this->user, $this->workspace, ['upload_id' => TemporaryUploads::newName('gone.pdf', (string) $this->workspace->getKey())]))
             ->toThrow(UploadException::class, __('uploads.errors.not_found'));
+    });
+
+    it('accepts the longest upload id create-upload-url can mint', function (): void {
+        $filename = str_repeat('a-very-long-report-name-', 5).'.pdf';
+        $upload = TemporaryUploads::newName($filename, (string) $this->workspace->getKey());
+        TemporaryUploads::disk()->put(TemporaryUploads::path($upload), pdfBytes());
+
+        expect(strlen($upload))->toBeLessThanOrEqual(TemporaryUploads::MAX_NAME_LENGTH);
+
+        RelaticleServer::actingAs($this->user)
+            ->tool(UploadFileTool::class, ['upload_id' => $upload])
+            ->assertOk();
+
+        expect(Media::query()->latest('id')->firstOrFail()->name)->toStartWith('a-very-long-report-name-');
+    });
+
+    it('names a signed-put upload after the file the agent asked to upload', function (): void {
+        $name = TemporaryUploads::newName('Quarterly Report.pdf', (string) $this->workspace->getKey());
+        TemporaryUploads::disk()->put(TemporaryUploads::path($name), pdfBytes());
+
+        $media = resolve(StoreAgentUpload::class)->execute($this->user, $this->workspace, ['upload_id' => $name]);
+
+        expect($media->name)->toBe('quarterly-report.pdf');
+    });
+
+    it('prefers an explicit filename over the one rebuilt from the upload id', function (): void {
+        $name = TemporaryUploads::newName('Quarterly Report.pdf', (string) $this->workspace->getKey());
+        TemporaryUploads::disk()->put(TemporaryUploads::path($name), pdfBytes());
+
+        $media = resolve(StoreAgentUpload::class)->execute(
+            $this->user,
+            $this->workspace,
+            ['upload_id' => $name, 'filename' => 'Quarterly Report.pdf'],
+        );
+
+        expect($media->name)->toBe('Quarterly Report.pdf');
+    });
+
+    it('keeps an unsluggable filename inside the upload id pattern', function (): void {
+        $name = TemporaryUploads::newName('????.pdf', (string) $this->workspace->getKey());
+
+        expect(TemporaryUploads::isValidName($name))->toBeTrue()
+            ->and(TemporaryUploads::displayName($name))->toBe('file.pdf');
+    });
+
+    it('refuses an upload id whose name segment carries a path', function (): void {
+        $workspaceId = (string) $this->workspace->getKey();
+
+        expect(TemporaryUploads::isValidName(strtoupper($workspaceId).'.'.Str::ulid().'../../etc.pdf'))->toBeFalse()
+            ->and(TemporaryUploads::isValidName(strtoupper($workspaceId).'.'.Str::ulid().'.a/b.pdf'))->toBeFalse()
+            ->and(TemporaryUploads::belongsToWorkspace(strtoupper($workspaceId).'.'.Str::ulid().'.a.b.pdf', $workspaceId))->toBeFalse();
     });
 
     it('rejects a temp name whose extension is outside the allowlist', function (): void {

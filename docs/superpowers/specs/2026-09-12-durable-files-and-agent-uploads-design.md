@@ -79,7 +79,7 @@ The native alternative is `Storage::temporaryUrl()`. It skips the PHP round trip
 
 ## Agent uploads over MCP
 
-`create-upload-url` takes `filename` and returns a 5-minute signed `PUT /mcp/uploads/{upload}` URL. The receiver rejects a missing or over-10 MB `Content-Length` before reading, streams to `tmp/{workspace}.{ulid}.{ext}` on the `local` disk, and answers 204.
+`create-upload-url` takes `filename` and returns a 5-minute signed `PUT /mcp/uploads/{upload}` URL. The `upload_id` is `{workspace}.{ulid}.{slug}.{ext}`, so `upload-file` can name the media after the file the agent asked to upload even when it passes no `filename`. The slug is the only part derived from user input and is restricted to `[a-z0-9-]{1,60}`. The receiver rejects a missing or over-10 MB `Content-Length` before reading, streams to `tmp/{workspace}.{ulid}.{ext}` on the `local` disk, and answers 204.
 
 `upload-file` takes exactly one of `source_url`, `base64` plus `filename`, or `upload_id`, and returns `{file_id, name, url, mime_type, size, suggested_markdown}`. `url` is signed and expires. `suggested_markdown` carries the stable `/media/{uuid}` link. 60 calls per hour per workspace through `RateLimiter::attempt`, refused files included.
 
