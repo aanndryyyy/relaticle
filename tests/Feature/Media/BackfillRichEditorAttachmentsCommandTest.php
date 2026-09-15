@@ -101,3 +101,15 @@ it('skips an image whose file is gone from the public disk', function (): void {
     expect(Media::query()->count())->toBe(2)
         ->and(Media::query()->where('model_id', $this->note->getKey())->exists())->toBeFalse();
 });
+
+it('skips a legacy image whose type the attachments collection refuses', function (): void {
+    Storage::disk('public')->put('legacy.png', '<svg xmlns="http://www.w3.org/2000/svg"/>');
+
+    $this->artisan('media:backfill-rich-editor-attachments --force')
+        ->expectsOutputToContain('the attachments collection refuses, skipped.')
+        ->expectsOutputToContain('2 image(s) migrated.')
+        ->assertSuccessful();
+
+    expect(Media::query()->count())->toBe(2)
+        ->and(Media::query()->where('model_id', $this->note->getKey())->exists())->toBeFalse();
+});

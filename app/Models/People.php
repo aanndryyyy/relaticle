@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\CreationSource;
+use App\Enums\MediaCollection;
 use App\Models\Concerns\BelongsToWorkspaceCreator;
 use App\Models\Concerns\HasCreator;
 use App\Models\Concerns\HasNotes;
 use App\Models\Concerns\HasWorkspace;
 use App\Observers\PeopleObserver;
 use App\Services\AvatarService;
+use App\Support\Media\UploadAllowlist;
 use Carbon\CarbonImmutable;
 use Database\Factories\PeopleFactory;
 use Filament\Models\Contracts\HasAvatar;
@@ -101,6 +103,12 @@ final class People extends Model implements HasAvatar, HasCustomFields, HasMedia
     public function tasks(): MorphToMany
     {
         return $this->morphToMany(Task::class, 'taskable');
+    }
+
+    public function registerMediaCollections(): void
+    {
+        $this->addMediaCollection(MediaCollection::Attachments->value)
+            ->acceptsMimeTypes(UploadAllowlist::mimeTypes());
     }
 
     public function getActivitylogOptions(): LogOptions

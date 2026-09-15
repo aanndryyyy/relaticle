@@ -11,6 +11,7 @@ use App\Models\Concerns\HasCreator;
 use App\Models\Concerns\HasNotes;
 use App\Models\Concerns\HasWorkspace;
 use App\Observers\CompanyObserver;
+use App\Support\Media\UploadAllowlist;
 use Carbon\CarbonImmutable;
 use Database\Factories\CompanyFactory;
 use Filament\Models\Contracts\HasAvatar;
@@ -103,6 +104,9 @@ final class Company extends Model implements HasAvatar, HasCustomFields, HasMedi
     public function registerMediaCollections(): void
     {
         $this->addMediaCollection(self::LOGO_MEDIA_COLLECTION)->useDisk('public');
+
+        $this->addMediaCollection(MediaCollection::Attachments->value)
+            ->acceptsMimeTypes(UploadAllowlist::mimeTypes());
     }
 
     /**

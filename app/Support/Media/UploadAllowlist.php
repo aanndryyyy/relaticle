@@ -24,6 +24,12 @@ final readonly class UploadAllowlist
         return (int) config('media-library.max_file_size');
     }
 
+    /** @return list<string> */
+    public static function mimeTypes(): array
+    {
+        return array_keys(self::MIME_TYPES);
+    }
+
     public static function extensionFor(string $mime): ?string
     {
         return self::MIME_TYPES[$mime] ?? null;

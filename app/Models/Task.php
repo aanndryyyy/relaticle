@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\CreationSource;
+use App\Enums\MediaCollection;
 use App\Models\Concerns\BelongsToWorkspaceCreator;
 use App\Models\Concerns\HasCreator;
 use App\Models\Concerns\HasWorkspace;
+use App\Support\Media\UploadAllowlist;
 use Carbon\CarbonImmutable;
 use Database\Factories\TaskFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -136,6 +138,12 @@ final class Task extends Model implements HasCustomFields, HasMedia, HasTimeline
     protected function forOpportunity(Builder $query, string $opportunityId): void
     {
         $query->whereHas('opportunities', fn (Builder $q) => $q->where('opportunities.id', $opportunityId));
+    }
+
+    public function registerMediaCollections(): void
+    {
+        $this->addMediaCollection(MediaCollection::Attachments->value)
+            ->acceptsMimeTypes(UploadAllowlist::mimeTypes());
     }
 
     public function getActivitylogOptions(): LogOptions

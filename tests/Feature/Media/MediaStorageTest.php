@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Support\Media\UploadPathGenerator;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Spatie\MediaLibrary\MediaCollections\Exceptions\FileUnacceptableForCollection;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
@@ -120,4 +121,31 @@ it('refuses to store for a team the user is not on', function (): void {
         'a.pdf',
         UploadSource::Panel,
     ))->toThrow(HttpException::class);
+});
+
+it('refuses an attachment whose type is outside the allowlist', function (): void {
+    $company = Company::factory()->create(['workspace_id' => $this->workspace->getKey()]);
+
+    expect(fn (): Media => $company->addMediaFromString('plain notes')
+        ->usingFileName('notes.txt')
+        ->toMediaCollection(MediaCollection::Attachments->value))
+        ->toThrow(FileUnacceptableForCollection::class);
+});
+
+it('refuses a pending upload whose type is outside the allowlist', function (): void {
+    expect(fn (): Media => $this->workspace->addMediaFromString('plain notes')
+        ->usingFileName('notes.txt')
+        ->toMediaCollection(MediaCollection::PendingUploads->value))
+        ->toThrow(FileUnacceptableForCollection::class);
+});
+
+it('still accepts an allowed type on the attachments collection', function (): void {
+    $company = Company::factory()->create(['workspace_id' => $this->workspace->getKey()]);
+
+    $media = $company->addMediaFromString(pdfBytes())
+        ->usingFileName('brief.pdf')
+        ->toMediaCollection(MediaCollection::Attachments->value);
+
+    expect($media->mime_type)->toBe('application/pdf')
+        ->and($media->collection_name)->toBe(MediaCollection::Attachments->value);
 });

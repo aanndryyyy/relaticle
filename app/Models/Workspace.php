@@ -16,6 +16,7 @@ use App\Events\WorkspaceUpdated;
 use App\Models\ActivityLog\Activity;
 use App\Models\ActivityLog\Scopes\WorkspaceScope;
 use App\Services\AvatarService;
+use App\Support\Media\UploadAllowlist;
 use App\Support\ReservedSlugAwareGenerateSlugAction;
 use Carbon\CarbonImmutable;
 use Database\Factories\WorkspaceFactory;
@@ -374,6 +375,9 @@ final class Workspace extends Model implements HasAvatar, HasMedia, Onboardable
             ->acceptsMimeTypes(self::LOGO_MIME_TYPES)
             ->singleFile()
             ->useDisk('public');
+
+        $this->addMediaCollection(MediaCollection::PendingUploads->value)
+            ->acceptsMimeTypes(UploadAllowlist::mimeTypes());
     }
 
     /**

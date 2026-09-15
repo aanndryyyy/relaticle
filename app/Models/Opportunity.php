@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\CreationSource;
+use App\Enums\MediaCollection;
 use App\Models\Concerns\BelongsToWorkspaceCreator;
 use App\Models\Concerns\HasCreator;
 use App\Models\Concerns\HasNotes;
 use App\Models\Concerns\HasWorkspace;
 use App\Observers\OpportunityObserver;
+use App\Support\Media\UploadAllowlist;
 use Carbon\CarbonImmutable;
 use Database\Factories\OpportunityFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -98,6 +100,12 @@ final class Opportunity extends Model implements HasCustomFields, HasMedia, HasT
     public function tasks(): MorphToMany
     {
         return $this->morphToMany(Task::class, 'taskable');
+    }
+
+    public function registerMediaCollections(): void
+    {
+        $this->addMediaCollection(MediaCollection::Attachments->value)
+            ->acceptsMimeTypes(UploadAllowlist::mimeTypes());
     }
 
     public function getActivitylogOptions(): LogOptions

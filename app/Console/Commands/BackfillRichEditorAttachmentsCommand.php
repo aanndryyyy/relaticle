@@ -8,6 +8,7 @@ use App\Enums\CustomFieldType;
 use App\Enums\MediaCollection;
 use App\Enums\UploadSource;
 use App\Models\CustomFieldValue;
+use App\Support\Media\UploadAllowlist;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
@@ -69,6 +70,14 @@ final class BackfillRichEditorAttachmentsCommand extends Command
             foreach ($legacy as $tag => $legacyPath) {
                 if (! $public->exists($legacyPath)) {
                     $this->warn("Value {$value->getKey()}: {$legacyPath} is missing on the public disk, skipped.");
+
+                    continue;
+                }
+
+                $mime = (string) $public->mimeType($legacyPath);
+
+                if (! in_array($mime, UploadAllowlist::mimeTypes(), true) || $public->size($legacyPath) > UploadAllowlist::maxBytes()) {
+                    $this->warn("Value {$value->getKey()}: {$legacyPath} is a [{$mime}] the attachments collection refuses, skipped.");
 
                     continue;
                 }
