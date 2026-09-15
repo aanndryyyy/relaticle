@@ -6,6 +6,7 @@ namespace App\Http\Requests\Api\V1;
 
 use App\Enums\CrmEntity;
 use App\Models\User;
+use Illuminate\Validation\Rule;
 
 final class UpdateCompanyRequest extends BaseCrmEntityRequest
 {
@@ -21,6 +22,7 @@ final class UpdateCompanyRequest extends BaseCrmEntityRequest
     {
         return [
             'name' => ['sometimes', 'required', 'string', 'max:255'],
+            'account_owner_id' => ['sometimes', 'nullable', 'string', Rule::in($user->currentWorkspace->allUsers()->pluck('id')->all())],
         ];
     }
 }
