@@ -88,16 +88,38 @@ final readonly class RichContentAttachments implements FileAttachmentProvider
         // cleanup would delete another member's pending draft image in the same workspace.
     }
 
-    public function tagOwnedAttachments(string $html): string
+    /**
+     * The inverse of {@see self::rewriteAttachmentUrls()}. A rendered body carries
+     * signed, expiring URLs; storing one re-signs it on every save, which rewrites
+     * the value and logs a change the user never made.
+     */
+    public function canonicalize(string $html): string
     {
         $document = HTMLDocument::createFromString('<body>'.$html, LIBXML_NOERROR, 'UTF-8');
 
-        foreach ($document->querySelectorAll('img:not([data-id])') as $image) {
-            $uuid = $this->lookup->uuidFromUrl($image->getAttribute('src') ?? '');
+        foreach ($document->querySelectorAll('img') as $image) {
+            $source = $image->getAttribute('src') ?? '';
+            $uuid = $this->lookup->uuidFromUrl($source);
 
-            if ($uuid !== null && $this->lookup->find($this->workspaceId, $uuid) instanceof Media) {
+            if (! $image->hasAttribute('data-id') && $uuid !== null && $this->lookup->find($this->workspaceId, $uuid) instanceof Media) {
                 $image->setAttribute('data-id', $uuid);
             }
+
+            if ($this->getFileAttachmentUrl($image->getAttribute('data-id')) !== null) {
+                $image->removeAttribute('src');
+            }
+        }
+
+        foreach ($document->querySelectorAll('a[href]') as $link) {
+            $href = $link->getAttribute('href') ?? '';
+            $uuid = $this->lookup->uuidFromUrl($href);
+
+            if ($uuid === null || ! $this->lookup->find($this->workspaceId, $uuid) instanceof Media) {
+                continue;
+            }
+
+            $fragment = parse_url($href, PHP_URL_FRAGMENT);
+            $link->setAttribute('href', route('media.show', ['media' => $uuid]).(is_string($fragment) ? '#'.$fragment : ''));
         }
 
         return $this->bodyHtml($document);

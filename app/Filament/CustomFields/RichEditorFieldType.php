@@ -41,10 +41,11 @@ final class RichEditorFieldType extends BaseFieldType
                 // Filament decides attachments by whether `attachFiles` sits in the toolbar,
                 // and there is no toolbar: without this, an uploaded image saves as null.
                 ->fileAttachments(true)
-                // Without this the editor dehydrates the signed preview URL into the
-                // stored body, so every save rotates the signature and logs a change.
                 ->fileAttachmentsVisibility('private')
                 ->fileAttachmentsMaxSize((int) (UploadAllowlist::maxBytes() / 1024))
+                ->dehydrateStateUsing(fn (mixed $state): mixed => is_string($state)
+                    ? $this->attachments()->canonicalize($state)
+                    : $state)
                 ->saveUploadedFileAttachmentUsing(fn (TemporaryUploadedFile $file): string => $this->attachments()->saveUploadedFileAttachment($file))
                 ->getFileAttachmentUrlUsing(fn (mixed $file): ?string => $this->attachments()->getFileAttachmentUrl($file))
                 // The defaults carry the table controls, unreachable otherwise without a toolbar.

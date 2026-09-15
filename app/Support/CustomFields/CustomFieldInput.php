@@ -162,7 +162,7 @@ final readonly class CustomFieldInput
 
         $html = str_starts_with(ltrim($value), '<') ? $value : $this->markdown->toHtml($value);
 
-        return RichContentAttachments::forWorkspace((string) $field->tenant_id)->tagOwnedAttachments($html);
+        return RichContentAttachments::forWorkspace((string) $field->tenant_id)->canonicalize($html);
     }
 
     private function isBlankString(mixed $value): bool

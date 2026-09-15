@@ -321,3 +321,27 @@ it('does not rewrite a body image when the note is saved untouched', function ()
     expect(storedNoteBody($note, $this->body))->toBe($before)
         ->and(Activity::query()->count())->toBe($activities);
 });
+
+it('does not rewrite a body document link when the note is saved untouched', function (): void {
+    $media = $this->workspace->addMediaFromString(pdfBytes())->usingFileName('brief.pdf')
+        ->withAttributes(['workspace_id' => $this->workspace->getKey()])
+        ->toMediaCollection(MediaCollection::PendingUploads->value);
+    $body = '<p><a href="'.route('media.show', ['media' => $media->uuid]).'">Brief</a></p>';
+
+    livewire(ManageNotes::class)
+        ->callAction('create', ['title' => 'Linked', 'custom_fields' => ['body' => $body]])
+        ->assertHasNoActionErrors();
+
+    $note = Note::query()->where('title', 'Linked')->firstOrFail();
+    $before = storedNoteBody($note, $this->body);
+
+    $this->travelTo(now()->addMinutes(7));
+
+    livewire(ManageNotes::class)
+        ->mountAction(TestAction::make('edit')->table($note))
+        ->callMountedAction()
+        ->assertHasNoActionErrors();
+
+    expect($before)->not->toContain('signature=')
+        ->and(storedNoteBody($note, $this->body))->toBe($before);
+});

@@ -8,6 +8,7 @@ use App\Models\Company;
 use App\Models\CustomField;
 use App\Models\CustomFieldOption;
 use App\Models\CustomFieldSection;
+use App\Models\CustomFieldValue;
 use App\Models\Task;
 use App\Models\User;
 use App\Support\Media\MediaLookup;
@@ -207,7 +208,7 @@ describe('rich editor images over rest', function (): void {
 
         $this->getJson("/api/v1/notes/{$id}")
             ->assertOk()
-            ->assertJsonPath('data.attributes.custom_fields.body', '<p><img src="'.e($media->refresh()->getUrl()).'" alt="a" data-id="'.$media->uuid.'"></p>');
+            ->assertJsonPath('data.attributes.custom_fields.body', '<p><img alt="a" data-id="'.$media->uuid.'" src="'.e($media->refresh()->getUrl()).'"></p>');
     });
 
     it('lists notes with images through one media query per workspace', function (): void {
@@ -309,4 +310,30 @@ describe('rich editor images over rest', function (): void {
         $this->assertDatabaseMissing('media', ['uuid' => $images[1]->uuid]);
         Storage::disk('local')->assertExists($images[2]->getPathRelativeToRoot());
     });
+
+    it('stores no signature when a read body is written back unchanged', function (): void {
+        $image = $this->workspace->addMediaFromString(onePixelPng())->usingFileName('a.png')
+            ->withAttributes(['workspace_id' => $this->workspace->getKey()])
+            ->toMediaCollection(MediaCollection::PendingUploads->value);
+        $document = $this->workspace->addMediaFromString(pdfBytes())->usingFileName('brief.pdf')
+            ->withAttributes(['workspace_id' => $this->workspace->getKey()])
+            ->toMediaCollection(MediaCollection::PendingUploads->value);
+
+        $id = $this->postJson('/api/v1/notes', ['title' => 'Round trip', 'custom_fields' => ['body' => '<p><img data-id="'.$image->uuid.'"></p><p><a href="'.route('media.show', ['media' => $document->uuid]).'">Brief</a></p>']])
+            ->assertCreated()->json('data.id');
+
+        $read = $this->getJson("/api/v1/notes/{$id}")->assertOk()->json('data.attributes.custom_fields.body');
+
+        expect($read)->toContain('signature=');
+
+        $this->patchJson("/api/v1/notes/{$id}", ['custom_fields' => ['body' => html_entity_decode($read)]])->assertOk();
+
+        $stored = (string) CustomFieldValue::query()->withoutGlobalScopes()
+            ->where('entity_id', $id)->where('custom_field_id', $this->body->getKey())->value('text_value');
+
+        expect($stored)->not->toContain('signature=')
+            ->and($stored)->toContain('data-id="'.$image->uuid.'"')
+            ->and($stored)->toContain('href="'.route('media.show', ['media' => $document->uuid]).'"');
+    });
+
 });
