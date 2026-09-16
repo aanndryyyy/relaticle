@@ -388,6 +388,35 @@ describe('Staff passkeys', function () {
         expect(config('passkeys.allowed_origins'))->toContain($origin);
     });
 
+    it('keeps a path out of every allowed origin', function (array $app) {
+        config()->set('app.url', $app['url']);
+        config()->set('app.app_panel_domain', $app['app_panel_domain']);
+        config()->set('app.sysadmin_domain', $app['sysadmin_domain']);
+
+        $origins = (require base_path('config/fortify.php'))['passkeys']['allowed_origins'];
+
+        expect($origins)->toBe($app['expected']);
+    })->with([
+        'trailing slash, no panel domains' => [[
+            'url' => 'https://example.test/',
+            'app_panel_domain' => null,
+            'sysadmin_domain' => null,
+            'expected' => ['https://example.test'],
+        ]],
+        'both panel domains' => [[
+            'url' => 'https://example.test',
+            'app_panel_domain' => 'app.example.test',
+            'sysadmin_domain' => 'sysadmin.example.test',
+            'expected' => ['https://app.example.test', 'https://sysadmin.example.test'],
+        ]],
+        'non-standard port is carried' => [[
+            'url' => 'http://example.test:8000',
+            'app_panel_domain' => 'app.example.test',
+            'sysadmin_domain' => null,
+            'expected' => ['http://app.example.test:8000', 'http://example.test:8000'],
+        ]],
+    ]);
+
     it('cannot derive the same webauthn handle as a customer with the same key', function () {
         $administrator = SystemAdministrator::factory()->create();
         $customer = User::factory()->create();

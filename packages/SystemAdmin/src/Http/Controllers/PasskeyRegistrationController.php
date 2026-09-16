@@ -23,8 +23,8 @@ final class PasskeyRegistrationController extends Controller
      */
     public function index(Request $request, GenerateRegistrationOptions $generate): JsonResponse
     {
-        // The profile page mints this after verifying a one-time code. Without it a
-        // stolen session cookie alone could add a credential that outlives the theft.
+        // The profile page mints this grant only after verifying a one-time code, so
+        // adding a credential costs the second factor and not just the session cookie.
         abort_unless(PasskeyRegistrationRequest::isGranted($request), 403);
 
         $options = $generate->execute($this->administrator());

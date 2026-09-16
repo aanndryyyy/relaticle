@@ -176,16 +176,18 @@ return [
         // The sysadmin panel has its own relying party but shares this one global
         // origin list, so its origin belongs here too.
         'allowed_origins' => (function (): array {
-            $appUrl = (string) config('app.url');
-            $parsed = parse_url($appUrl);
+            $parsed = parse_url((string) config('app.url'));
             $scheme = $parsed['scheme'] ?? 'https';
             $port = isset($parsed['port']) ? ":{$parsed['port']}" : '';
 
+            // Every entry is built from a host, never from APP_URL itself: an origin
+            // is scheme, host and port, and a trailing path never matches one.
             $origin = fn (?string $domain): ?string => $domain ? "{$scheme}://{$domain}{$port}" : null;
+            $default = $origin($parsed['host'] ?? null);
 
             return array_values(array_unique(array_filter([
-                $origin(config('app.app_panel_domain')) ?? $appUrl,
-                $origin(config('app.sysadmin_domain')) ?? $appUrl,
+                $origin(config('app.app_panel_domain')) ?? $default,
+                $origin(config('app.sysadmin_domain')) ?? $default,
             ])));
         })(),
         'user_handle_secret' => env('PASSKEYS_USER_HANDLE_SECRET', config('app.key')),
