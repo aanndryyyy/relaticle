@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Relaticle\SystemAdmin;
 
 use Exception;
+use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Facades\Filament;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -18,6 +19,7 @@ use Filament\Tables\Columns\Column;
 use Filament\Tables\Table;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\View\View;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Database\Eloquent\Model;
@@ -27,13 +29,17 @@ use Illuminate\Session\Middleware\AuthenticateSession;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Route;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 use Relaticle\Ink\InkPlugin;
 use Relaticle\Ink\Models\Category;
 use Relaticle\Ink\Models\Post;
 use Relaticle\SystemAdmin\Filament\Pages\Auth\EditProfile;
 use Relaticle\SystemAdmin\Filament\Pages\Dashboard;
+use Relaticle\SystemAdmin\Http\Controllers\PasskeyLoginController;
+use Relaticle\SystemAdmin\Http\Controllers\PasskeyRegistrationController;
 use Relaticle\SystemAdmin\Http\Middleware\DenySearchIndexing;
+use Relaticle\SystemAdmin\Http\Middleware\RequireSecondFactor;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
 use Relaticle\SystemAdmin\Policies\CategoryPolicy;
 use Relaticle\SystemAdmin\Policies\PostPolicy;
@@ -138,6 +144,13 @@ final class SystemAdminPanelProvider extends PanelProvider
             ->login()
             ->profile(EditProfile::class)
             ->emailVerification(isRequired: config('app.require_email_verification'))
+            // A SuperAdministrator password reaches every customer's data and, through
+            // impersonation, a signed-in session as any of them.
+            ->multiFactorAuthentication(
+                AppAuthentication::make()->recoverable(),
+                isRequired: true,
+            )
+            ->multiFactorAuthenticationRequiredMiddlewareName(RequireSecondFactor::class)
             ->authGuard('sysadmin')
             ->authPasswordBroker('system_administrators')
             ->strictAuthorization()
@@ -201,7 +214,33 @@ final class SystemAdminPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 Authenticate::class,
+                RequireSecondFactor::class,
             ])
+            ->routes(function () use ($panel): void {
+                Route::prefix('passkeys')
+                    ->name('passkeys.')
+                    ->group(function () use ($panel): void {
+                        Route::get('/login/options', [PasskeyLoginController::class, 'index'])
+                            ->middleware(['guest:sysadmin', 'throttle:passkeys'])
+                            ->name('login-options');
+                        Route::post('/login', [PasskeyLoginController::class, 'store'])
+                            ->middleware(['guest:sysadmin', 'throttle:passkeys'])
+                            ->name('login');
+
+                        // Behind the panel's own stack, so registering a passkey is
+                        // reachable only once the required second factor is enrolled.
+                        Route::get('/options', [PasskeyRegistrationController::class, 'index'])
+                            ->middleware([...$panel->getAuthMiddleware(), 'throttle:passkeys'])
+                            ->name('options');
+                        Route::post('/', [PasskeyRegistrationController::class, 'store'])
+                            ->middleware([...$panel->getAuthMiddleware(), 'throttle:passkeys'])
+                            ->name('store');
+                    });
+            })
+            ->renderHook(
+                PanelsRenderHook::AUTH_LOGIN_FORM_AFTER,
+                fn (): View => view('system-admin::auth.passkey-login'),
+            )
             ->renderHook(
                 PanelsRenderHook::AUTH_LOGIN_FORM_BEFORE,
                 fn (): string => Blade::render('@env(\'local\')<x-login-link email="sysadmin@relaticle.com" guard="sysadmin" user-model="'.SystemAdministrator::class.'" redirect-url="'.$this->sysadminHomeUrl().'" />@endenv'),

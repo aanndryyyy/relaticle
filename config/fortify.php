@@ -173,22 +173,21 @@ return [
     'passkeys' => [
         'relying_party_id' => config('app.app_panel_domain')
             ?: parse_url((string) config('app.url'), PHP_URL_HOST),
-        'allowed_origins' => [
-            (function (): string {
-                $appUrl = (string) config('app.url');
-                $panelDomain = config('app.app_panel_domain');
+        // The sysadmin panel has its own relying party but shares this one global
+        // origin list, so its origin belongs here too.
+        'allowed_origins' => (function (): array {
+            $appUrl = (string) config('app.url');
+            $parsed = parse_url($appUrl);
+            $scheme = $parsed['scheme'] ?? 'https';
+            $port = isset($parsed['port']) ? ":{$parsed['port']}" : '';
 
-                if (! $panelDomain) {
-                    return $appUrl;
-                }
+            $origin = fn (?string $domain): ?string => $domain ? "{$scheme}://{$domain}{$port}" : null;
 
-                $parsed = parse_url($appUrl);
-                $scheme = $parsed['scheme'] ?? 'https';
-                $port = isset($parsed['port']) ? ":{$parsed['port']}" : '';
-
-                return "{$scheme}://{$panelDomain}{$port}";
-            })(),
-        ],
+            return array_values(array_unique(array_filter([
+                $origin(config('app.app_panel_domain')) ?? $appUrl,
+                $origin(config('app.sysadmin_domain')) ?? $appUrl,
+            ])));
+        })(),
         'user_handle_secret' => env('PASSKEYS_USER_HANDLE_SECRET', config('app.key')),
         'timeout' => 60000,
     ],
