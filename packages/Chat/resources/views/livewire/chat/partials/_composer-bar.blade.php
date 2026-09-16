@@ -1,12 +1,12 @@
 {{-- Shared input bar for every composer surface (full-page chat, side panel,
      dashboard). Renders the rounded container, the TipTap mount, and the
-     controls row (model picker and attachment on the lead side, char
-     counter, mic and send/stop on the trailing side). The caller owns the
-     surrounding `x-data="chatEditor(...)"` wrapper (and its `x-on:*` listeners + `data-chat-context`): this
-     partial only needs `text`, `isStreaming`, `rateLimit`/`submitting` etc.
-     to already be reachable up the Alpine scope chain, exactly as the editor
-     mount below relies on `x-ref="editor"` resolving to that same wrapper's
-     scope.
+     controls row (attachment on the lead side, char counter, model picker,
+     mic and send/stop on the trailing side). The caller owns the surrounding
+     `x-data="chatEditor(...)"` wrapper (and its `x-on:*` listeners +
+     `data-chat-context`): this partial only needs `text`, `isStreaming`,
+     `rateLimit`/`submitting` etc. to already be reachable up the Alpine scope
+     chain, exactly as the editor mount below relies on `x-ref="editor"`
+     resolving to that same wrapper's scope.
 
      $showStopButton (bool, default true): dashboard has no streaming
      concept: it navigates to the conversation page instead, so it passes
@@ -34,8 +34,6 @@
 
     <div class="flex items-center gap-2 px-3 pb-2">
         <div class="flex items-center gap-1.5">
-            @include('chat::livewire.chat.partials._model-picker')
-
             @php $attachTexts = [
                 'wrongType' => __('Attach a CSV or TXT file.'),
                 'tooLarge' => __('Files up to 10 MB.'),
@@ -80,7 +78,7 @@
                     </button>
                 </div>
 
-                <div x-show="attachError" x-cloak role="alert" class="absolute bottom-full start-0 mb-2 flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                <div x-show="attachError" x-cloak role="alert" class="absolute bottom-full end-0 mb-2 flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
                     <span x-text="attachError"></span>
                     <button type="button" x-on:click="attachError = null" class="-me-1 shrink-0 rounded p-0.5 transition hover:bg-red-600/10 dark:hover:bg-red-400/20" aria-label="{{ __('Dismiss') }}">
                         <x-heroicon-m-x-mark class="h-3.5 w-3.5" aria-hidden="true" />
@@ -102,6 +100,8 @@
                 class="text-[length:var(--text-micro)]"
                 aria-live="polite"
             ></span>
+
+            @include('chat::livewire.chat.partials._model-picker')
 
             {{-- Push-to-talk dictation. Hidden entirely, not disabled, when the
                  feature is off or the transcription provider has no key: a
@@ -149,7 +149,7 @@
 
                     {{-- Floated above the bar so a failure never reflows the
                          composer. Absolute against the rounded container's
-                         `relative`. --}}
+                         `relative`, opposite the attachment error's own edge. --}}
                     <div
                         x-show="voiceError"
                         x-cloak

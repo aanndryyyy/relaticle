@@ -31,7 +31,7 @@
         x-transition:enter="motion-safe:transition motion-safe:ease-out motion-safe:duration-100"
         x-transition:enter-start="motion-safe:opacity-0"
         x-transition:enter-end="motion-safe:opacity-100"
-        class="absolute bottom-full start-0 z-10 mb-2 w-56 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
+        class="absolute bottom-full end-0 z-10 mb-2 w-56 overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-gray-700 dark:bg-gray-900"
     >
         <div role="listbox" aria-label="{{ __('AI model options') }}" class="max-h-64 overflow-y-auto">
             <template x-for="opt in modelOptions" :key="opt.value">
