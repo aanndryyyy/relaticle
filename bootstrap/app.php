@@ -29,8 +29,8 @@ use Illuminate\Support\Facades\Route;
 use Laravel\Cashier\Http\Middleware\VerifyWebhookSignature;
 use Livewire\Exceptions\PayloadTooLargeException;
 use Livewire\Mechanisms\HandleComponents\CorruptComponentPayloadException;
+use Relaticle\SystemAdmin\Http\Middleware\EnsureAuthenticationContext;
 use Relaticle\SystemAdmin\Http\Middleware\IsolateAuthenticationSession;
-use Relaticle\SystemAdmin\Http\Middleware\RemoveForeignGuardSession;
 use Sentry\Laravel\Integration;
 use Spatie\Health\Commands\DispatchQueueCheckJobsCommand;
 use Spatie\Health\Commands\RunHealthChecksCommand;
@@ -90,13 +90,15 @@ return Application::configure(basePath: dirname(__DIR__))
         // api/mcp root banners are exactly the crawlable secondary-host URLs.
         $middleware->prepend(DenyIndexingOnSecondaryHosts::class);
 
+        // Controller constructors can resolve sessions before route middleware runs.
+        $middleware->append(IsolateAuthenticationSession::class);
+
         $middleware->web(
             append: [
-                'auth.remove-foreign-session',
+                'auth.context',
                 RedirectToPrimaryHost::class,
                 EnsureAuthenticationComplete::class,
             ],
-            prepend: ['auth.isolate'],
         );
 
         // Only enforced on multi-host deployments (any *_DOMAIN configured);
@@ -154,24 +156,18 @@ return Application::configure(basePath: dirname(__DIR__))
             prepend: SetUpPanel::class,
         );
 
-        $middleware->prependToPriorityList(
-            before: SetUpPanel::class,
-            prepend: IsolateAuthenticationSession::class,
-        );
-
         $middleware->appendToPriorityList(
             after: StartSession::class,
-            append: RemoveForeignGuardSession::class,
+            append: EnsureAuthenticationContext::class,
         );
 
         $middleware->prependToPriorityList(
-            before: IsolateAuthenticationSession::class,
+            before: SetUpPanel::class,
             prepend: RedirectToPrimaryHost::class,
         );
 
         $middleware->alias([
-            'auth.isolate' => IsolateAuthenticationSession::class,
-            'auth.remove-foreign-session' => RemoveForeignGuardSession::class,
+            'auth.context' => EnsureAuthenticationContext::class,
             'signed' => ValidateSignature::class,
             'no-referrer' => NoReferrer::class,
             // Fortify and Passkeys both reference this alias by name in their own

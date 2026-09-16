@@ -223,11 +223,10 @@ final class SystemAdminPanelProvider extends PanelProvider
             ])
             ->databaseNotifications()
             ->middleware([
-                'auth.isolate',
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
                 StartSession::class,
-                'auth.remove-foreign-session',
+                'auth.context',
                 AuthenticateSession::class,
                 ShareErrorsFromSession::class,
                 PreventRequestForgery::class,

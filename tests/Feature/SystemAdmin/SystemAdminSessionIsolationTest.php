@@ -8,25 +8,31 @@ use Filament\Auth\Pages\Login as StaffLogin;
 use Filament\Facades\Filament;
 use Filament\Support\Facades\FilamentView;
 use Filament\Support\View\ViewManager;
+use Illuminate\Contracts\Routing\ResponseFactory;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Controller;
+use Illuminate\Routing\Redirector;
 use Illuminate\Routing\RouteCollection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Redirect;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use PragmaRX\Google2FAQRCode\Google2FA;
 use Relaticle\Ink\Models\Post;
+use Relaticle\SystemAdmin\Http\Middleware\EnsureAuthenticationContext;
 use Relaticle\SystemAdmin\Http\Middleware\IsolateAuthenticationSession;
-use Relaticle\SystemAdmin\Http\Middleware\RemoveForeignGuardSession;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
 use Symfony\Component\HttpFoundation\Response;
 use Tests\Helpers\PasskeyAssertionFixture;
 
-mutates(IsolateAuthenticationSession::class, RemoveForeignGuardSession::class);
+mutates(IsolateAuthenticationSession::class, EnsureAuthenticationContext::class);
 
 beforeEach(function (): void {
     config()->set([
@@ -73,8 +79,14 @@ function isolatedAuthRequest(array &$cookies, string $method, string $url, array
     app()->forgetInstance('auth.driver');
     app('session')->forgetDrivers();
     app()->forgetInstance('session.store');
-    Cookie::flushQueuedCookies();
-    Cookie::setDefaultPathAndDomain(config('session.path'), config('session.domain'), config('session.secure'), config('session.same_site'));
+    app()->forgetInstance('cookie');
+    Cookie::clearResolvedInstance('cookie');
+    app()->forgetInstance('redirect');
+    Redirect::clearResolvedInstance('redirect');
+    app()->forgetInstance(ResponseFactory::class);
+    foreach (app('router')->getRoutes() as $route) {
+        $route->flushController();
+    }
     Auth::shouldUse('web');
     app()->forgetInstance('filament');
     Filament::clearResolvedInstance('filament');
@@ -129,6 +141,46 @@ function signInIsolatedStaff(array &$cookies, SystemAdministrator $administrator
         ->assertOk();
 }
 
+final class StaffSessionRedirectController extends Controller
+{
+    public function __construct(private readonly Redirector $redirector) {}
+
+    public function __invoke(): RedirectResponse
+    {
+        return $this->redirector->to('https://staff.example.test/session-flash')->with('notice', 'Saved');
+    }
+}
+
+it('persists staff flash messages when a controller constructor resolves the redirector', function (): void {
+    Route::domain('staff.example.test')->middleware('web')->group(function (): void {
+        Route::get('/session-redirect', StaffSessionRedirectController::class);
+        Route::get('/session-flash', fn (Request $request): array => ['notice' => $request->session()->get('notice')]);
+    });
+    $cookies = [];
+
+    isolatedAuthRequest($cookies, 'GET', 'https://staff.example.test/session-redirect')
+        ->assertRedirect('https://staff.example.test/session-flash');
+
+    isolatedAuthRequest($cookies, 'GET', 'https://staff.example.test/session-flash')
+        ->assertOk()->assertJson(['notice' => 'Saved']);
+});
+
+it('persists staff flash messages on the first HTTP request after application boot', function (): void {
+    Route::domain('staff.example.test')->middleware('web')->group(function (): void {
+        Route::get('/session-redirect', StaffSessionRedirectController::class);
+        Route::get('/session-flash', fn (Request $request): array => ['notice' => $request->session()->get('notice')]);
+    });
+    $cookies = [];
+    $response = $this->getJson('https://staff.example.test/session-redirect')
+        ->assertRedirect('https://staff.example.test/session-flash');
+    foreach ($response->headers->getCookies() as $cookie) {
+        $cookies[$cookie->getDomain() ?: 'staff.example.test'][$cookie->getName()] = $cookie->getValue();
+    }
+
+    isolatedAuthRequest($cookies, 'GET', 'https://staff.example.test/session-flash')
+        ->assertOk()->assertJson(['notice' => 'Saved']);
+});
+
 it('gives staff a secure host-only cookie and separate database storage', function (): void {
     $cookies = [];
     $customer = isolatedAuthRequest($cookies, 'GET', 'https://example.test/passkeys/login/options')->assertOk();
@@ -146,6 +198,22 @@ it('gives staff a secure host-only cookie and separate database storage', functi
     expect(DB::table('sessions')->where('id', $customerCookie->getValue())->exists())->toBeTrue()
         ->and(DB::table('system_administrator_sessions')->where('id', $staffCookie->getValue())->exists())->toBeTrue()
         ->and(DB::table('sessions')->where('id', $staffCookie->getValue())->exists())->toBeFalse();
+});
+
+it('isolates staff sessions when the configured hostname contains uppercase letters', function (): void {
+    config()->set('app.sysadmin_domain', 'Staff.Example.test');
+    foreach (app('router')->getRoutes() as $route) {
+        if ($route->getDomain() === 'staff.example.test') {
+            $route->domain('Staff.Example.test');
+        }
+    }
+    $cookies = [];
+    $response = isolatedAuthRequest($cookies, 'GET', 'https://staff.example.test/passkeys/login/options')->assertOk();
+    $cookie = $response->getCookie('__Host-'.config('system-admin.session.cookie'));
+
+    expect($cookie)->not->toBeNull();
+    expect(DB::table('system_administrator_sessions')->where('id', $cookie->getValue())->exists())->toBeTrue()
+        ->and(DB::table('sessions')->where('id', $cookie->getValue())->exists())->toBeFalse();
 });
 
 it('keeps staff signed in through customer password login and logout', function (string $driver): void {
@@ -409,6 +477,7 @@ it('requires the native staff password and MFA challenge while keeping the custo
             'calls' => [['path' => '', 'method' => 'authenticate', 'params' => []]],
         ]],
     ])->assertOk()->assertJsonPath('components.0.effects.redirect', 'https://staff.example.test');
+    isolatedAuthRequest($cookies, 'GET', 'https://staff.example.test')->assertOk()->assertSee('Dashboard');
     isolatedAuthRequest($cookies, 'GET', 'https://app.example.test/passkeys/confirm/options')->assertOk();
     expect(DB::table('system_administrator_sessions')->where('user_id', $administrator->id)->exists())->toBeTrue();
 });

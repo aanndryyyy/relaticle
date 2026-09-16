@@ -51,7 +51,7 @@ use Spatie\MarkdownResponse\Middleware\ProvideMarkdownResponse;
 */
 
 Route::middleware('guest')->group(function () {
-    if (Feature::active(SocialAuth::class)) {
+    if (Feature::for(null)->active(SocialAuth::class)) {
         Route::get('/auth/redirect/{provider}', RedirectController::class)
             ->name('auth.socialite.redirect')
             ->middleware('throttle:10,1,socialite-redirect');
@@ -71,7 +71,7 @@ Route::middleware('guest')->group(function () {
 });
 
 Route::middleware('auth')->group(function (): void {
-    if (Feature::active(SocialAuth::class)) {
+    if (Feature::for(null)->active(SocialAuth::class)) {
         // Confirmation intent, not login: a linked provider re-authenticated here
         // proves current access to that identity for one sensitive operation.
         // Distinct from the link routes below, which establish a new association.
@@ -217,7 +217,7 @@ $legacyDocsRedirect = function (DocsRepository $repository, string $slug = ''): 
         : redirect('/developers', 301);
 };
 
-if (Feature::active(Documentation::class)) {
+if (Feature::for(null)->active(Documentation::class)) {
     Route::get('/documentation/{slug?}', $legacyDocsRedirect)->where('slug', '.*');
     Route::get('/docs/{slug?}', $legacyDocsRedirect)->where('slug', '.*');
 }
