@@ -19,7 +19,6 @@ use Relaticle\EmailIntegration\Models\Email;
 use Relaticle\EmailIntegration\Notifications\MailboxHistoryImportCompletedNotification;
 use Relaticle\EmailIntegration\Services\Contracts\MailServiceFactoryInterface;
 use Relaticle\EmailIntegration\Services\Contracts\MailServiceInterface;
-use Relaticle\EmailIntegration\Services\EmailSyncDebugStoreFailure;
 
 mutates(InitialEmailSyncJob::class);
 
@@ -328,7 +327,7 @@ it('advances after a disabled direction skips every message in a page', function
 
     handleInitialEmailSync(new InitialEmailSyncJob($account), $factory);
 
-    (new StoreEmailJob($account, 'M1'))->handle($factory, resolve(StoreEmailAction::class), resolve(EmailSyncDebugStoreFailure::class));
+    (new StoreEmailJob($account, 'M1'))->handle($factory, resolve(StoreEmailAction::class));
 
     invokeInitialEmailSyncBatchFinallyCallbacks();
 

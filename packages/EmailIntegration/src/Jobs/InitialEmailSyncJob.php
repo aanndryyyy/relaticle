@@ -4,13 +4,12 @@ declare(strict_types=1);
 
 namespace Relaticle\EmailIntegration\Jobs;
 
-use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
-use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Config;
+use Relaticle\EmailIntegration\Actions\CompleteMailboxHistoryImportAction;
 use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
 use Relaticle\EmailIntegration\Jobs\Concerns\DetectsAuthErrors;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
@@ -167,11 +166,7 @@ final class InitialEmailSyncJob implements ShouldBeUnique, ShouldQueue
         MailboxSyncTracker::clearMessageRetries($account);
 
         if ($historyImportBatchId !== null) {
-            $batch = Bus::findBatch($historyImportBatchId);
-
-            if ($batch instanceof Batch && $batch->totalJobs === 0) {
-                $account->user?->notify(new MailboxHistoryImportCompletedNotification($account->fresh() ?? $account));
-            }
+            resolve(CompleteMailboxHistoryImportAction::class)->execute((string) $account->getKey(), $historyImportBatchId);
 
             return;
         }

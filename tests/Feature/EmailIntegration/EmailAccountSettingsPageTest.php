@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use App\Models\User;
 use App\Models\Workspace;
-use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
@@ -258,7 +257,7 @@ it('does not touch another account\'s signature', function (): void {
     $this->assertDatabaseHas(EmailSignature::class, ['id' => $signature->id]);
 });
 
-it('shows a dismissible callout with retry when history import has failures', function (): void {
+it('does not show history import failure recovery on account settings', function (): void {
     $batch = resolve(MailboxHistoryImportService::class)->startBatch($this->account);
 
     $this->account->update([
@@ -275,9 +274,8 @@ it('shows a dismissible callout with retry when history import has failures', fu
     ]);
 
     livewire(EmailAccountSettingsPage::class, ['account' => $this->account->id])
-        ->assertSee(__('filament/pages/email-account-settings.history_import_failure.heading'))
-        ->assertSee(__('filament/pages/email-accounts.history_import.failed_jobs', ['count' => '2']))
-        ->assertActionVisible(TestAction::make('retryFailedImport')->arguments(['account_id' => $this->account->id]));
+        ->assertDontSee(__('filament/pages/email-accounts.history_import_failure.badge'))
+        ->assertDontSee(__('filament/pages/email-accounts.actions.retry_failed_import.label'));
 });
 
 it('shows syncing percent while mailbox history is importing', function (): void {

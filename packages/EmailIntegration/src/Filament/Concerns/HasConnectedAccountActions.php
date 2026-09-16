@@ -119,22 +119,28 @@ trait HasConnectedAccountActions
     {
         return Action::make('retryFailedImport')
             ->label(__('filament/pages/email-accounts.actions.retry_failed_import.label'))
-            ->icon('heroicon-o-arrow-path')
-            ->color('primary')
+            ->icon('heroicon-m-arrow-path')
+            ->link()
+            ->color('warning')
             ->size(Size::Small)
-            ->visible(fn (array $arguments): bool => $this instanceof EmailAccountSettingsPage
-                && (bool) $this->findAccount($arguments)?->showsMailboxHistoryImportFailureSummary())
+            ->visible(fn (array $arguments): bool => (bool) $this->findAccount($arguments)?->showsMailboxHistoryImportFailureSummary())
             ->action(function (array $arguments): void {
                 $account = $this->findOwnedAccountOrFail($arguments);
+                $user = auth()->user();
+                abort_unless($user instanceof User, 403);
 
-                resolve(RetryMailboxHistoryImportFailuresAction::class)->execute($account);
+                $batchId = $account->history_import_batch_id;
+                abort_unless(is_string($batchId) && $batchId !== '', 404);
+
+                $retried = resolve(RetryMailboxHistoryImportFailuresAction::class)->execute($user, $account, $batchId);
 
                 $this->afterAccountChanged();
 
                 Notification::make()
-                    ->success()
-                    ->title(__('filament/pages/email-accounts.notifications.retry_failed_import_queued.title'))
-                    ->body(__('filament/pages/email-accounts.notifications.retry_failed_import_queued.body'))
+                    ->title($retried
+                        ? __('filament/pages/email-accounts.notifications.retry_failed_import_queued.title')
+                        : __('filament/notifications/mailbox-import-complete.failures.unavailable'))
+                    ->status($retried ? 'success' : 'warning')
                     ->send();
             });
     }

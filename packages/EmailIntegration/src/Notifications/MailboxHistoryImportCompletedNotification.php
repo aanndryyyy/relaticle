@@ -16,7 +16,11 @@ final class MailboxHistoryImportCompletedNotification extends Notification imple
 {
     use Queueable;
 
-    public function __construct(public readonly ConnectedAccount $account) {}
+    public function __construct(
+        public readonly ConnectedAccount $account,
+        public readonly ?string $batchId = null,
+        public readonly bool $afterFailedImportRetry = false,
+    ) {}
 
     /**
      * @return list<string>
@@ -28,12 +32,18 @@ final class MailboxHistoryImportCompletedNotification extends Notification imple
 
     public function toMail(object $notifiable): MailMessage
     {
+        $lineKey = $this->afterFailedImportRetry
+            ? 'filament/notifications/mailbox-import-complete.mail.retry_line'
+            : 'filament/notifications/mailbox-import-complete.mail.line';
+
         return (new MailMessage)
-            ->subject(__('filament/notifications/mailbox-import-complete.mail.subject'))
+            ->subject($this->afterFailedImportRetry
+                ? __('filament/notifications/mailbox-import-complete.mail.retry_subject')
+                : __('filament/notifications/mailbox-import-complete.mail.subject'))
             ->greeting(__('filament/notifications/mailbox-import-complete.mail.greeting', [
                 'name' => $notifiable instanceof User ? $notifiable->name : '',
             ]))
-            ->line(__('filament/notifications/mailbox-import-complete.mail.line', [
+            ->line(__($lineKey, [
                 'email' => $this->account->email_address,
                 'count' => $this->account->initial_sync_imported,
             ]));
@@ -44,9 +54,17 @@ final class MailboxHistoryImportCompletedNotification extends Notification imple
      */
     public function toDatabase(User $notifiable): array
     {
+        $titleKey = $this->afterFailedImportRetry
+            ? 'filament/notifications/mailbox-import-complete.retry_success.title'
+            : 'filament/notifications/mailbox-import-complete.title';
+        $bodyKey = $this->afterFailedImportRetry
+            ? 'filament/notifications/mailbox-import-complete.retry_success.body'
+            : 'filament/notifications/mailbox-import-complete.body';
+
         return FilamentNotification::make()
-            ->title(__('filament/notifications/mailbox-import-complete.title'))
-            ->body(__('filament/notifications/mailbox-import-complete.body', [
+            ->viewData(['batch_id' => $this->batchId])
+            ->title(__($titleKey))
+            ->body(__($bodyKey, [
                 'email' => $this->account->email_address,
                 'count' => $this->account->initial_sync_imported,
             ]))

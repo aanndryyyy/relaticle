@@ -20,8 +20,8 @@
         >
             @foreach ($this->connectedAccounts as $account)
                 <div wire:key="email-account-{{ $account->getKey() }}" class="space-y-3 rounded-lg border border-gray-200 px-4 py-3 dark:border-white/10">
-                    <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <div class="flex min-w-0 flex-1 items-center gap-3">
+                    <div class="grid grid-cols-1 items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:gap-x-4">
+                        <div class="flex min-w-0 items-center gap-3">
                             <x-filament::icon :icon="$account->provider->getIcon()" class="h-5 w-5 shrink-0 text-gray-400" />
 
                             <div class="min-w-0">
@@ -39,8 +39,12 @@
                             </div>
                         </div>
 
-                        <div class="flex shrink-0 items-center gap-3">
-                            @if ($account->showsSyncProgress())
+                        <x-email-integration::history-import-failure-status :account="$account" class="w-full sm:w-auto">
+                            {{ ($this->retryFailedImportAction())(['account_id' => $account->getKey()]) }}
+                        </x-email-integration::history-import-failure-status>
+
+                        <div class="flex shrink-0 items-center gap-3 sm:justify-end">
+                            @if ($account->showsSyncProgressOnAccountsPage())
                                 <x-email-integration::importing-badge :account="$account" :icon="$this->syncingIcon()" />
                             @elseif ($account->hasSyncError())
                                 <x-filament::badge

@@ -305,7 +305,7 @@ it('shows the reason and a retry when mail could not be stored', function (): vo
         ->assertActionVisible(TestAction::make('retrySync')->arguments(['account_id' => $this->account->id]));
 });
 
-it('does not surface history import failures on the accounts list', function (): void {
+it('shows a warning badge and retry link after history import failures', function (): void {
     $batch = resolve(MailboxHistoryImportService::class)->startBatch($this->account);
 
     $this->account->update([
@@ -322,8 +322,9 @@ it('does not surface history import failures on the accounts list', function ():
     ]);
 
     livewire(EmailAccountsPage::class)
-        ->assertDontSee(__('filament/pages/email-accounts.history_import.failed_jobs', ['count' => '2']))
-        ->assertActionHidden(TestAction::make('retryFailedImport')->arguments(['account_id' => $this->account->id]))
+        ->assertSee(__('filament/pages/email-accounts.history_import_failure.badge'))
+        ->assertSee(__('filament/pages/email-accounts.actions.retry_failed_import.label'))
+        ->assertActionVisible(TestAction::make('retryFailedImport')->arguments(['account_id' => $this->account->id]))
         ->assertSee(__('filament/pages/email-accounts.in_sync'));
 });
 

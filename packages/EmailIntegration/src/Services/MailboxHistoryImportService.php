@@ -7,15 +7,32 @@ namespace Relaticle\EmailIntegration\Services;
 use Illuminate\Bus\Batch;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
+use Relaticle\EmailIntegration\Actions\CompleteMailboxHistoryImportAction;
 use Relaticle\EmailIntegration\Data\MailboxHistoryImportSummary;
 use Relaticle\EmailIntegration\Jobs\StoreEmailJob;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
-use Relaticle\EmailIntegration\Models\Email;
-use Relaticle\EmailIntegration\Notifications\MailboxHistoryImportCompletedNotification;
 
 final readonly class MailboxHistoryImportService
 {
+    private const string AWAITING_RETRY_SUCCESS_NOTICE_PREFIX = 'email-integration:history-import-awaiting-retry-success-notice:';
+
+    public function markAwaitingRetrySuccessNotice(string $batchId): void
+    {
+        Cache::put(self::AWAITING_RETRY_SUCCESS_NOTICE_PREFIX.$batchId, true, now()->addWeek());
+    }
+
+    public function pullAwaitingRetrySuccessNotice(string $batchId): bool
+    {
+        return (bool) Cache::pull(self::AWAITING_RETRY_SUCCESS_NOTICE_PREFIX.$batchId);
+    }
+
+    public function hasAwaitingRetrySuccessNotice(string $batchId): bool
+    {
+        return Cache::has(self::AWAITING_RETRY_SUCCESS_NOTICE_PREFIX.$batchId);
+    }
+
     public function lockKey(ConnectedAccount $account): string
     {
         return 'email-history-import:'.$account->getKey();
@@ -23,7 +40,7 @@ final readonly class MailboxHistoryImportService
 
     public function isRunning(ConnectedAccount $account): bool
     {
-        if (! $account->hasEmail() || ! filled($account->history_import_batch_id)) {
+        if (! $account->hasEmail() || blank($account->history_import_batch_id)) {
             return false;
         }
 
@@ -46,7 +63,7 @@ final readonly class MailboxHistoryImportService
 
     public function summary(ConnectedAccount $account): ?MailboxHistoryImportSummary
     {
-        if (! filled($account->history_import_batch_id)) {
+        if (blank($account->history_import_batch_id)) {
             return null;
         }
 
@@ -57,7 +74,7 @@ final readonly class MailboxHistoryImportService
         }
 
         $pending = $batch->pendingJobs;
-        $failed = $batch->failedJobs;
+        $failed = $this->batchFailedJobCount($batch);
         $total = $batch->totalJobs;
         $successful = max(0, $total - $pending - $failed);
 
@@ -123,7 +140,13 @@ final readonly class MailboxHistoryImportService
                 return $account->sync_cursor !== null ? 100 : 0;
             }
 
-            return $this->batchProgressPercent($batch);
+            $percent = $this->batchProgressPercent($batch);
+
+            if ($account->sync_cursor !== null && ! $this->batchIsComplete($batch)) {
+                return 100;
+            }
+
+            return $percent;
         }
 
         if ($account->sync_cursor !== null) {
@@ -152,6 +175,21 @@ final readonly class MailboxHistoryImportService
     }
 
     /**
+     * Laravel's failed_jobs counter increments on every failed attempt (including retries).
+     * failed_job_ids lists each batch job once, which matches messages the user must retry.
+     */
+    private function batchFailedJobCount(Batch $batch): int
+    {
+        $failedJobIds = $batch->failedJobIds;
+
+        if ($failedJobIds !== []) {
+            return count($failedJobIds);
+        }
+
+        return $batch->failedJobs;
+    }
+
+    /**
      * @return int<0, 100>
      */
     public function batchProgressPercent(Batch $batch): int
@@ -165,7 +203,7 @@ final readonly class MailboxHistoryImportService
 
     private function historyImportBatch(ConnectedAccount $account): ?Batch
     {
-        if (! filled($account->history_import_batch_id)) {
+        if (blank($account->history_import_batch_id)) {
             return null;
         }
 
@@ -183,19 +221,7 @@ final readonly class MailboxHistoryImportService
             ->onQueue('emails-sync')
             ->allowFailures()
             ->finally(static function (Batch $batch) use ($accountId): void {
-                $account = ConnectedAccount::query()->whereKey($accountId)->first();
-
-                if (! $account instanceof ConnectedAccount) {
-                    return;
-                }
-
-                $imported = Email::query()
-                    ->where('connected_account_id', $account->getKey())
-                    ->count();
-
-                $account->update(['initial_sync_imported' => $imported]);
-
-                $account->user?->notify(new MailboxHistoryImportCompletedNotification($account->fresh() ?? $account));
+                resolve(CompleteMailboxHistoryImportAction::class)->execute($accountId, $batch->id);
             })
             ->dispatch();
     }

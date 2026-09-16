@@ -11,14 +11,15 @@ use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
 use Illuminate\Queue\Attributes\MaxExceptions;
+use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
+use Relaticle\EmailIntegration\Actions\RecordMailboxHistoryImportStoreFailureAction;
 use Relaticle\EmailIntegration\Actions\StoreEmailAction;
 use Relaticle\EmailIntegration\Enums\EmailFolder;
 use Relaticle\EmailIntegration\Jobs\Concerns\ReleasesOnProviderRateLimit;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Email;
 use Relaticle\EmailIntegration\Services\Contracts\MailServiceFactoryInterface;
-use Relaticle\EmailIntegration\Services\EmailSyncDebugStoreFailure;
 use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 use Throwable;
 
@@ -55,7 +56,9 @@ final class StoreEmailJob implements ShouldBeUnique, ShouldQueue
     public function middleware(): array
     {
         return [
-            (new WithoutOverlapping($this->uniqueId()))->expireAfter(900),
+            (new WithoutOverlapping($this->uniqueId()))
+                ->releaseAfter(15)
+                ->expireAfter(300),
         ];
     }
 
@@ -65,7 +68,6 @@ final class StoreEmailJob implements ShouldBeUnique, ShouldQueue
     public function handle(
         MailServiceFactoryInterface $mailFactory,
         StoreEmailAction $action,
-        EmailSyncDebugStoreFailure $debugStoreFailure,
     ): void {
         if ($this->batch()?->cancelled()) {
             return;
@@ -87,8 +89,6 @@ final class StoreEmailJob implements ShouldBeUnique, ShouldQueue
         }
 
         try {
-            $debugStoreFailure->failJobIfConfigured($this->connectedAccount, $this->messageId);
-
             $fetched = $mailFactory->make($this->connectedAccount)->fetchMessage($this->messageId);
         } catch (Throwable $exception) {
             if ($this->releaseIfProviderRateLimited($accountId, $exception)) {
@@ -145,6 +145,22 @@ final class StoreEmailJob implements ShouldBeUnique, ShouldQueue
     public function failed(Throwable $exception): void
     {
         MailboxSyncTracker::clearMessageRetry($this->connectedAccount, $this->messageId);
+
+        $batch = $this->batch();
+        $batchId = $batch?->id;
+        $historyBatchId = $this->connectedAccount->history_import_batch_id;
+
+        if (is_string($batchId) && is_string($historyBatchId) && $batchId === $historyBatchId) {
+            $message = $exception instanceof MaxAttemptsExceededException
+                ? __('filament/pages/email-accounts.history_import_failure.max_attempts')
+                : $exception->getMessage();
+
+            resolve(RecordMailboxHistoryImportStoreFailureAction::class)->execute(
+                $this->connectedAccount,
+                $historyBatchId,
+                $message,
+            );
+        }
     }
 
     private function doesItAlreadyExists(): bool

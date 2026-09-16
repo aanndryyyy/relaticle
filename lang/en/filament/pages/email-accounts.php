@@ -30,7 +30,7 @@ return [
             'description' => 'Already synced mail and events stay in Relaticle. We will create missing people and companies using the current workspace record-creation setting, and import any messages not stored yet. This can take a while on a large mailbox.',
         ],
         'retry_failed_import' => [
-            'label' => 'Retry failed messages',
+            'label' => 'Retry',
         ],
     ],
     'settings' => [
@@ -96,7 +96,6 @@ return [
     ],
     'send_missing_tooltip' => 'Send access was not granted. Grant it to send mail from Relaticle.',
     'importing' => 'Syncing',
-    'finishing_import' => 'Finishing import',
     'importing_calendar' => 'Syncing calendar',
     'importing_email' => 'Syncing email',
     'importing_email_and_calendar' => 'Syncing email and calendar',
@@ -105,6 +104,11 @@ return [
         'processed' => ':processed of :total processed',
         'failed_jobs' => ':count messages could not be imported',
         'successful_jobs' => ':count imported successfully',
+    ],
+    'history_import_failure' => [
+        'badge' => 'Import issue',
+        'dismiss' => 'Dismiss',
+        'max_attempts' => 'This message could not be stored after several tries. Use Retry on Email Accounts. If it keeps failing, wait a few minutes and try again.',
     ],
     'sync_status' => [
         'title_syncing' => 'Syncing',

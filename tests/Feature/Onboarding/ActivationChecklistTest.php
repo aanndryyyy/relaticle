@@ -21,6 +21,7 @@ use Illuminate\Support\Str;
 use Laravel\Pennant\Feature;
 use Relaticle\EmailIntegration\Filament\Pages\EmailAccountsPage;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 
 mutates(ActivationChecklist::class, DismissActivationChecklist::class);
@@ -124,6 +125,31 @@ it('shows an inline syncing row while the mailbox import is in flight', function
         ->assertSeeHtml('data-testid="activation-email-sync-progress"')
         ->assertSee(__('filament/pages/dashboard.activation.steps.sync_email.syncing'))
         ->assertSee('12%');
+});
+
+it('does not show mailbox syncing on the checklist after the history cursor is written', function (): void {
+    $account = ConnectedAccount::factory()->create([
+        'workspace_id' => $this->workspace->getKey(),
+        'user_id' => $this->owner->getKey(),
+        'sync_cursor' => 'history-done',
+        'initial_sync_imported' => 220,
+        'initial_sync_estimated' => 224,
+    ]);
+
+    $batchId = resolve(MailboxHistoryImportService::class)->startBatch($account)->id;
+    $account->update(['history_import_batch_id' => $batchId]);
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 224,
+        'pending_jobs' => 3,
+        'failed_jobs' => 0,
+        'finished_at' => null,
+    ]);
+
+    livewire(ActivationChecklist::class)
+        ->assertSeeHtml(stepState('sync_email', true))
+        ->assertDontSeeHtml('data-testid="activation-email-sync-progress"')
+        ->assertDontSee(__('filament/pages/dashboard.activation.steps.sync_email.syncing'));
 });
 
 it('does not treat background incremental sync as an in-flight mailbox import', function (): void {

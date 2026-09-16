@@ -12,7 +12,6 @@ use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Email;
 use Relaticle\EmailIntegration\Services\Contracts\MailServiceFactoryInterface;
 use Relaticle\EmailIntegration\Services\Contracts\MailServiceInterface;
-use Relaticle\EmailIntegration\Services\EmailSyncDebugStoreFailure;
 
 mutates(StoreEmailJob::class);
 
@@ -48,7 +47,7 @@ function runStoreEmailJob(ConnectedAccount $account, EmailDirection $direction, 
     $factory = Mockery::mock(MailServiceFactoryInterface::class);
     $factory->shouldReceive('make')->andReturn($service);
 
-    (new StoreEmailJob($account, $fetched->providerMessageId))->handle($factory, resolve(StoreEmailAction::class), resolve(EmailSyncDebugStoreFailure::class));
+    (new StoreEmailJob($account, $fetched->providerMessageId))->handle($factory, resolve(StoreEmailAction::class));
 }
 
 it('skips storing a sent email when sync_sent is off', function (): void {

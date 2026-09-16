@@ -274,7 +274,8 @@ final class ConnectedAccount extends Model
      */
     public function hasSyncError(): bool
     {
-        return filled($this->last_error);
+        return filled($this->last_error)
+            && ! $this->showsMailboxHistoryImportFailureSummary();
     }
 
     /**
@@ -287,10 +288,6 @@ final class ConnectedAccount extends Model
         }
 
         if ($this->hasEmail() && $this->sync_cursor === null) {
-            return true;
-        }
-
-        if ($this->hasEmail() && $this->isEmailHistoryImportRunning()) {
             return true;
         }
 
@@ -315,52 +312,21 @@ final class ConnectedAccount extends Model
 
     public function showsMailboxHistoryImportFailureSummary(): bool
     {
+        if ($this->sync_cursor === null || blank($this->history_import_batch_id)) {
+            return false;
+        }
+
+        $import = resolve(MailboxHistoryImportService::class);
+
+        if ($import->hasAwaitingRetrySuccessNotice((string) $this->history_import_batch_id)) {
+            return true;
+        }
+
         $summary = $this->mailboxHistoryImportSummary();
 
         return $summary instanceof MailboxHistoryImportSummary
             && $summary->finished
             && $summary->failedJobs > 0;
-    }
-
-    /**
-     * Provider pagination is done; store jobs may still be running or retrying on backoff.
-     */
-    public function isMailboxHistoryImportStoringPhase(): bool
-    {
-        return $this->hasEmail()
-            && filled($this->history_import_batch_id)
-            && $this->sync_cursor !== null
-            && $this->isEmailHistoryImportRunning();
-    }
-
-    /**
-     * Percent in the badge misleads during store (e.g. 99% while three jobs retry). Use counts instead.
-     */
-    public function showsPercentOnImportBadge(): bool
-    {
-        if ($this->showsMailboxHistoryImportFailureSummary() || $this->isMailboxHistoryImportStoringPhase()) {
-            return false;
-        }
-
-        return $this->showsSyncProgress();
-    }
-
-    public function historyImportProcessedLabel(): ?string
-    {
-        if (! filled($this->history_import_batch_id)) {
-            return null;
-        }
-
-        $import = resolve(MailboxHistoryImportService::class);
-
-        if ($import->totalJobCount($this) <= 0) {
-            return null;
-        }
-
-        return __('filament/pages/email-accounts.history_import.processed', [
-            'processed' => number_format($import->processedJobCount($this)),
-            'total' => number_format($import->totalJobCount($this)),
-        ]);
     }
 
     public function isImportingCalendarHistory(): bool
@@ -401,6 +367,13 @@ final class ConnectedAccount extends Model
             || $this->isEmailHistoryImportRunning()
             || $this->isCalendarSyncing()
             || $this->isEmailSyncing();
+    }
+
+    public function showsSyncProgressOnAccountsPage(): bool
+    {
+        return $this->showsMailboxHistoryImportProgressOnAccountsPage()
+            || $this->showsCalendarSyncProgress()
+            || ($this->isEmailSyncing() && ! $this->isEmailHistoryImportRunning());
     }
 
     public function isIncrementalSyncing(): bool
