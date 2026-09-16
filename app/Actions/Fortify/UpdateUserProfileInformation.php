@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Actions\Fortify;
 
 use App\Models\User;
-use App\Support\ChatLocales;
 use Filament\Facades\Filament;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
@@ -24,7 +23,7 @@ final readonly class UpdateUserProfileInformation implements UpdatesUserProfileI
             'email' => ['required', 'email', 'max:255', Rule::unique('users')->ignore($user->id)],
             'profile_photo_path' => ['nullable', 'string', 'max:255'],
             'timezone' => ['nullable', 'string', 'max:64', 'timezone'],
-            'locale' => ['sometimes', 'required', 'string', Rule::in(ChatLocales::CODES)],
+            'locale' => ['sometimes', 'required', 'string', Rule::in((array) config('app.available_locales'))],
         ])->validateWithBag('updateProfileInformation');
 
         $this->assertEmailChangeIsVerified($user, (string) $input['email']);

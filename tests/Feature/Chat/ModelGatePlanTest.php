@@ -13,10 +13,9 @@ use Laravel\Pennant\Feature;
 use Relaticle\Chat\Http\Controllers\ChatController;
 use Relaticle\Chat\Models\AiCreditBalance;
 use Relaticle\Chat\Services\ModelRegistry;
-use Relaticle\Chat\Support\ChatLocale;
 use Tests\Helpers\ChatDocument;
 
-mutates(ChatController::class, ChatLocale::class);
+mutates(ChatController::class);
 
 it('rejects an Opus request from a grandfathered Free user with a 403', function (): void {
     Feature::define(Billing::class, true);

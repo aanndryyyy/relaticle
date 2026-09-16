@@ -11,7 +11,6 @@ use App\Models\UserSocialAccount;
 use App\Notifications\Auth\NoticeOfEmailChangeRequest;
 use App\Notifications\Auth\VerifyEmailChange;
 use App\Support\Auth\AuthenticationSession;
-use App\Support\ChatLocales;
 use App\Support\SameOriginUrl;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Http\Request;
@@ -792,7 +791,7 @@ describe('locale', function () {
             ->assertFormFieldExists('locale', function ($field): bool {
                 $options = $field->getOptions();
 
-                return array_keys($options) === ChatLocales::CODES
+                return array_keys($options) === (array) config('app.available_locales')
                     && $options['da'] === 'dansk'
                     && $options['en'] === 'English';
             });
@@ -886,15 +885,15 @@ describe('locale', function () {
             ->email->toBe('locale-email@example.com');
     });
 
-    test('chatLocale falls back to English for a language without translations', function () {
-        expect(User::factory()->make(['locale' => 'da'])->chatLocale())->toBe('da')
-            ->and(User::factory()->make(['locale' => 'ne'])->chatLocale())->toBe('en')
-            ->and(User::factory()->make(['locale' => null])->chatLocale())->toBe('en');
+    test('an unavailable stored locale falls back to the app default', function () {
+        expect(User::factory()->make(['locale' => 'da'])->effectiveLocale())->toBe('da')
+            ->and(User::factory()->make(['locale' => 'ne'])->effectiveLocale())->toBe('en')
+            ->and(User::factory()->make(['locale' => null])->effectiveLocale())->toBe('en');
     });
 
-    test('chatLanguageName names the stored language even without translations', function () {
-        expect(User::factory()->make(['locale' => 'da'])->chatLanguageName())->toBe('Danish')
-            ->and(User::factory()->make(['locale' => 'ne'])->chatLanguageName())->toBe('Nepali')
-            ->and(User::factory()->make(['locale' => null])->chatLanguageName())->toBe('English');
+    test('the language name reads the stored language even without translations', function () {
+        expect(User::factory()->make(['locale' => 'da'])->languageName())->toBe('Danish')
+            ->and(User::factory()->make(['locale' => 'ne'])->languageName())->toBe('Nepali')
+            ->and(User::factory()->make(['locale' => null])->languageName())->toBe('English');
     });
 });

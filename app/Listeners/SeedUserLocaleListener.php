@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Listeners;
 
 use App\Models\User;
-use App\Support\ChatLocales;
 use Illuminate\Auth\Events\Login;
 
 /**
@@ -28,7 +27,7 @@ final class SeedUserLocaleListener
 
         $locale = $this->primaryLanguage((string) request()->header('Accept-Language', ''));
 
-        if (! ChatLocales::isSupported($locale)) {
+        if (! in_array($locale, (array) config('app.available_locales'), true)) {
             return;
         }
 

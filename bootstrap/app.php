@@ -10,6 +10,7 @@ use App\Http\Middleware\RedirectToPrimaryHost;
 use App\Http\Middleware\RequireIdentityConfirmation;
 use App\Http\Middleware\RequireOperationGrant;
 use App\Http\Middleware\SetApiWorkspaceContext;
+use App\Http\Middleware\SetUserLocale;
 use App\Http\Middleware\SubdomainRootResponse;
 use App\Http\Middleware\ThrottleBeforeAuthentication;
 use App\Http\Middleware\ValidateSignature;
@@ -88,6 +89,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->web(append: [
             RedirectToPrimaryHost::class,
             EnsureAuthenticationComplete::class,
+            SetUserLocale::class,
         ]);
 
         // Only enforced on multi-host deployments (any *_DOMAIN configured);

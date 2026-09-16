@@ -14,7 +14,6 @@ use App\Models\Concerns\HasWorkspaces;
 use App\Notifications\Auth\ResetPassword;
 use App\Notifications\Auth\VerifyEmail;
 use App\Observers\UserObserver;
-use App\Support\ChatLocales;
 use Carbon\CarbonImmutable;
 use Database\Factories\UserFactory;
 use Exception;
@@ -47,6 +46,7 @@ use Laravel\Jetstream\Jetstream;
 use Laravel\Passport\Client;
 use Laravel\Passport\Passport;
 use Laravel\Sanctum\HasApiTokens;
+use Locale;
 
 /**
  * @property string $name
@@ -165,21 +165,29 @@ final class User extends Authenticatable implements FilamentUser, HasAvatar, Has
     }
 
     /**
-     * The locale the chat surface renders in. Only the languages that ship
-     * chat translations qualify; anything else renders English chrome.
+     * Guarded against a code dropped from available_locales, which would
+     * otherwise set a locale the app no longer offers.
      */
-    public function chatLocale(): string
+    public function effectiveLocale(): string
     {
-        return ChatLocales::isSupported($this->locale) ? (string) $this->locale : ChatLocales::DEFAULT;
+        $default = (string) config('app.locale');
+
+        if ($this->locale === null) {
+            return $default;
+        }
+
+        return in_array($this->locale, (array) config('app.available_locales'), true)
+            ? $this->locale
+            : $default;
     }
 
     /**
      * The English name of the stored language, translations or not, because
      * the prompt can name any language the model speaks.
      */
-    public function chatLanguageName(): string
+    public function languageName(): string
     {
-        return ChatLocales::languageName($this->locale);
+        return Locale::getDisplayLanguage($this->locale ?? (string) config('app.locale'), 'en');
     }
 
     /**

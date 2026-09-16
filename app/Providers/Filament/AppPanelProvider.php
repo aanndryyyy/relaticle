@@ -29,6 +29,7 @@ use App\Http\Middleware\CheckScheduledDeletion;
 use App\Http\Middleware\DenySearchIndexing;
 use App\Http\Middleware\EnsureAuthenticationComplete;
 use App\Http\Middleware\EnsureHostedWorkspaceAccess;
+use App\Http\Middleware\SetUserLocale;
 use App\Listeners\SwitchWorkspace;
 use App\Livewire\App\AppDatabaseNotifications;
 use App\Livewire\App\AppSidebar;
@@ -311,6 +312,7 @@ final class AppPanelProvider extends PanelProvider
                 Authenticate::class,
                 EnsureAuthenticationComplete::class,
                 CheckScheduledDeletion::class,
+                SetUserLocale::class,
             ])
             ->persistentMiddleware([
                 EnsureAuthenticationComplete::class,

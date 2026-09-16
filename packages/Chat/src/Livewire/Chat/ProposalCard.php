@@ -19,7 +19,6 @@ use Livewire\Attributes\Locked;
 use Livewire\Attributes\On;
 use Relaticle\Chat\Enums\PendingActionOperation;
 use Relaticle\Chat\Enums\PendingActionStatus;
-use Relaticle\Chat\Livewire\Concerns\RendersInChatLocale;
 use Relaticle\Chat\Models\PendingAction;
 use Relaticle\Chat\Services\PendingActionService;
 use Relaticle\Chat\Services\ProposalEditor;
@@ -51,8 +50,6 @@ use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
  */
 final class ProposalCard extends BaseLivewireComponent
 {
-    use RendersInChatLocale;
-
     public string $context = 'conversation';
 
     public ?string $pendingActionId = null;

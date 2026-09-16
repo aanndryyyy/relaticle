@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Models\User;
+use App\Support\LocaleScope;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -14,10 +15,9 @@ use Relaticle\Chat\Livewire\Chat\ChatInterface;
 use Relaticle\Chat\Models\AiCreditBalance;
 use Relaticle\Chat\Services\CreditService;
 use Relaticle\Chat\Services\TurnContinuationService;
-use Relaticle\Chat\Support\ChatLocale;
 use Tests\Helpers\FakeTranslations;
 
-mutates(CrmAssistant::class, ProcessChatMessage::class, ChatLocale::class, ChatInterface::class);
+mutates(CrmAssistant::class, ProcessChatMessage::class, LocaleScope::class, ChatInterface::class);
 
 beforeEach(function (): void {
     $this->user = User::factory()->withPersonalWorkspace()->create(['locale' => 'da']);
@@ -108,7 +108,7 @@ it('runs the turn in the user\'s locale and restores the worker afterwards', fun
 });
 
 it('restores the worker locale when the turn throws', function (): void {
-    expect(fn (): mixed => ChatLocale::within('da', function (): void {
+    expect(fn (): mixed => LocaleScope::within('da', function (): void {
         throw new RuntimeException('boom');
     }))->toThrow(RuntimeException::class);
 

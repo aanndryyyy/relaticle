@@ -7,6 +7,7 @@ namespace Relaticle\Chat\Jobs;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Services\Billing\HostedWorkspaceAccess;
+use App\Support\LocaleScope;
 use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -44,7 +45,6 @@ use Relaticle\Chat\Services\PendingActionService;
 use Relaticle\Chat\Services\TipTapDocumentParser;
 use Relaticle\Chat\Services\TurnContinuationService;
 use Relaticle\Chat\Support\AssistantText;
-use Relaticle\Chat\Support\ChatLocale;
 use Relaticle\Chat\Support\ChatTelemetry;
 use Relaticle\Chat\Support\ConversationTitleGate;
 use Relaticle\Chat\Support\ProviderRateGate;
@@ -127,7 +127,7 @@ final class ProcessChatMessage implements ShouldQueue
 
     public function handle(CreditService $creditService): void
     {
-        ChatLocale::within($this->user->chatLocale(), fn () => $this->runTurn($creditService));
+        LocaleScope::within($this->user->effectiveLocale(), fn () => $this->runTurn($creditService));
     }
 
     private function runTurn(CreditService $creditService): void
@@ -213,7 +213,7 @@ final class ProcessChatMessage implements ShouldQueue
                 'name' => $this->user->name,
                 'id' => (string) $this->user->getKey(),
                 'role' => $this->user->ownsWorkspace($this->workspace) ? 'owner' : 'member',
-                'language' => $this->user->chatLanguageName(),
+                'language' => $this->user->languageName(),
             ]);
             $agent->withMentions($this->mentions);
             $agent->withPageContext($this->pageContext);
@@ -519,7 +519,7 @@ final class ProcessChatMessage implements ShouldQueue
 
     public function failed(?Throwable $exception): void
     {
-        ChatLocale::within($this->user->chatLocale(), fn () => $this->runFailed($exception));
+        LocaleScope::within($this->user->effectiveLocale(), fn () => $this->runFailed($exception));
     }
 
     /**
@@ -914,7 +914,7 @@ final class ProcessChatMessage implements ShouldQueue
             provisionalTitle: $attempt['provisional'],
             message: $attempt['latest'],
             provider: $this->resolved['provider'],
-            languageName: $this->user->chatLanguageName(),
+            languageName: $this->user->languageName(),
             pageContext: $this->pageContext,
             reply: $reply,
         ));
@@ -957,7 +957,7 @@ final class ProcessChatMessage implements ShouldQueue
             message: $this->isContinuation ? '' : $this->message,
             reply: $reply,
             provider: $this->resolved['provider'],
-            languageName: $this->user->chatLanguageName(),
+            languageName: $this->user->languageName(),
             toolNames: array_values(array_unique(
                 $streamedResponse->toolCalls
                     ->map(static fn (ToolCallData $toolCall): string => $toolCall->name)

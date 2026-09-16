@@ -10,7 +10,6 @@ use App\Actions\Profile\RequestEmailChange;
 use App\Filament\Actions\ConfirmIdentityAction;
 use App\Livewire\BaseLivewireComponent;
 use App\Support\Auth\AuthenticationSession;
-use App\Support\ChatLocales;
 use App\Support\EmailAddress;
 use App\Support\SameOriginUrl;
 use DanHarrin\LivewireRateLimiting\Exceptions\TooManyRequestsException;
@@ -30,6 +29,7 @@ use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use League\Flysystem\UnableToCheckFileExistence;
+use Locale;
 use Throwable;
 
 final class UpdateProfileInformation extends BaseLivewireComponent
@@ -40,10 +40,27 @@ final class UpdateProfileInformation extends BaseLivewireComponent
     public function mount(): void
     {
         $data = $this->authUser()->only(['name', 'email', 'timezone']);
-        $data['locale'] = $this->authUser()->chatLocale();
+        $data['locale'] = $this->authUser()->effectiveLocale();
         $data['email'] = $this->confirmedEmailTarget() ?? $data['email'];
 
         $this->form->fill($data);
+    }
+
+    /**
+     * Each language named in itself, so a user finds theirs without knowing
+     * its English name.
+     *
+     * @return array<string, string>
+     */
+    private function localeOptions(): array
+    {
+        $options = [];
+
+        foreach ((array) config('app.available_locales') as $code) {
+            $options[(string) $code] = Locale::getDisplayLanguage((string) $code, (string) $code);
+        }
+
+        return $options;
     }
 
     /**
@@ -113,7 +130,7 @@ final class UpdateProfileInformation extends BaseLivewireComponent
                             ->label(__('profile.form.locale.label'))
                             ->helperText(__('profile.form.locale.helper_text'))
                             ->placeholder(__('profile.form.locale.placeholder'))
-                            ->options(ChatLocales::options())
+                            ->options($this->localeOptions())
                             ->native(false)
                             ->selectablePlaceholder(false),
                         Actions::make([
@@ -187,7 +204,7 @@ final class UpdateProfileInformation extends BaseLivewireComponent
 
         $this->form->fill([
             ...$this->authUser()->only(['name', 'email', 'timezone']),
-            'locale' => $this->authUser()->chatLocale(),
+            'locale' => $this->authUser()->effectiveLocale(),
             'profile_photo_path' => null,
         ]);
 

@@ -2,16 +2,16 @@
 
 declare(strict_types=1);
 
-namespace Relaticle\Chat\Support;
+namespace App\Support;
 
 use Closure;
 use Illuminate\Support\Facades\Date;
 
 /**
- * Queue workers keep the app locale between jobs, so every chat-scoped
- * locale change is paired with a restore, exceptions included.
+ * For work with no request behind it. Queue workers keep the app locale
+ * between jobs, so every change is paired with a restore, exceptions included.
  */
-final readonly class ChatLocale
+final readonly class LocaleScope
 {
     /**
      * @template T

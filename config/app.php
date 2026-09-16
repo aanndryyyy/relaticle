@@ -161,6 +161,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Selectable Locales
+    |--------------------------------------------------------------------------
+    |
+    | The languages a user may pick in their profile. This is a preference
+    | list, not a list of finished translations: the assistant replies in the
+    | chosen language immediately, while any UI string without a lang file
+    | falls back to fallback_locale above.
+    |
+    */
+
+    'available_locales' => ['en', 'ar', 'da', 'de', 'es', 'fa', 'fr', 'it', 'nl', 'pt', 'ru', 'tr', 'vi', 'zh'],
+
+    /*
+    |--------------------------------------------------------------------------
     | Encryption Key
     |--------------------------------------------------------------------------
     |
