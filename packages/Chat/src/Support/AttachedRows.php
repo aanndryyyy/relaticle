@@ -13,9 +13,28 @@ final readonly class AttachedRows
 
     public const int CELL_LIMIT = 200;
 
-    public static function append(string $text, ChatAttachment $attachment): string
+    /**
+     * The row cap alone bounds height, not width: 25 rows of a 2,000-column
+     * file still assemble megabytes of prompt, which then replays on every
+     * later turn in the conversation. A file over this goes to the wizard,
+     * the same door a file over the row cap takes.
+     */
+    public const int INLINE_CHAR_LIMIT = 65536;
+
+    /**
+     * The inlined message, or null when the file belongs in the import wizard.
+     */
+    public static function inline(string $text, ChatAttachment $attachment): ?string
     {
+        if ($attachment->rowCount() > self::INLINE_ROW_LIMIT) {
+            return null;
+        }
+
         $block = self::block($attachment);
+
+        if (mb_strlen($block) > self::INLINE_CHAR_LIMIT) {
+            return null;
+        }
 
         return $text === '' ? $block : "{$text}\n\n{$block}";
     }

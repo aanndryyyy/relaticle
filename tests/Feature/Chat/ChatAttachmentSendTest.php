@@ -218,6 +218,27 @@ it('strips backticks from the filename in the lead line too', function (): void 
     Queue::assertPushed(ProcessChatMessage::class, fn (ProcessChatMessage $job): bool => substr_count($job->message, '```') === 2);
 });
 
+it('hands off a file that is wide rather than tall, instead of inlining megabytes of prompt', function (): void {
+    Queue::fake();
+
+    $columns = 200;
+    $header = implode(',', array_map(static fn (int $i): string => "col_{$i}", range(1, $columns)));
+    $row = implode(',', array_fill(0, $columns, str_repeat('x', AttachedRows::CELL_LIMIT)));
+    $content = implode("\n", [$header, ...array_fill(0, 5, $row)])."\n";
+
+    $attachmentId = (string) $this->postJson(route('chat.attachments.store'), [
+        'file' => UploadedFile::fake()->createWithContent('wide.csv', $content),
+        'conversation_id' => $this->conversationId,
+    ])->assertOk()->json('id');
+
+    $this->postJson(route('chat.send', ['conversation' => $this->conversationId]), [
+        'document' => ChatDocument::fromText('Import these please'),
+        'attachment_id' => $attachmentId,
+    ])->assertOk()->assertJsonPath('status', 'stored');
+
+    Queue::assertNothingPushed();
+});
+
 it('stores a handoff reply for a large file without running the model or spending a credit', function (): void {
     Queue::fake();
     $attachmentId = attachCsv(26);
@@ -324,7 +345,7 @@ it('keeps typed text that itself starts with the attached file lead', function (
     $job = new ProcessChatMessage(
         user: $this->user,
         workspace: $this->workspace,
-        message: AttachedRows::append($typed, $attachment),
+        message: AttachedRows::inline($typed, $attachment),
         conversationId: $this->conversationId,
         resolved: ['provider' => 'anthropic', 'model' => 'claude-sonnet-5', 'id' => 'claude-sonnet-5', 'source' => 'auto'],
         turnId: (string) Str::ulid(),
@@ -340,7 +361,7 @@ it('keeps typed text that itself starts with the attached file lead', function (
 it('shows the attachment on the stored user message after the turn', function (): void {
     $attachmentId = attachCsv(2);
     $attachment = ChatAttachment::find($this->user, $attachmentId);
-    $composedMessage = AttachedRows::append('Here are my contacts', $attachment);
+    $composedMessage = AttachedRows::inline('Here are my contacts', $attachment);
     CrmAssistant::fake(['Review the proposal below.']);
 
     $job = new ProcessChatMessage(

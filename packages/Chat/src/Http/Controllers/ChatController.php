@@ -148,7 +148,11 @@ final readonly class ChatController
             }
         }
 
-        if ($attachment instanceof ChatAttachment && $attachment->rowCount() > AttachedRows::INLINE_ROW_LIMIT) {
+        $message = $attachment instanceof ChatAttachment
+            ? AttachedRows::inline($parsed['text'], $attachment)
+            : $parsed['text'];
+
+        if ($message === null) {
             $stored = $this->importHandoffs->execute($user, $workspace, $conversation, $attachment, $parsed['text'], $validated['document']);
 
             return response()->json([
@@ -158,10 +162,6 @@ final readonly class ChatController
                 ...$stored,
             ]);
         }
-
-        $message = $attachment instanceof ChatAttachment
-            ? AttachedRows::append($parsed['text'], $attachment)
-            : $parsed['text'];
 
         $turnId = (string) Str::ulid();
 
