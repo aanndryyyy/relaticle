@@ -545,11 +545,13 @@ final class ProcessChatMessage implements ShouldQueue
 
         resolve(PendingActionService::class)->supersedePendingForConversation($this->conversationId);
 
-        try {
-            $this->persistFailedTurn($exception);
-        } catch (Throwable $e) {
-            report($e);
-            ChatTelemetry::breadcrumb('failed.persist_failed', ['exception' => $e->getMessage()]);
+        if (! $this->opensTheThread()) {
+            try {
+                $this->persistFailedTurn($exception);
+            } catch (Throwable $e) {
+                report($e);
+                ChatTelemetry::breadcrumb('failed.persist_failed', ['exception' => $e->getMessage()]);
+            }
         }
 
         $this->broadcastSafely(new ChatStreamFailed(
@@ -560,6 +562,17 @@ final class ProcessChatMessage implements ShouldQueue
         // Last, after persistFailedTurn: a reload landing mid-failed() must
         // never find the marker gone AND the rows unpersisted at once.
         TurnPresence::clear($this->conversationId, $this->turnId);
+    }
+
+    /**
+     * The setup greeting: a continuation that resumes nothing. There is no user
+     * turn to make coherent, and a persisted error row would satisfy
+     * StartSetupGreeting's empty-thread guard forever, so the owner would never
+     * be greeted. Leaving the thread empty is what lets the next open retry.
+     */
+    private function opensTheThread(): bool
+    {
+        return $this->isContinuation && $this->resumesTurnId === null;
     }
 
     private function failureMessage(?Throwable $exception): string
