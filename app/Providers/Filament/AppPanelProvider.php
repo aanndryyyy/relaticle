@@ -322,9 +322,11 @@ final class AppPanelProvider extends PanelProvider
                     ->icon('heroicon-o-shopping-cart'),
             ])
             ->middleware([
+                'auth.isolate',
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
                 StartSession::class,
+                'auth.remove-foreign-session',
                 AuthenticateSession::class,
                 ShareErrorsFromSession::class,
                 PreventRequestForgery::class,

@@ -14,18 +14,23 @@ use App\Http\Middleware\SubdomainRootResponse;
 use App\Http\Middleware\ThrottleBeforeAuthentication;
 use App\Http\Middleware\ValidateSignature;
 use Filament\Facades\Filament;
+use Filament\Http\Middleware\SetUpPanel;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
+use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\SubstituteBindings;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 use Laravel\Cashier\Http\Middleware\VerifyWebhookSignature;
 use Livewire\Exceptions\PayloadTooLargeException;
 use Livewire\Mechanisms\HandleComponents\CorruptComponentPayloadException;
+use Relaticle\SystemAdmin\Http\Middleware\IsolateAuthenticationSession;
+use Relaticle\SystemAdmin\Http\Middleware\RemoveForeignGuardSession;
 use Sentry\Laravel\Integration;
 use Spatie\Health\Commands\DispatchQueueCheckJobsCommand;
 use Spatie\Health\Commands\RunHealthChecksCommand;
@@ -85,10 +90,14 @@ return Application::configure(basePath: dirname(__DIR__))
         // api/mcp root banners are exactly the crawlable secondary-host URLs.
         $middleware->prepend(DenyIndexingOnSecondaryHosts::class);
 
-        $middleware->web(append: [
-            RedirectToPrimaryHost::class,
-            EnsureAuthenticationComplete::class,
-        ]);
+        $middleware->web(
+            append: [
+                'auth.remove-foreign-session',
+                RedirectToPrimaryHost::class,
+                EnsureAuthenticationComplete::class,
+            ],
+            prepend: ['auth.isolate'],
+        );
 
         // Only enforced on multi-host deployments (any *_DOMAIN configured);
         // the framework already skips TrustHosts in local and test runs.
@@ -140,7 +149,29 @@ return Application::configure(basePath: dirname(__DIR__))
             prepend: ThrottleBeforeAuthentication::class,
         );
 
+        $middleware->prependToPriorityList(
+            before: EncryptCookies::class,
+            prepend: SetUpPanel::class,
+        );
+
+        $middleware->prependToPriorityList(
+            before: SetUpPanel::class,
+            prepend: IsolateAuthenticationSession::class,
+        );
+
+        $middleware->appendToPriorityList(
+            after: StartSession::class,
+            append: RemoveForeignGuardSession::class,
+        );
+
+        $middleware->prependToPriorityList(
+            before: IsolateAuthenticationSession::class,
+            prepend: RedirectToPrimaryHost::class,
+        );
+
         $middleware->alias([
+            'auth.isolate' => IsolateAuthenticationSession::class,
+            'auth.remove-foreign-session' => RemoveForeignGuardSession::class,
             'signed' => ValidateSignature::class,
             'no-referrer' => NoReferrer::class,
             // Fortify and Passkeys both reference this alias by name in their own
