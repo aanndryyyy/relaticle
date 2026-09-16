@@ -488,3 +488,26 @@ it('refuses sample removal from a member', function (): void {
 
     resolve(RemoveSampleData::class)->execute($member, $this->workspace);
 })->throws(HttpException::class);
+
+it('refuses the removeSampleData call from a member through the component', function (): void {
+    seedSampleRecords($this->workspace, $this->owner);
+    People::factory()->create([
+        'workspace_id' => $this->workspace->getKey(),
+        'creator_id' => $this->owner->getKey(),
+        'creation_source' => CreationSource::WEB,
+    ]);
+
+    $member = User::factory()->create();
+    $this->workspace->users()->attach($member, ['role' => WorkspaceRole::Editor->value]);
+
+    $this->actingAs($member);
+    Filament::setTenant($this->workspace);
+
+    livewire(ActivationChecklist::class)
+        ->call('removeSampleData')
+        ->assertStatus(403);
+
+    foreach ([Company::class, People::class, Opportunity::class, Task::class, Note::class] as $model) {
+        expect($model::query()->where('workspace_id', $this->workspace->getKey())->where('creation_source', CreationSource::SYSTEM)->exists())->toBeTrue();
+    }
+});
