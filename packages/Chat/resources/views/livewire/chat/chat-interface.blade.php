@@ -72,6 +72,8 @@ Alpine.data('chatInterface', (initialConversationId, sendUrl, initialMessage, in
         blockShowAllTemplate: @js(__('Show all :count rows')),
         blockShowFewerText: @js(__('Show fewer')),
         blockOpenUrlTemplate: @js(__('Open all :total in :title')),
+        attachmentRowText: @js(__(':count row', ['count' => 1])),
+        attachmentRowsTemplate: @js(__(':count rows')),
         feedbackCategories: @js([
             ['value' => 'inaccurate', 'label' => __('Inaccurate')],
             ['value' => 'did_not_follow', 'label' => __("Didn't do what I asked")],

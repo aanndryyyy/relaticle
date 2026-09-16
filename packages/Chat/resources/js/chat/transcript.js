@@ -127,7 +127,7 @@ function snapshotMessages(messages) {
     }
 }
 
-export const transcriptModule = ({ messagesUrl, messageSearchUrlTemplate, messageSearchUnreachableText, messageSearchStalledText, todayLabel, yesterdayLabel, feedbackDeleteConfirmText, blockTitles, blockColumnLabels, blockFooterTemplate, blockShowAllTemplate, blockShowFewerText, blockOpenUrlTemplate, feedbackCategories = null, proposalTexts = {} }) => ({
+export const transcriptModule = ({ messagesUrl, messageSearchUrlTemplate, messageSearchUnreachableText, messageSearchStalledText, todayLabel, yesterdayLabel, feedbackDeleteConfirmText, blockTitles, blockColumnLabels, blockFooterTemplate, blockShowAllTemplate, blockShowFewerText, blockOpenUrlTemplate, attachmentRowText, attachmentRowsTemplate, feedbackCategories = null, proposalTexts = {} }) => ({
     messageSearchUrlTemplate,
     messageSearchUnreachableText,
     messageSearchStalledText,
@@ -1243,6 +1243,18 @@ export const transcriptModule = ({ messagesUrl, messageSearchUrlTemplate, messag
     // about a pending approval and would be a lie here.
     hasUserPrompt(index) {
         return this.messages.slice(0, index).some((m) => m.role === 'user');
+    },
+
+    // A file sent on its own says everything the turn has to say, so the text
+    // bubble would paint as an empty pill above the card.
+    showsTextBubble(message) {
+        return !message.attachment || (message.content ?? '').trim() !== '';
+    },
+
+    attachmentRowLabel(count) {
+        return count === 1
+            ? attachmentRowText
+            : attachmentRowsTemplate.replace(':count', count.toLocaleString());
     },
 
     // A single-use attachment is consumed by the turn it was sent with, so

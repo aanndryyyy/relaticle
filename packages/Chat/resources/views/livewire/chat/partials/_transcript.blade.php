@@ -138,12 +138,32 @@
                             class="flex flex-col items-end gap-1"
                             :class="msg.editing ? 'w-full max-w-full' : 'max-w-[85%]'"
                         >
-                            <template x-if="!msg.editing">
+                            {{-- The card leads the turn, as the chip does in the
+                                 composer: the typed words comment on the file. --}}
+                            <template x-if="msg.attachment && !msg.editing">
+                                <div
+                                    data-user-attachment
+                                    :title="msg.created_at ? new Date(msg.created_at).toLocaleString() : ''"
+                                    class="flex max-w-full items-center gap-2.5 rounded-2xl bg-gray-100 px-3 py-2 dark:bg-white/10"
+                                    :class="showsTextBubble(msg) ? '' : 'rounded-br-md'"
+                                >
+                                    <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white text-gray-500 ring-1 ring-gray-900/5 dark:bg-white/10 dark:text-gray-300 dark:ring-white/10">
+                                        <x-heroicon-o-table-cells class="h-4 w-4" aria-hidden="true" />
+                                    </span>
+                                    <span class="flex min-w-0 flex-col text-start">
+                                        <span class="truncate text-sm font-medium text-gray-900 dark:text-gray-100" x-text="msg.attachment.name"></span>
+                                        <span class="text-xs text-gray-500 dark:text-gray-400" x-text="attachmentRowLabel(msg.attachment.row_count)"></span>
+                                    </span>
+                                </div>
+                            </template>
+
+                            <template x-if="!msg.editing && showsTextBubble(msg)">
                                 {{-- Neutral gray pill, matching the Attio reference
                                      (user-directed, 2026-08): the flat assistant
                                      column opposite keeps who-said-what scanning
                                      without a brand tint. --}}
                                 <div
+                                    data-user-text
                                     :title="msg.created_at ? new Date(msg.created_at).toLocaleString() : ''"
                                     class="[overflow-wrap:anywhere] break-words rounded-2xl rounded-br-md bg-gray-100 px-4 py-2.5 text-sm text-gray-900 dark:bg-white/10 dark:text-gray-100"
                                 >
@@ -161,17 +181,6 @@
                                     <x-heroicon-m-at-symbol class="h-3 w-3 shrink-0" aria-hidden="true" />
                                     <span class="truncate" x-text="msg.page_context.label"></span>
                                 </a>
-                            </template>
-
-                            <template x-if="msg.attachment && !msg.editing">
-                                <span
-                                    data-user-attachment
-                                    class="inline-flex max-w-full items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[length:var(--text-micro)] font-medium text-gray-600 ring-1 ring-gray-900/10 dark:bg-white/10 dark:text-gray-300 dark:ring-white/10"
-                                >
-                                    <x-heroicon-m-paper-clip class="h-3 w-3 shrink-0" aria-hidden="true" />
-                                    <span class="truncate" x-text="msg.attachment.name"></span>
-                                    <span x-text="'(' + msg.attachment.row_count + ')'"></span>
-                                </span>
                             </template>
 
                             {{-- Failure notice only. There is no delivery receipt on a

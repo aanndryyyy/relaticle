@@ -88,6 +88,7 @@ it('attaches a large csv, stores the handoff and lands on the mapping step', fun
 
     $page->waitForText("That's 40 rows.")
         ->assertVisible('[data-chat-context="conversation"] [data-user-attachment]')
+        ->assertVisible('[data-chat-context="conversation"] [data-user-text]')
         ->assertSee('Import as people');
 
     expect(DB::table('agent_conversation_messages')->where('conversation_id', $conversationId)->count())->toBe(2);
@@ -109,4 +110,78 @@ it('attaches a large csv, stores the handoff and lands on the mapping step', fun
 
     expect($import->total_rows)->toBe(40);
     $page->assertSee('Name')->assertSee('Email');
+});
+
+it('shows a file sent on its own as a card with no empty text bubble', function (): void {
+    Storage::fake('local');
+
+    $user = User::factory()->withWorkspace()->create();
+    $workspace = $user->currentWorkspace;
+
+    AiCreditBalance::query()->updateOrCreate(['workspace_id' => $workspace->getKey()], [
+        'workspace_id' => $workspace->getKey(),
+        'credits_remaining' => 100,
+        'credits_used' => 0,
+        'period_starts_at' => now()->startOfMonth(),
+        'period_ends_at' => now()->endOfMonth(),
+    ]);
+
+    $conversationId = ChatBrowser::seedConversation($user, $workspace->getKey(), 'attach');
+
+    $lines = ['Name,Email,Company'];
+    for ($i = 1; $i <= 40; $i++) {
+        $lines[] = "Person {$i},person{$i}@example.test,Company {$i}";
+    }
+
+    $attachment = resolve(StoreChatAttachment::class)->execute(
+        $user,
+        UploadedFile::fake()->createWithContent('contacts.csv', implode("\n", $lines)."\n"),
+        $conversationId,
+    )->meta();
+
+    $page = ChatBrowser::logIn($user, $workspace->slug, $conversationId)
+        ->assertSourceHas('placeholder="Ask anything..."');
+
+    $attachmentState = json_encode([
+        'id' => $attachment['id'],
+        'name' => $attachment['name'],
+        'row_count' => $attachment['row_count'],
+    ], JSON_THROW_ON_ERROR);
+
+    $page->script(<<<JS
+        (() => {
+            const island = document.querySelector('[data-chat-context="conversation"] [data-chat-attachment]');
+            const data = Alpine.\$data(island);
+            data.attachment = {$attachmentState};
+            data.publish();
+        })();
+    JS);
+
+    $page->waitForText('40 rows');
+
+    $page->script(<<<'JS'
+        (() => {
+            const wrapper = document.querySelector('[data-chat-context="conversation"][x-data*="chatEditor"]');
+            wrapper.closest('form').requestSubmit();
+        })();
+    JS);
+
+    $page->waitForText("That's 40 rows.")
+        ->assertVisible('[data-chat-context="conversation"] [data-user-attachment]');
+
+    $bubble = $page->script(<<<'JS'
+        (() => {
+            const bubble = document.querySelector('[data-chat-context="conversation"] [data-user-bubble]');
+
+            return {
+                cards: bubble.querySelectorAll('[data-user-attachment]').length,
+                texts: bubble.querySelectorAll('[data-user-text]').length,
+                label: bubble.innerText.trim(),
+            };
+        })()
+    JS);
+
+    expect($bubble['cards'])->toBe(1)
+        ->and($bubble['texts'])->toBe(0)
+        ->and($bubble['label'])->toBe("contacts.csv\n40 rows");
 });
