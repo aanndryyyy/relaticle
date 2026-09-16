@@ -300,7 +300,6 @@
         "Tests\\Feature\\ImportWizard\\Validation\\ColumnValidatorTest": 6.902,
         "Tests\\Feature\\ImportWizard\\Validation\\EntityLinkValidatorTest": 6.5149,
         "Tests\\Feature\\Jobs\\FetchFaviconForCompanyTest": 2.1824,
-        "Tests\\Feature\\Listeners\\LogPasskeyEventTest": 0.332,
         "Tests\\Feature\\Livewire\\PayloadGuardTest": 0.4296,
         "Tests\\Feature\\Mcp\\CompanyToolsTest": 9.3775,
         "Tests\\Feature\\Mcp\\CrmSummaryResourceTest": 1.7609,
