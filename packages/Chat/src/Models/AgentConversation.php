@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Relaticle\Chat\Models;
 
+use App\Enums\MediaCollection;
 use App\Models\User;
 use App\Models\Workspace;
 use Carbon\CarbonImmutable;
@@ -16,6 +17,10 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Spatie\MediaLibrary\HasMedia;
+use Spatie\MediaLibrary\InteractsWithMedia;
+use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 /**
  * @property string $id
@@ -29,12 +34,19 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 #[Table(name: 'agent_conversations', keyType: 'string')]
 #[WithoutIncrementing]
-final class AgentConversation extends Model
+final class AgentConversation extends Model implements HasMedia
 {
     /** @use HasFactory<Factory<static>> */
     use HasFactory;
 
+    use InteractsWithMedia;
+
     public const string PURPOSE_SETUP = 'setup';
+
+    public const string ATTACHMENTS_MEDIA_COLLECTION = MediaCollection::ChatAttachments->value;
+
+    /** @var list<string> */
+    public const array ATTACHMENT_MIME_TYPES = ['text/csv', 'text/plain', 'application/csv'];
 
     protected $guarded = [];
 
@@ -65,6 +77,33 @@ final class AgentConversation extends Model
     public function messages(): HasMany
     {
         return $this->hasMany(AgentConversationMessage::class, 'conversation_id');
+    }
+
+    /**
+     * @return MorphMany<Media, $this>
+     */
+    public function attachments(): MorphMany
+    {
+        return $this->media()->where('collection_name', self::ATTACHMENTS_MEDIA_COLLECTION);
+    }
+
+    // The CSV readers take a filesystem path, so the collection pins the local
+    // disk rather than following MEDIA_DISK.
+    public function registerMediaCollections(): void
+    {
+        $this->addMediaCollection(self::ATTACHMENTS_MEDIA_COLLECTION)
+            ->acceptsMimeTypes(self::ATTACHMENT_MIME_TYPES)
+            ->useDisk('local');
+    }
+
+    /** @param Builder<self> $query */
+    #[Scope]
+    protected function ownedBy(Builder $query, User $user): void
+    {
+        $query
+            ->where('participant_type', $user->getMorphClass())
+            ->where('participant_id', (string) $user->getKey())
+            ->where('workspace_id', $user->current_workspace_id);
     }
 
     /** @param Builder<self> $query */

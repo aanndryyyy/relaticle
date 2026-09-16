@@ -65,6 +65,10 @@ Route::middleware(['auth:web', EnsureHostedWorkspaceAccess::class])->group(funct
     Route::post('/chat/attachments', [ChatAttachmentController::class, 'store'])
         ->middleware('throttle:30,1,chat-attachments')
         ->name('chat.attachments.store');
+    Route::delete('/chat/attachments/{attachment}', [ChatAttachmentController::class, 'destroy'])
+        ->middleware('throttle:30,1,chat-attachments')
+        ->whereUuid('attachment')
+        ->name('chat.attachments.destroy');
     Route::get('/chat/attachments/{attachment}/import/{entity}', [ChatAttachmentController::class, 'import'])
         ->middleware('throttle:30,1,chat-attachment-import')
         ->whereUuid('attachment')

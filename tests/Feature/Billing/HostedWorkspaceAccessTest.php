@@ -7,13 +7,12 @@ use App\Features\Billing as BillingFeature;
 use App\Http\Middleware\EnsureHostedWorkspaceAccess;
 use App\Models\Company;
 use App\Models\User;
-use App\Models\Workspace;
 use App\Services\Billing\HostedWorkspaceAccess;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
 use Laravel\Pennant\Feature;
+use Relaticle\Chat\Actions\StoreChatAttachment;
 use Relaticle\Chat\Jobs\ProcessChatMessage;
 use Tests\Helpers\ChatDocument;
 
@@ -149,16 +148,9 @@ it('redirects a paused workspace to billing on the attachment import route inste
 
     $csv = UploadedFile::fake()->createWithContent('contacts.csv', "Name\nJane\n");
 
-    $media = $this->workspace->addMedia($csv)
-        ->usingFileName(Str::ulid().'.csv')
-        ->withCustomProperties([
-            'uploaded_by' => (string) $this->user->getKey(),
-            'row_count' => 1,
-            'header' => ['Name'],
-        ])
-        ->toMediaCollection(Workspace::CHAT_ATTACHMENTS_MEDIA_COLLECTION);
+    $attachment = resolve(StoreChatAttachment::class)->execute($this->user, $csv);
 
-    $this->get(route('chat.attachments.import', ['attachment' => $media->uuid, 'entity' => 'people']))
+    $this->get(route('chat.attachments.import', ['attachment' => $attachment->id(), 'entity' => 'people']))
         ->assertRedirect(route('filament.app.pages.billing', ['tenant' => $this->workspace->slug]));
 });
 

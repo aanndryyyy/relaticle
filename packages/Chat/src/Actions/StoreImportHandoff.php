@@ -17,7 +17,7 @@ final readonly class StoreImportHandoff
 {
     public function __construct(
         private TipTapDocumentParser $documents,
-        private ConsumeChatAttachment $consume,
+        private MarkAttachmentSent $markSent,
         private ListConversationMessages $messages,
         private PendingActionService $pendingActions,
     ) {}
@@ -75,7 +75,7 @@ final readonly class StoreImportHandoff
 
             DB::table('agent_conversations')->where('id', $conversationId)->update(['updated_at' => $now]);
 
-            $this->consume->execute($attachment, $conversationId);
+            $this->markSent->execute($attachment);
         });
 
         $assistant = collect($this->messages->execute($user, $conversationId, null, 2))

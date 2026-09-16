@@ -42,6 +42,7 @@
             <div
                 x-data="chatAttachment({
                     uploadUrl: @js(route('chat.attachments.store')),
+                    deleteUrlTemplate: @js(route('chat.attachments.destroy', ['attachment' => '__ID__'])),
                     context: @js($context ?? 'conversation'),
                     maxBytes: @js(\Relaticle\Chat\Actions\StoreChatAttachment::MAX_KILOBYTES * 1024),
                     texts: @js($attachTexts),

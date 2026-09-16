@@ -15,6 +15,7 @@ use Filament\View\PanelsRenderHook;
 use Illuminate\Contracts\View\Factory;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
@@ -28,7 +29,7 @@ use Laravel\Ai\Events\ToolFailed;
 use Livewire\Livewire;
 use Relaticle\Chat\Commands\ChatModelsCommand;
 use Relaticle\Chat\Commands\ExpirePendingActionsCommand;
-use Relaticle\Chat\Commands\PruneChatAttachmentsCommand;
+use Relaticle\Chat\Commands\PurgeUnsentAttachmentsCommand;
 use Relaticle\Chat\Commands\ReleaseOrphanedReservationsCommand;
 use Relaticle\Chat\Commands\ResetCreditsCommand;
 use Relaticle\Chat\Livewire\App\Chat\ChatAllChatsPanel;
@@ -36,6 +37,7 @@ use Relaticle\Chat\Livewire\App\Chat\ChatSidebarNav;
 use Relaticle\Chat\Livewire\App\Chat\ChatSidePanel;
 use Relaticle\Chat\Livewire\Chat\ChatInterface;
 use Relaticle\Chat\Livewire\Chat\ProposalCard;
+use Relaticle\Chat\Models\AgentConversation;
 use Relaticle\Chat\Services\ModelRegistry;
 use Relaticle\Chat\Settings\ChatSettings;
 use Relaticle\Chat\Storage\SupersededAwareConversationStore;
@@ -60,6 +62,8 @@ final class ChatServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        Relation::morphMap(['agent_conversation' => AgentConversation::class]);
+
         $this->applyStoredSettings();
         $this->registerCommands();
         $this->registerChannels();
@@ -102,7 +106,7 @@ final class ChatServiceProvider extends ServiceProvider
         $this->commands([
             ChatModelsCommand::class,
             ExpirePendingActionsCommand::class,
-            PruneChatAttachmentsCommand::class,
+            PurgeUnsentAttachmentsCommand::class,
             ReleaseOrphanedReservationsCommand::class,
             ResetCreditsCommand::class,
         ]);

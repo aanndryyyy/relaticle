@@ -3,7 +3,7 @@
 // partial. It uploads first and hands the sender an id; nothing is sent here.
 const csrf = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 
-export function chatAttachment({ uploadUrl, context, maxBytes, texts }) {
+export function chatAttachment({ uploadUrl, deleteUrlTemplate, context, maxBytes, texts }) {
     return {
         attachment: null,
         uploading: false,
@@ -92,7 +92,7 @@ export function chatAttachment({ uploadUrl, context, maxBytes, texts }) {
                     this.attachError = json?.errors?.file?.[0] || json?.message || texts.failed;
                     return;
                 }
-                this.attachment = { id: json.id, name: json.name, row_count: json.row_count };
+                this.attachment = { id: json.id, name: json.name, row_count: json.row_count, conversation_id: json.conversation_id };
                 this.publish();
             } catch {
                 this.attachError = texts.failed;
@@ -101,9 +101,22 @@ export function chatAttachment({ uploadUrl, context, maxBytes, texts }) {
             }
         },
 
-        remove() {
+        // The row and file go with the chip; a failed delete still clears the
+        // composer, and the server purges what it never received back.
+        async remove() {
+            const removed = this.attachment;
             this.attachment = null;
             this.publish();
+
+            if (! removed?.id) return;
+            try {
+                await fetch(deleteUrlTemplate.replace('__ID__', removed.id), {
+                    method: 'DELETE',
+                    headers: { 'Accept': 'application/json', 'X-CSRF-TOKEN': csrf() },
+                });
+            } catch {
+                // Left for chat:purge-unsent-attachments.
+            }
         },
 
         publish() {
@@ -113,8 +126,8 @@ export function chatAttachment({ uploadUrl, context, maxBytes, texts }) {
         },
 
         // The full-page chat and the side panel expose their conversation id on
-        // the chatInterface root; the dashboard has none, so the upload stays
-        // unbound and the send binds it.
+        // the chatInterface root; the dashboard has none, so the upload opens
+        // the conversation and the first send joins it.
         conversationScope() {
             const host = this._root?.closest('[x-data^="chatInterface"]');
             return host && window.Alpine ? window.Alpine.$data(host) : null;

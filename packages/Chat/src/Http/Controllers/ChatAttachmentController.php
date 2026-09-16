@@ -9,6 +9,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Relaticle\Chat\Actions\DeleteChatAttachment;
 use Relaticle\Chat\Actions\ImportAttachment;
 use Relaticle\Chat\Actions\StoreChatAttachment;
 use Relaticle\ImportWizard\Enums\ImportEntityType;
@@ -20,6 +21,7 @@ final readonly class ChatAttachmentController
     public function __construct(
         private StoreChatAttachment $store,
         private ImportAttachment $import,
+        private DeleteChatAttachment $delete,
     ) {}
 
     public function store(Request $request): JsonResponse
@@ -37,7 +39,21 @@ final readonly class ChatAttachmentController
 
         $attachment = $this->store->execute($user, $file, $validated['conversation_id'] ?? null);
 
-        return response()->json([...$attachment->meta(), 'header' => $attachment->header()]);
+        return response()->json([
+            ...$attachment->meta(),
+            'header' => $attachment->header(),
+            'conversation_id' => $attachment->conversationId(),
+        ]);
+    }
+
+    public function destroy(Request $request, string $attachment): JsonResponse
+    {
+        /** @var User $user */
+        $user = $request->user();
+
+        abort_unless($this->delete->execute($user, $attachment), 404);
+
+        return response()->json(['success' => true]);
     }
 
     public function import(Request $request, string $attachment, string $entity): RedirectResponse

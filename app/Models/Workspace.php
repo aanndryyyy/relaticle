@@ -101,11 +101,6 @@ final class Workspace extends Model implements HasAvatar, HasMedia, Onboardable
 
     public const int LOGO_MAX_KILOBYTES = 2048;
 
-    public const string CHAT_ATTACHMENTS_MEDIA_COLLECTION = MediaCollection::ChatAttachments->value;
-
-    /** @var list<string> */
-    public const array CHAT_ATTACHMENT_MIME_TYPES = ['text/csv', 'text/plain', 'application/csv'];
-
     public const string SLUG_REGEX = '/^[a-z0-9]+(?:-[a-z0-9]+)*$/';
 
     /**
@@ -408,10 +403,6 @@ final class Workspace extends Model implements HasAvatar, HasMedia, Onboardable
 
         $this->addMediaCollection(MediaCollection::PendingUploads->value)
             ->acceptsMimeTypes(UploadAllowlist::mimeTypes());
-
-        $this->addMediaCollection(self::CHAT_ATTACHMENTS_MEDIA_COLLECTION)
-            ->acceptsMimeTypes(self::CHAT_ATTACHMENT_MIME_TYPES)
-            ->useDisk('local');
     }
 
     /**

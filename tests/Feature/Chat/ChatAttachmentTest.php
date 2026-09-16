@@ -9,10 +9,15 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Relaticle\Chat\Actions\CreateConversation;
+use Relaticle\Chat\Actions\DeleteChatAttachment;
+use Relaticle\Chat\Actions\DeleteConversation;
 use Relaticle\Chat\Actions\ImportAttachment;
+use Relaticle\Chat\Actions\MarkAttachmentSent;
 use Relaticle\Chat\Actions\StoreChatAttachment;
-use Relaticle\Chat\Commands\PruneChatAttachmentsCommand;
+use Relaticle\Chat\Commands\PurgeUnsentAttachmentsCommand;
 use Relaticle\Chat\Http\Controllers\ChatAttachmentController;
+use Relaticle\Chat\Models\AgentConversation;
 use Relaticle\Chat\Support\ChatAttachment;
 use Relaticle\ImportWizard\Enums\ImportEntityType;
 use Relaticle\ImportWizard\Enums\ImportStatus;
@@ -21,7 +26,7 @@ use Relaticle\ImportWizard\Store\ImportStore;
 use Relaticle\ImportWizard\Support\ImportFileLoader;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
-mutates(StoreChatAttachment::class, ImportAttachment::class, ChatAttachmentController::class, PruneChatAttachmentsCommand::class, ImportFileLoader::class, ChatAttachment::class);
+mutates(StoreChatAttachment::class, CreateConversation::class, DeleteChatAttachment::class, DeleteConversation::class, ImportAttachment::class, ChatAttachmentController::class, PurgeUnsentAttachmentsCommand::class, ImportFileLoader::class, ChatAttachment::class);
 
 beforeEach(function (): void {
     Storage::fake('local');
@@ -49,7 +54,24 @@ function csvUpload(int $rows, string $name = 'contacts.csv'): UploadedFile
     return UploadedFile::fake()->createWithContent($name, implode("\n", $lines)."\n");
 }
 
-it('stores a csv as a media row on the team and reports its header and row count', function (): void {
+function attachmentConversation(User $user, string $title = 'setup'): string
+{
+    $id = (string) Str::uuid7();
+
+    DB::table('agent_conversations')->insert([
+        'id' => $id,
+        'participant_type' => 'user',
+        'participant_id' => (string) $user->getKey(),
+        'workspace_id' => $user->current_workspace_id,
+        'title' => $title,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    return $id;
+}
+
+it('opens a conversation titled after the file and stores the csv on it', function (): void {
     $response = $this->postJson(route('chat.attachments.store'), ['file' => csvUpload(3)]);
 
     $response->assertOk()->assertJson([
@@ -58,17 +80,93 @@ it('stores a csv as a media row on the team and reports its header and row count
         'header' => ['Name', 'Email', 'Company'],
     ]);
 
-    $attachment = ChatAttachment::find($this->workspace, $this->user, $response->json('id'));
+    $conversation = AgentConversation::query()->findOrFail($response->json('conversation_id'));
+    $attachment = ChatAttachment::find($this->user, $response->json('id'));
 
-    expect($attachment)->toBeInstanceOf(ChatAttachment::class)
+    expect($conversation->title)->toBe('contacts.csv')
+        ->and($conversation->participant_id)->toBe((string) $this->user->getKey())
+        ->and($conversation->workspace_id)->toBe($this->workspace->getKey())
+        ->and($conversation->attachments()->count())->toBe(1)
+        ->and($attachment)->toBeInstanceOf(ChatAttachment::class)
+        ->and($attachment->media->model_type)->toBe('agent_conversation')
+        ->and($attachment->media->model_id)->toBe($conversation->getKey())
         ->and($attachment->media->collection_name)->toBe(MediaCollection::ChatAttachments->value)
         ->and($attachment->media->workspace_id)->toBe($this->workspace->getKey())
         ->and($attachment->media->disk)->toBe('local')
         ->and($attachment->name())->toBe('contacts.csv')
         ->and($attachment->header())->toBe(['Name', 'Email', 'Company'])
         ->and($attachment->rowCount())->toBe(3)
-        ->and($attachment->isConsumed())->toBeFalse()
+        ->and($attachment->conversationId())->toBe($conversation->getKey())
+        ->and($attachment->isSent())->toBeFalse()
         ->and($attachment->fileExists())->toBeTrue();
+});
+
+it('stores the csv on the conversation it was uploaded in', function (): void {
+    $conversationId = attachmentConversation($this->user);
+
+    $response = $this->postJson(route('chat.attachments.store'), ['file' => csvUpload(2), 'conversation_id' => $conversationId])
+        ->assertOk()
+        ->assertJsonPath('conversation_id', $conversationId);
+
+    expect(ChatAttachment::find($this->user, $response->json('id'))?->media->model_id)->toBe($conversationId)
+        ->and(AgentConversation::query()->count())->toBe(1);
+});
+
+it('deletes the attachment and its file with the conversation', function (): void {
+    $response = $this->postJson(route('chat.attachments.store'), ['file' => csvUpload(2)])->assertOk();
+    $media = ChatAttachment::find($this->user, $response->json('id'))->media;
+
+    $this->deleteJson(route('chat.conversations.destroy', $response->json('conversation_id')))->assertOk();
+
+    expect(Media::query()->whereKey($media->getKey())->exists())->toBeFalse()
+        ->and(Storage::disk('local')->exists($media->getPathRelativeToRoot()))->toBeFalse()
+        ->and(AgentConversation::query()->count())->toBe(0);
+});
+
+it('removes an unsent attachment together with the conversation the upload opened', function (): void {
+    $response = $this->postJson(route('chat.attachments.store'), ['file' => csvUpload(2)])->assertOk();
+    $media = ChatAttachment::find($this->user, $response->json('id'))->media;
+
+    $this->deleteJson(route('chat.attachments.destroy', ['attachment' => $response->json('id')]))->assertOk();
+
+    expect(Media::query()->whereKey($media->getKey())->exists())->toBeFalse()
+        ->and(Storage::disk('local')->exists($media->getPathRelativeToRoot()))->toBeFalse()
+        ->and(AgentConversation::query()->whereKey($response->json('conversation_id'))->exists())->toBeFalse();
+});
+
+it('removes an unsent attachment but keeps a conversation that already has messages', function (): void {
+    $conversationId = attachmentConversation($this->user);
+    DB::table('agent_conversation_messages')->insert([
+        'id' => (string) Str::uuid7(),
+        'conversation_id' => $conversationId,
+        'participant_type' => 'user',
+        'participant_id' => (string) $this->user->getKey(),
+        'agent' => 'crm-assistant',
+        'role' => 'user',
+        'content' => 'hello',
+        'attachments' => '[]',
+        'tool_calls' => '[]',
+        'tool_results' => '[]',
+        'usage' => '{}',
+        'meta' => '{}',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+    $id = $this->postJson(route('chat.attachments.store'), ['file' => csvUpload(2), 'conversation_id' => $conversationId])->json('id');
+
+    $this->deleteJson(route('chat.attachments.destroy', ['attachment' => $id]))->assertOk();
+
+    expect(ChatAttachment::find($this->user, $id))->toBeNull()
+        ->and(AgentConversation::query()->whereKey($conversationId)->exists())->toBeTrue();
+});
+
+it('refuses to remove an attachment that was already sent', function (): void {
+    $id = $this->postJson(route('chat.attachments.store'), ['file' => csvUpload(2)])->json('id');
+    resolve(MarkAttachmentSent::class)->execute(ChatAttachment::find($this->user, $id));
+
+    $this->deleteJson(route('chat.attachments.destroy', ['attachment' => $id]))->assertNotFound();
+
+    expect(ChatAttachment::find($this->user, $id)?->fileExists())->toBeTrue();
 });
 
 it('sweeps attachments with the workspace that owns them', function (): void {
@@ -88,8 +186,9 @@ it('hides an attachment from other members of the same team', function (): void 
     $id = $this->postJson(route('chat.attachments.store'), ['file' => csvUpload(2)])->json('id');
     $member = User::factory()->create();
     $this->workspace->users()->attach($member, ['role' => 'editor']);
+    $member->switchWorkspace($this->workspace);
 
-    expect(ChatAttachment::find($this->workspace, $member, $id))->toBeNull();
+    expect(ChatAttachment::find($member, $id))->toBeNull();
 });
 
 it('accepts a txt file that holds csv rows', function (): void {
@@ -121,6 +220,8 @@ it('rejects a file with no header row, no data rows, or duplicate columns with t
     $this->postJson(route('chat.attachments.store'), ['file' => UploadedFile::fake()->createWithContent('contacts.csv', $content)])
         ->assertStatus(422)
         ->assertJsonPath('errors.file.0', $message);
+
+    expect(AgentConversation::query()->count())->toBe(0);
 })->with([
     'empty' => ['', 'CSV file is empty'],
     'header only' => ["Name,Email\n", 'CSV file has no data rows'],
@@ -137,16 +238,7 @@ it('rejects a file that is not utf-8', function (): void {
 
 it('rejects a conversation that belongs to someone else', function (): void {
     $other = User::factory()->withPersonalWorkspace()->create();
-    $conversationId = (string) Str::uuid7();
-    DB::table('agent_conversations')->insert([
-        'id' => $conversationId,
-        'participant_type' => 'user',
-        'participant_id' => (string) $other->getKey(),
-        'workspace_id' => $other->currentWorkspace->getKey(),
-        'title' => 'private',
-        'created_at' => now(),
-        'updated_at' => now(),
-    ]);
+    $conversationId = attachmentConversation($other, 'private');
 
     $this->postJson(route('chat.attachments.store'), ['file' => csvUpload(2), 'conversation_id' => $conversationId])
         ->assertStatus(422)
@@ -172,7 +264,7 @@ it('builds a people import from the stored file and lands on the mapping step', 
         ->and($import->file_name)->toBe('contacts.csv')
         ->and(ImportStore::load($import->id)?->query()->count())->toBe(40);
 
-    expect(ChatAttachment::find($this->workspace, $this->user, $id)?->importIdFor(ImportEntityType::People))->toBe($import->id);
+    expect(ChatAttachment::find($this->user, $id)?->importIdFor(ImportEntityType::People))->toBe($import->id);
 });
 
 it('redirects a repeated click to the import already built', function (): void {
@@ -212,18 +304,22 @@ it('refuses an unsupported entity and a foreign attachment', function (): void {
     $this->get(route('chat.attachments.import', ['attachment' => $id, 'entity' => 'people']))->assertNotFound();
 });
 
-it('prunes media rows and files older than 24 hours and keeps newer ones', function (): void {
-    $oldId = $this->postJson(route('chat.attachments.store'), ['file' => csvUpload(1)])->json('id');
-    $freshId = $this->postJson(route('chat.attachments.store'), ['file' => csvUpload(1)])->json('id');
-    Media::query()->where('uuid', $oldId)->update(['created_at' => now()->subHours(25)]);
-    Media::query()->where('uuid', $freshId)->update(['created_at' => now()->subHours(2)]);
-    $old = ChatAttachment::find($this->workspace, $this->user, $oldId)?->media;
-    $fresh = ChatAttachment::find($this->workspace, $this->user, $freshId)?->media;
+it('purges unsent attachments older than a day with the conversation they opened, and keeps sent and fresh ones', function (): void {
+    $staleUnsent = $this->postJson(route('chat.attachments.store'), ['file' => csvUpload(1)])->json();
+    $staleSent = $this->postJson(route('chat.attachments.store'), ['file' => csvUpload(1)])->json();
+    $freshUnsent = $this->postJson(route('chat.attachments.store'), ['file' => csvUpload(1)])->json();
+    resolve(MarkAttachmentSent::class)->execute(ChatAttachment::find($this->user, $staleSent['id']));
+    Media::query()->whereIn('uuid', [$staleUnsent['id'], $staleSent['id']])->update(['created_at' => now()->subHours(25)]);
+    $staleUnsentPath = ChatAttachment::find($this->user, $staleUnsent['id'])->media->getPathRelativeToRoot();
 
-    $this->artisan('chat:prune-attachments')->assertSuccessful();
+    $this->artisan('chat:purge-unsent-attachments')
+        ->expectsOutputToContain('Purged 1 attachment(s).')
+        ->assertSuccessful();
 
-    expect(Media::query()->where('uuid', $oldId)->exists())->toBeFalse()
-        ->and(Storage::disk('local')->exists($old->getPathRelativeToRoot()))->toBeFalse()
-        ->and(Media::query()->where('uuid', $freshId)->exists())->toBeTrue()
-        ->and(Storage::disk('local')->exists($fresh->getPathRelativeToRoot()))->toBeTrue();
+    expect(Media::query()->where('uuid', $staleUnsent['id'])->exists())->toBeFalse()
+        ->and(Storage::disk('local')->exists($staleUnsentPath))->toBeFalse()
+        ->and(AgentConversation::query()->whereKey($staleUnsent['conversation_id'])->exists())->toBeFalse()
+        ->and(ChatAttachment::find($this->user, $staleSent['id'])?->fileExists())->toBeTrue()
+        ->and(AgentConversation::query()->whereKey($staleSent['conversation_id'])->exists())->toBeTrue()
+        ->and(ChatAttachment::find($this->user, $freshUnsent['id'])?->fileExists())->toBeTrue();
 });

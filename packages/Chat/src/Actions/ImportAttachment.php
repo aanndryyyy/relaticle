@@ -34,7 +34,7 @@ final readonly class ImportAttachment
 
         abort_unless($user->can('create', $modelClass), 403);
 
-        $attachment = ChatAttachment::find($workspace, $user, $attachmentId);
+        $attachment = ChatAttachment::find($user, $attachmentId);
 
         abort_if(! $attachment instanceof ChatAttachment, 404);
 

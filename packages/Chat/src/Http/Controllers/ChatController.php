@@ -26,9 +26,10 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Laravel\Pennant\Feature;
-use Relaticle\Chat\Actions\ConsumeChatAttachment;
+use Relaticle\Chat\Actions\CreateConversation;
 use Relaticle\Chat\Actions\DeleteConversation;
 use Relaticle\Chat\Actions\ListConversations;
+use Relaticle\Chat\Actions\MarkAttachmentSent;
 use Relaticle\Chat\Actions\RenameConversation;
 use Relaticle\Chat\Actions\StoreImportHandoff;
 use Relaticle\Chat\Jobs\GenerateConversationTitle;
@@ -43,10 +44,8 @@ use Relaticle\Chat\Support\ChatAttachment;
 use Relaticle\Chat\Support\ConversationTitleGate;
 use Relaticle\Chat\Support\ModelDescriptor;
 use Relaticle\Chat\Support\RecordReferenceResolver;
-use Relaticle\Chat\Support\TitleSanitizer;
 use Relaticle\Chat\Support\TranscriptScope;
 use Relaticle\Chat\Support\TurnPresence;
-use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 final readonly class ChatController
 {
@@ -62,7 +61,8 @@ final readonly class ChatController
         private ModelRegistry $registry,
         private TipTapDocumentParser $documentParser,
         private StoreImportHandoff $importHandoffs,
-        private ConsumeChatAttachment $consumeAttachment,
+        private MarkAttachmentSent $markAttachmentSent,
+        private CreateConversation $createConversation,
     ) {}
 
     /** @return list<string> */
@@ -101,8 +101,12 @@ final readonly class ChatController
         $user = $request->user();
         $workspace = $user->currentWorkspace;
 
+        $conversation ??= $validated['conversation_id'] ?? null;
+
+        abort_if($conversation === null, 422, 'conversation_id is required.');
+
         $parsed = $this->documentParser->parse($validated['document'], $workspace);
-        $attachment = $this->resolveAttachment($validated['attachment_id'] ?? null, $user, $workspace);
+        $attachment = $this->resolveAttachment($validated['attachment_id'] ?? null, $user, $conversation);
 
         if ($parsed['text'] === '' && ! $attachment instanceof ChatAttachment) {
             throw ValidationException::withMessages([
@@ -115,10 +119,6 @@ final readonly class ChatController
                 'document' => 'Message is too long.',
             ]);
         }
-
-        $conversation ??= $validated['conversation_id'] ?? null;
-
-        abort_if($conversation === null, 422, 'conversation_id is required.');
 
         $existing = DB::table('agent_conversations')->where('id', $conversation)->first();
 
@@ -249,7 +249,7 @@ final readonly class ChatController
         ));
 
         if ($attachment instanceof ChatAttachment) {
-            $this->consumeAttachment->execute($attachment, $conversation);
+            $this->markAttachmentSent->execute($attachment);
         }
 
         return response()->json([
@@ -258,20 +258,22 @@ final readonly class ChatController
         ]);
     }
 
-    private function resolveAttachment(?string $attachmentId, User $user, Workspace $workspace): ?ChatAttachment
+    // An upload is bound to the conversation it was made in; a message in
+    // another conversation cannot pick it up.
+    private function resolveAttachment(?string $attachmentId, User $user, ?string $conversation = null): ?ChatAttachment
     {
         if ($attachmentId === null) {
             return null;
         }
 
-        $media = ChatAttachment::query($workspace, $user)
-            ->where('uuid', $attachmentId)
-            ->whereNull('custom_properties->consumed_at')
-            ->first();
+        $attachment = ChatAttachment::find($user, $attachmentId);
 
-        $attachment = $media instanceof Media ? new ChatAttachment($media) : null;
+        $usable = $attachment instanceof ChatAttachment
+            && ! $attachment->isSent()
+            && $attachment->fileExists()
+            && ($conversation === null || $attachment->conversationId() === $conversation);
 
-        if ($attachment === null || ! $attachment->fileExists()) {
+        if (! $usable) {
             throw ValidationException::withMessages([
                 'attachment_id' => __('That attachment is no longer available. Attach the file again.'),
             ]);
@@ -378,7 +380,7 @@ final readonly class ChatController
         abort_if($workspace === null, 403);
 
         $parsed = $this->documentParser->parse($validated['document'], $workspace);
-        $attachment = $this->resolveAttachment($validated['attachment_id'] ?? null, $user, $workspace);
+        $attachment = $this->resolveAttachment($validated['attachment_id'] ?? null, $user);
 
         if ($parsed['text'] === '' && ! $attachment instanceof ChatAttachment) {
             throw ValidationException::withMessages([
@@ -392,23 +394,13 @@ final readonly class ChatController
             ]);
         }
 
-        $conversationId = (string) Str::uuid7();
-
         $title = $attachment instanceof ChatAttachment && $parsed['text'] === ''
             ? $attachment->name()
             : $parsed['text'];
 
-        DB::table('agent_conversations')->insert([
-            'id' => $conversationId,
-            'participant_type' => $user->getMorphClass(),
-            'participant_id' => (string) $user->getKey(),
-            'workspace_id' => $workspace->getKey(),
-            'title' => TitleSanitizer::clean($title),
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        $conversation = $this->createConversation->execute($user, $workspace, $title, $attachment);
 
-        return response()->json(['conversation_id' => $conversationId]);
+        return response()->json(['conversation_id' => (string) $conversation->getKey()]);
     }
 
     public function cancel(Request $request, string $conversationId): JsonResponse

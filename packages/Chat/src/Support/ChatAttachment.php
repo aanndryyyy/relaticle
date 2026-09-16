@@ -5,9 +5,9 @@ declare(strict_types=1);
 namespace Relaticle\Chat\Support;
 
 use App\Models\User;
-use App\Models\Workspace;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Storage;
+use Relaticle\Chat\Models\AgentConversation;
 use Relaticle\ImportWizard\Enums\ImportEntityType;
 use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
@@ -15,24 +15,14 @@ final readonly class ChatAttachment
 {
     public function __construct(public Media $media) {}
 
-    /**
-     * Scoped on the media row's own workspace_id column, as every media query
-     * is; the uploader property narrows it further, since an attachment is
-     * private to the person who sent it.
-     *
-     * @return Builder<Media>
-     */
-    public static function query(Workspace $workspace, User $user): Builder
+    public static function find(User $user, string $id): ?self
     {
-        return Media::query()
-            ->where('workspace_id', $workspace->getKey())
-            ->where('collection_name', Workspace::CHAT_ATTACHMENTS_MEDIA_COLLECTION)
-            ->where('custom_properties->uploaded_by', (string) $user->getKey());
-    }
-
-    public static function find(Workspace $workspace, User $user, string $id): ?self
-    {
-        $media = self::query($workspace, $user)->where('uuid', $id)->first();
+        $media = Media::query()
+            ->where('workspace_id', $user->current_workspace_id)
+            ->where('collection_name', AgentConversation::ATTACHMENTS_MEDIA_COLLECTION)
+            ->where('uuid', $id)
+            ->whereHasMorph('model', [AgentConversation::class], fn (Builder $query) => $query->ownedBy($user))
+            ->first();
 
         return $media instanceof Media ? new self($media) : null;
     }
@@ -60,16 +50,21 @@ final readonly class ChatAttachment
         return is_array($header) ? array_values(array_map(strval(...), $header)) : [];
     }
 
-    public function conversationId(): ?string
+    public function conversationId(): string
     {
-        $id = $this->media->getCustomProperty('conversation_id');
-
-        return is_string($id) ? $id : null;
+        return (string) $this->media->model_id;
     }
 
-    public function isConsumed(): bool
+    public function conversation(): ?AgentConversation
     {
-        return $this->media->getCustomProperty('consumed_at') !== null;
+        $model = $this->media->model;
+
+        return $model instanceof AgentConversation ? $model : null;
+    }
+
+    public function isSent(): bool
+    {
+        return $this->media->getCustomProperty('sent_at') !== null;
     }
 
     public function importIdFor(ImportEntityType $type): ?string
