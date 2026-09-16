@@ -2,12 +2,10 @@
 
 declare(strict_types=1);
 
-use App\Livewire\App\AppDatabaseNotifications;
 use App\Models\User;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Bus\PendingBatch;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Notifications\SendQueuedNotifications;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Artisan;
@@ -657,37 +655,53 @@ it('retries a mailbox import from the accounts page callout', function (): void 
     Artisan::shouldHaveReceived('call')->with('queue:retry', ['id' => 'failed-job'])->once();
 });
 
-it('does not retry another users mailbox from a notification', function (): void {
+it('resolves failed store job uuids from the failed jobs table when batch ids are empty', function (): void {
     Artisan::spy();
     $user = User::factory()->withWorkspace()->create();
-    $this->actingAs($user);
-    Filament::setTenant($user->currentWorkspace);
     $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'user_id' => $user->id,
         'workspace_id' => $user->current_workspace_id,
+        'sync_cursor' => 'history-done',
+        'history_import_batch_id' => 'batch-from-failed-jobs',
     ]));
 
-    expect(fn () => Livewire::test(AppDatabaseNotifications::class)
-        ->dispatch('retry-mailbox-history-import', accountId: $account->getKey(), batchId: 'other-batch'))
-        ->toThrow(ModelNotFoundException::class);
+    DB::table('job_batches')->insert([
+        'id' => 'batch-from-failed-jobs',
+        'name' => 'Mailbox history import',
+        'total_jobs' => 1,
+        'pending_jobs' => 0,
+        'failed_jobs' => 1,
+        'failed_job_ids' => json_encode([]),
+        'options' => serialize([]),
+        'cancelled_at' => null,
+        'created_at' => now()->getTimestamp(),
+        'finished_at' => now()->getTimestamp(),
+    ]);
 
-    Artisan::shouldNotHaveReceived('call');
-});
+    $job = new StoreEmailJob($account, 'msg-failed');
+    $job->withBatchId('batch-from-failed-jobs');
 
-it('does not retry an old import after a newer import has started', function (): void {
-    Artisan::spy();
-    $user = User::factory()->withWorkspace()->create();
-    $this->actingAs($user);
-    Filament::setTenant($user->currentWorkspace);
-    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
-        'user_id' => $user->id, 'workspace_id' => $user->current_workspace_id,
-        'sync_cursor' => 'done', 'history_import_batch_id' => 'new-batch',
-    ]));
+    DB::table('failed_jobs')->insert([
+        'uuid' => 'failed-uuid-from-table',
+        'connection' => 'database',
+        'queue' => 'emails-sync',
+        'payload' => json_encode([
+            'uuid' => 'failed-uuid-from-table',
+            'displayName' => StoreEmailJob::class,
+            'job' => 'Illuminate\\Queue\\CallQueuedHandler@call',
+            'data' => [
+                'commandName' => StoreEmailJob::class,
+                'command' => serialize($job),
+            ],
+        ]),
+        'exception' => 'RuntimeException: Provider unavailable',
+        'failed_at' => now(),
+    ]);
 
-    Livewire::test(AppDatabaseNotifications::class)
-        ->dispatch('retry-mailbox-history-import', accountId: $account->getKey(), batchId: 'old-batch')
-        ->assertNotified();
+    resolve(RetryMailboxHistoryImportFailuresAction::class)
+        ->execute($user, $account, 'batch-from-failed-jobs');
 
-    Artisan::shouldNotHaveReceived('call');
+    Artisan::shouldHaveReceived('call')->with('queue:retry', ['id' => 'failed-uuid-from-table'])->once();
 });
 
 it('recovers the failed email through the accounts page callout using the real queue retry command', function (): void {

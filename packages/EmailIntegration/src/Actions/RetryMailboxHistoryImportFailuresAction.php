@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Relaticle\EmailIntegration\Jobs\StoreEmailJob;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 
@@ -66,14 +67,31 @@ final readonly class RetryMailboxHistoryImportFailuresAction
             return array_values($batch->failedJobIds);
         }
 
-        $uuids = DB::table('failed_jobs')
-            ->where('payload', 'like', '%'.$batchId.'%')
-            ->where('payload', 'like', '%StoreEmailJob%')
-            ->pluck('uuid');
+        $storeJobName = class_basename(StoreEmailJob::class);
+        $uuids = [];
 
-        return array_values(array_map(
-            static fn (mixed $uuid): string => (string) $uuid,
-            $uuids->all(),
-        ));
+        foreach (DB::table('failed_jobs')->where('queue', 'emails-sync')->get(['uuid', 'payload']) as $row) {
+            $payload = json_decode((string) $row->payload, true);
+
+            if (! is_array($payload)) {
+                continue;
+            }
+
+            $displayName = $payload['displayName'] ?? '';
+
+            if (! is_string($displayName) || ! str_contains($displayName, $storeJobName)) {
+                continue;
+            }
+
+            $command = $payload['data']['command'] ?? '';
+
+            if (! is_string($command) || ! str_contains($command, $batchId)) {
+                continue;
+            }
+
+            $uuids[] = (string) $row->uuid;
+        }
+
+        return array_values(array_unique($uuids));
     }
 }

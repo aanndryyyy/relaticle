@@ -80,6 +80,10 @@ return [
             'title' => 'Retry queued.',
             'body' => 'We are retrying messages that could not be imported. This page updates as they finish.',
         ],
+        'retry_failed_import_unavailable' => [
+            'title' => 'Retry unavailable',
+            'body' => 'No failed imports are available to retry for this import.',
+        ],
     ],
     'default_badge' => 'Default',
     'sections' => [

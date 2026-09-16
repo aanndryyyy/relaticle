@@ -164,7 +164,7 @@ final readonly class MailboxSyncTracker
 
     private static function retryFlagKey(ConnectedAccount $account, string $messageId): string
     {
-        return 'mailbox-sync:email:'.$account->getKey().':retrying:'.sha1($messageId);
+        return 'mailbox-sync:email:'.$account->getKey().':retrying:'.hash('xxh3', $messageId);
     }
 
     private static function calendarProcessedKey(ConnectedAccount $account): string

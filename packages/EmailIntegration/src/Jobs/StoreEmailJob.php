@@ -13,6 +13,7 @@ use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
 use Illuminate\Queue\Attributes\MaxExceptions;
 use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
+use Illuminate\Support\Facades\Config;
 use Relaticle\EmailIntegration\Actions\RecordMailboxHistoryImportStoreFailureAction;
 use Relaticle\EmailIntegration\Actions\StoreEmailAction;
 use Relaticle\EmailIntegration\Enums\EmailFolder;
@@ -32,13 +33,31 @@ final class StoreEmailJob implements ShouldBeUnique, ShouldQueue
     public int $tries = 3;
 
     /** @var array<int, int> Spaced retry delays so transient 429/5xx don't hammer the provider. */
-    public array $backoff = [60, 300, 900];
+    public array $backoff;
 
     public function __construct(
         public readonly ConnectedAccount $connectedAccount,
         public readonly string $messageId,
     ) {
         $this->onQueue('emails-sync');
+        $this->backoff = self::resolveStoreBackoff();
+    }
+
+    /**
+     * @return list<int>
+     */
+    private static function resolveStoreBackoff(): array
+    {
+        $configured = Config::array('email-integration.sync.store_backoff');
+
+        if ($configured === []) {
+            return [60, 300, 900];
+        }
+
+        return array_values(array_map(
+            static fn (mixed $seconds): int => (int) $seconds,
+            $configured,
+        ));
     }
 
     /**

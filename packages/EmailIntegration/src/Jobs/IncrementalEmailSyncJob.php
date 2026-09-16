@@ -10,6 +10,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
 use Illuminate\Support\Facades\Bus;
+use Relaticle\EmailIntegration\Actions\StartMailboxHistoryImportAction;
 use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
 use Relaticle\EmailIntegration\Exceptions\MailHistoryExpired;
 use Relaticle\EmailIntegration\Jobs\Concerns\DetectsAuthErrors;
@@ -52,8 +53,7 @@ final class IncrementalEmailSyncJob implements ShouldBeUnique, ShouldQueue
             $delta = $service->fetchDelta($account->sync_cursor);
         } catch (MailHistoryExpired) {
             MailboxSyncTracker::markEmailFinished($account);
-            $account->update(['sync_cursor' => null]);
-            dispatch(new InitialEmailSyncJob($account));
+            resolve(StartMailboxHistoryImportAction::class)->execute($account);
 
             return;
         }

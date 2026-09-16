@@ -93,6 +93,18 @@ it('uses the same retry schedule as the other email sync jobs', function (): voi
         ->and($payload['backoff'])->toBe('60,300,900');
 });
 
+it('reads store backoff delays from email integration config', function (): void {
+    config()->set('email-integration.sync.store_backoff', [10, 20]);
+
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create());
+
+    Queue::connection('database')->push(new StoreEmailJob($account, 'msg-backoff'), '', 'emails-sync');
+
+    $payload = json_decode((string) DB::table('jobs')->value('payload'), true);
+
+    expect($payload['backoff'])->toBe('10,20');
+});
+
 it('reports a message as retrying after a store failure and clears it once stored', function (): void {
     $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
         'sync_inbox' => true,

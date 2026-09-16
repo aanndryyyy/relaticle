@@ -139,7 +139,7 @@ trait HasConnectedAccountActions
                 Notification::make()
                     ->title($retried
                         ? __('filament/pages/email-accounts.notifications.retry_failed_import_queued.title')
-                        : __('filament/notifications/mailbox-import-complete.failures.unavailable'))
+                        : __('filament/pages/email-accounts.notifications.retry_failed_import_unavailable.title'))
                     ->status($retried ? 'success' : 'warning')
                     ->send();
             });

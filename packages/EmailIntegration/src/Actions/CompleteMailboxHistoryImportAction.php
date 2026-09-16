@@ -26,6 +26,7 @@ final readonly class CompleteMailboxHistoryImportAction
             $account = ConnectedAccount::query()->lockForUpdate()->find($accountId);
             $batch = Bus::findBatch($batchId);
 
+            // pendingJobs still counts in-flight store work; failedJobIds are permanent failures only.
             if (! $account instanceof ConnectedAccount || ! $batch instanceof Batch
                 || $account->history_import_batch_id !== $batchId
                 || $account->sync_cursor === null
