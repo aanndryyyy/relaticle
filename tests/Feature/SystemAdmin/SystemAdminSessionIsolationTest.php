@@ -166,6 +166,8 @@ it('persists staff flash messages when a controller constructor resolves the red
 });
 
 it('persists staff flash messages on the first HTTP request after application boot', function (): void {
+    Route::middleware('web')->group(base_path('routes/web.php'));
+
     Route::domain('staff.example.test')->middleware('web')->group(function (): void {
         Route::get('/session-redirect', StaffSessionRedirectController::class);
         Route::get('/session-flash', fn (Request $request): array => ['notice' => $request->session()->get('notice')]);
@@ -547,4 +549,54 @@ it('restores customer session configuration after a failed staff request', funct
 
     $response = isolatedAuthRequest($cookies, 'GET', 'https://example.test/passkeys/login/options')->assertOk();
     expect($response->getCookie($original['cookie'])->getDomain())->toBe('.example.test');
+});
+
+it('removes foreign authentication from protected panel requests', function (string $context): void {
+    $cookies = [];
+    $customer = User::factory()->withWorkspace()->create();
+    $administrator = SystemAdministrator::factory()->create();
+    $customerResponse = isolatedAuthRequest($cookies, 'POST', 'https://app.example.test/login', [
+        'email' => $customer->email,
+        'password' => 'password',
+    ])->assertOk();
+    signInIsolatedStaff($cookies, $administrator);
+    $staffResponse = isolatedAuthRequest($cookies, 'GET', 'https://staff.example.test/')->assertOk();
+    $isStaff = $context === 'sysadmin';
+    $response = $isStaff ? $staffResponse : $customerResponse;
+    $cookie = $isStaff ? '__Host-'.config('system-admin.session.cookie') : config('session.cookie');
+    $table = $isStaff ? 'system_administrator_sessions' : 'sessions';
+    $foreignGuard = $isStaff ? 'web' : 'sysadmin';
+    $id = $response->getCookie($cookie)->getValue();
+    $payload = unserialize(base64_decode(DB::table($table)->where('id', $id)->value('payload')));
+    $payload[Auth::guard($foreignGuard)->getName()] = $isStaff ? $customer->id : $administrator->id;
+    DB::table($table)->where('id', $id)->update(['payload' => base64_encode(serialize($payload))]);
+
+    isolatedAuthRequest($cookies, 'GET', $isStaff
+        ? 'https://staff.example.test/'
+        : 'https://app.example.test/'.$customer->currentWorkspace->slug.'/companies')->assertOk();
+
+    $this->assertGuest($foreignGuard);
+    $stored = unserialize(base64_decode(DB::table($table)->where('id', $id)->value('payload')));
+    expect($stored)->not->toHaveKey(Auth::guard($foreignGuard)->getName());
+})->with(['web', 'sysadmin']);
+
+it('requires second factor enrollment on an existing staff Livewire page', function (): void {
+    $cookies = [];
+    $administrator = SystemAdministrator::factory()->create();
+    signInIsolatedStaff($cookies, $administrator);
+    $page = isolatedAuthRequest($cookies, 'GET', 'https://staff.example.test/')->assertOk();
+    preg_match_all('/wire:snapshot="([^"]+)"/', $page->getContent(), $matches);
+    $snapshot = collect($matches[1])
+        ->map(fn (string $value): string => html_entity_decode($value, ENT_QUOTES))
+        ->first(fn (string $value): bool => str_contains(json_decode($value, true, flags: JSON_THROW_ON_ERROR)['memo']['name'], 'Dashboard'));
+    expect($snapshot)->not->toBeNull();
+    $administrator->update(['app_authentication_secret' => null]);
+
+    isolatedAuthRequest($cookies, 'POST', 'https://staff.example.test'.route('default-livewire.update', absolute: false), [
+        'components' => [[
+            'snapshot' => $snapshot,
+            'updates' => [],
+            'calls' => [['path' => '', 'method' => '$refresh', 'params' => []]],
+        ]],
+    ])->assertRedirect(Filament::getPanel('sysadmin')->getSetUpRequiredMultiFactorAuthenticationUrl());
 });
