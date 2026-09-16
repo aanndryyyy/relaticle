@@ -45,6 +45,7 @@ use App\Support\CustomFields\CustomFieldInput;
 use App\Support\CustomFields\RecordNameResolver;
 use App\Support\Markdown\TableAwareLeagueDriver;
 use App\Support\Media\MediaLookup;
+use App\Support\Passport\ClientRepository;
 use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
 use Filament\Auth\Notifications\NoticeOfEmailChangeRequest;
@@ -77,6 +78,7 @@ use Knuckles\Scribe\Scribe;
 use Laravel\Cashier\Cashier;
 use Laravel\Cashier\Events\WebhookHandled;
 use Laravel\Jetstream\Events\TeamMemberAdded;
+use Laravel\Passport\ClientRepository as BaseClientRepository;
 use Laravel\Passport\Events\AccessTokenCreated;
 use Laravel\Passport\Passport;
 use Laravel\Sanctum\Sanctum;
@@ -164,6 +166,10 @@ final class AppServiceProvider extends ServiceProvider
                 config('markdown-response.driver_options.league.options', []),
             ),
         );
+
+        // Passport self-binds this singleton, and every OAuth endpoint resolves the
+        // client it was handed through it.
+        $this->app->singleton(BaseClientRepository::class, ClientRepository::class);
 
         // The shared MarkdownRenderer always loads HeadingPermalinkExtension, which
         // stamps a docs-site anchor onto every heading regardless of add_anchors_to_headings.
