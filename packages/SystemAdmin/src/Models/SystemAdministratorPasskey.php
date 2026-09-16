@@ -36,14 +36,18 @@ final class SystemAdministratorPasskey extends Passkey
     }
 
     /**
-     * Whether a browser can tell a staff credential from a customer one. Sharing a
-     * relying party means the sign-in picker offers both and the staff endpoint
-     * rejects whichever customer credential it is handed, so the feature is offered
-     * only once SYSADMIN_DOMAIN separates the two.
+     * SYSADMIN_DOMAIN has to do the separating: falling back to the APP_URL host makes
+     * the staff relying party a parent of the customer host, which browsers offer there.
      */
     public static function hasDedicatedRelyingParty(): bool
     {
-        return self::relyingPartyId() !== Passkeys::relyingPartyId();
+        $domain = config('app.sysadmin_domain');
+
+        if (! is_string($domain) || $domain === '') {
+            return false;
+        }
+
+        return ! str_ends_with('.'.Passkeys::relyingPartyId(), '.'.$domain);
     }
 
     /**

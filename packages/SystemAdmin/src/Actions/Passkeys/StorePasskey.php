@@ -8,6 +8,7 @@ use Laravel\Passkeys\Events\PasskeyRegistered;
 use Laravel\Passkeys\Exceptions\InvalidPasskeyException;
 use Laravel\Passkeys\Support\WebAuthn;
 use ParagonIE\ConstantTime\Base64UrlSafe;
+use Relaticle\SystemAdmin\Auth\StaffWebAuthn;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
 use Relaticle\SystemAdmin\Models\SystemAdministratorPasskey;
 use Webauthn\AuthenticatorAttestationResponse;
@@ -29,7 +30,7 @@ final readonly class StorePasskey
             throw InvalidPasskeyException::make('Unable to register passkey. Please try again.');
         }
 
-        $source = WebAuthn::attestationValidator()->check(
+        $source = StaffWebAuthn::attestationValidator()->check(
             authenticatorAttestationResponse: $credential->response,
             publicKeyCredentialCreationOptions: $options,
             host: SystemAdministratorPasskey::relyingPartyId(),

@@ -26,6 +26,7 @@ use Relaticle\Ink\Models\Category;
 use Relaticle\Ink\Models\Post;
 use Relaticle\Ink\Models\Tag;
 use Relaticle\SystemAdmin\Actions\Passkeys\DeletePasskey as SysadminDeletePasskey;
+use Relaticle\SystemAdmin\Auth\StaffWebAuthn;
 use Relaticle\SystemAdmin\Enums\SystemAdministratorRole;
 use Relaticle\SystemAdmin\Filament\Pages\Auth\EditProfile;
 use Relaticle\SystemAdmin\Filament\Pages\Settings\ManageAiSettings;
@@ -35,6 +36,7 @@ use Relaticle\SystemAdmin\Http\Requests\PasskeyRegistrationRequest;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
 use Relaticle\SystemAdmin\Models\SystemAdministratorPasskey;
 use Symfony\Component\HttpKernel\Exception\HttpException;
+use Tests\Helpers\PasskeyAssertionFixture;
 
 mutates(SystemAdministrator::class, SystemAdministratorRole::class, RequireSecondFactor::class, SystemAdministratorPasskey::class);
 
@@ -386,10 +388,50 @@ describe('Staff passkeys', function () {
         $parsed = parse_url((string) $panelUrl);
         $origin = $parsed['scheme'].'://'.$parsed['host'].(isset($parsed['port']) ? ':'.$parsed['port'] : '');
 
-        expect(config('passkeys.allowed_origins'))->toContain($origin);
+        expect(StaffWebAuthn::allowedOrigin())->toBe($origin);
     });
 
-    it('keeps a path out of every allowed origin', function (array $app) {
+    it('signs in a staff assertion minted on the sysadmin origin', function () {
+        $administrator = SystemAdministrator::factory()->create();
+
+        $options = $this->getJson('/sysadmin/passkeys/login/options')->json('options');
+        $challenge = base64_decode(strtr((string) $options['challenge'], '-_', '+/'), true);
+
+        $assertion = PasskeyAssertionFixture::build((string) $options['rpId'], StaffWebAuthn::allowedOrigin(), (string) $challenge);
+
+        $administrator->passkeys()->create([
+            'name' => 'Laptop',
+            'credential_id' => PasskeyAssertionFixture::base64Url($assertion['credentialId']),
+            'credential' => $assertion['storedCredential'],
+        ]);
+
+        $this->postJson('/sysadmin/passkeys/login', $assertion['payload'])->assertOk();
+
+        $this->assertAuthenticatedAs($administrator, 'sysadmin');
+    });
+
+    it('refuses a staff assertion minted on the customer panel origin', function () {
+        config()->set('passkeys.allowed_origins', [StaffWebAuthn::allowedOrigin(), 'https://app.example.test']);
+
+        $administrator = SystemAdministrator::factory()->create();
+
+        $options = $this->getJson('/sysadmin/passkeys/login/options')->json('options');
+        $challenge = base64_decode(strtr((string) $options['challenge'], '-_', '+/'), true);
+
+        $assertion = PasskeyAssertionFixture::build((string) $options['rpId'], 'https://app.example.test', (string) $challenge);
+
+        $administrator->passkeys()->create([
+            'name' => 'Laptop',
+            'credential_id' => PasskeyAssertionFixture::base64Url($assertion['credentialId']),
+            'credential' => $assertion['storedCredential'],
+        ]);
+
+        $this->postJson('/sysadmin/passkeys/login', $assertion['payload'])->assertStatus(422);
+
+        $this->assertGuest('sysadmin');
+    });
+
+    it('keeps the sysadmin origin and every path out of the customer allowed origins', function (array $app) {
         config()->set('app.url', $app['url']);
         config()->set('app.app_panel_domain', $app['app_panel_domain']);
         config()->set('app.sysadmin_domain', $app['sysadmin_domain']);
@@ -408,13 +450,36 @@ describe('Staff passkeys', function () {
             'url' => 'https://example.test',
             'app_panel_domain' => 'app.example.test',
             'sysadmin_domain' => 'sysadmin.example.test',
-            'expected' => ['https://app.example.test', 'https://sysadmin.example.test'],
+            'expected' => ['https://app.example.test'],
         ]],
         'non-standard port is carried' => [[
             'url' => 'http://example.test:8000',
             'app_panel_domain' => 'app.example.test',
             'sysadmin_domain' => null,
-            'expected' => ['http://app.example.test:8000', 'http://example.test:8000'],
+            'expected' => ['http://app.example.test:8000'],
+        ]],
+    ]);
+
+    it('builds the staff origin from the panel host, scheme and port', function (array $app) {
+        config()->set('app.url', $app['url']);
+        config()->set('app.sysadmin_domain', $app['sysadmin_domain']);
+
+        expect(StaffWebAuthn::allowedOrigin())->toBe($app['expected']);
+    })->with([
+        'own domain' => [[
+            'url' => 'https://example.test',
+            'sysadmin_domain' => 'sysadmin.example.test',
+            'expected' => 'https://sysadmin.example.test',
+        ]],
+        'trailing slash, path-routed' => [[
+            'url' => 'https://example.test/',
+            'sysadmin_domain' => null,
+            'expected' => 'https://example.test',
+        ]],
+        'non-standard port is carried' => [[
+            'url' => 'http://example.test:8000',
+            'sysadmin_domain' => 'sysadmin.example.test',
+            'expected' => 'http://sysadmin.example.test:8000',
         ]],
     ]);
 
@@ -550,14 +615,28 @@ describe('Passkey management proof of identity', function () {
             ->and($names)->toContain('regenerateAppAuthenticationRecoveryCodes');
     });
 
-    it('offers no passkey registration while staff and customer credentials share a relying party', function () {
-        config()->set('app.sysadmin_domain', null);
+    it('offers no passkey registration while staff and customer credentials share a relying party', function (array $app) {
+        config()->set('app.sysadmin_domain', $app['sysadmin_domain']);
+        config()->set('passkeys.relying_party_id', $app['customer_relying_party_id']);
         $this->actingAs(SystemAdministrator::factory()->create(), 'sysadmin');
 
         expect(SystemAdministratorPasskey::hasDedicatedRelyingParty())->toBeFalse();
 
         livewire(EditProfile::class)->assertActionHidden(TestAction::make('registerPasskey'));
-    });
+    })->with([
+        'path-routed panel falls back to the app host' => [[
+            'sysadmin_domain' => null,
+            'customer_relying_party_id' => 'app.example.test',
+        ]],
+        'staff relying party is a parent of the customer host' => [[
+            'sysadmin_domain' => 'example.test',
+            'customer_relying_party_id' => 'app.example.test',
+        ]],
+        'both panels on one host' => [[
+            'sysadmin_domain' => 'example.test',
+            'customer_relying_party_id' => 'example.test',
+        ]],
+    ]);
 
     it('offers passkey registration once the panel has its own relying party', function () {
         $this->actingAs(SystemAdministrator::factory()->create(), 'sysadmin');

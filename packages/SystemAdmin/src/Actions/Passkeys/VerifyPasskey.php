@@ -9,6 +9,7 @@ use Laravel\Passkeys\Events\PasskeyVerified;
 use Laravel\Passkeys\Exceptions\InvalidPasskeyException;
 use Laravel\Passkeys\Support\WebAuthn;
 use ParagonIE\ConstantTime\Base64UrlSafe;
+use Relaticle\SystemAdmin\Auth\StaffWebAuthn;
 use Relaticle\SystemAdmin\Models\SystemAdministratorPasskey;
 use Throwable;
 use Webauthn\AuthenticatorAssertionResponse;
@@ -50,7 +51,7 @@ final readonly class VerifyPasskey
             // Forged assertion bytes surface as PHP warnings and bare
             // InvalidArgumentExceptions, not only the documented WebauthnException.
             try {
-                $verified = WebAuthn::assertionValidator()->check(
+                $verified = StaffWebAuthn::assertionValidator()->check(
                     credentialRecord: $source,
                     authenticatorAssertionResponse: $response,
                     publicKeyCredentialRequestOptions: $options,
