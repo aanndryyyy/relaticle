@@ -148,6 +148,9 @@ arch('avoid mutation')
         'App\Support\Media\UploadPathGenerator',
         // Same for DefaultUrlGenerator.
         'App\Support\Media\MediaUrlGenerator',
+        // Stands in for Passport's own ClientRepository singleton; PHP forbids a
+        // readonly class extending a non-readonly one.
+        'App\Support\Passport\ClientRepository',
         'App\View',
         'App\Services\Favicon\Drivers',
         'App\Providers\Filament',
@@ -196,6 +199,9 @@ arch('avoid inheritance')
         'App\Support\Media\UploadPathGenerator',
         // Same for DefaultUrlGenerator.
         'App\Support\Media\MediaUrlGenerator',
+        // Rebound over Passport's self-bound ClientRepository singleton, so it must
+        // extend the class every OAuth endpoint type-hints.
+        'App\Support\Passport\ClientRepository',
     ]);
 
 // Packages are kept final by pint (final_class, repo-wide) and strict-typed by
