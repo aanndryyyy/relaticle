@@ -141,6 +141,7 @@ final class Billing extends Page
             'pastDue' => $subscription?->pastDue() ?? false,
             'onGrace' => $subscription?->onGracePeriod() ?? false,
             'trialAvailable' => $this->trialAvailable(),
+            'onStripeTrial' => $subscription?->onTrial() ?? false,
             'hasHostedAccess' => $hasHostedAccess,
             'isGrandfathered' => $isGrandfathered,
             'balance' => AiCreditBalance::query()->where('workspace_id', $workspace->getKey())->first(),
