@@ -12,6 +12,7 @@ return [
         'manage' => 'Manage',
         'reconnect' => 'Reconnect',
         'set_default' => 'Set as default',
+        'retry_sync' => 'Retry sync',
         'disconnect' => 'Disconnect Mailbox',
         'sync_calendar' => [
             'enable_label' => 'Sync calendar',
@@ -27,6 +28,9 @@ return [
             'label' => 'Re-import history',
             'heading' => 'Re-import mailbox history?',
             'description' => 'Already synced mail and events stay in Relaticle. We will create missing people and companies using the current workspace record-creation setting, and import any messages not stored yet. This can take a while on a large mailbox.',
+        ],
+        'retry_failed_import' => [
+            'label' => 'Retry failed messages',
         ],
     ],
     'settings' => [
@@ -68,6 +72,14 @@ return [
             'title' => 'History import queued.',
             'body' => 'People and companies will appear as the import runs. You can keep using Relaticle.',
         ],
+        'sync_retry_queued' => [
+            'title' => 'Sync retry queued.',
+            'body' => 'We are fetching what could not be stored. This page updates as it finishes.',
+        ],
+        'retry_failed_import_queued' => [
+            'title' => 'Retry queued.',
+            'body' => 'We are retrying messages that could not be imported. This page updates as they finish.',
+        ],
     ],
     'default_badge' => 'Default',
     'sections' => [
@@ -78,17 +90,28 @@ return [
     ],
     'synced_at' => 'Synced :time',
     'in_sync' => 'In Sync',
+    'sync_error' => [
+        'badge' => 'Sync issue',
+        'heading' => 'Some items could not be synced',
+    ],
     'send_missing_tooltip' => 'Send access was not granted. Grant it to send mail from Relaticle.',
     'importing' => 'Syncing',
+    'finishing_import' => 'Finishing import',
     'importing_calendar' => 'Syncing calendar',
     'importing_email' => 'Syncing email',
     'importing_email_and_calendar' => 'Syncing email and calendar',
     'importing_percent' => ':percent%',
+    'history_import' => [
+        'processed' => ':processed of :total processed',
+        'failed_jobs' => ':count messages could not be imported',
+        'successful_jobs' => ':count imported successfully',
+    ],
     'sync_status' => [
         'title_syncing' => 'Syncing',
         'title_complete' => 'Import complete',
         'meetings_processed' => '{1}:count meeting processed|[2,*]:count meetings processed',
         'emails_processed' => '{1}:count email processed|[2,*]:count emails processed',
+        'retrying_messages' => '{1}Retrying :count message|[2,*]Retrying :count messages',
         'close' => 'Dismiss',
         'open_settings' => 'Open account settings',
     ],

@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 return [
     'subheading' => 'Update your account permissions and settings.',
+    'history_import_failure' => [
+        'heading' => 'Some messages were not imported',
+        'dismiss' => 'Dismiss',
+    ],
     'tabs' => [
         'general' => 'General',
         'sharing' => 'Sharing',

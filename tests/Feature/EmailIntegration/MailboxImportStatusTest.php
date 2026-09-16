@@ -53,6 +53,27 @@ it('shows processed count and a progress bar while history is importing', functi
         ->assertDontSee(__('filament/pages/email-accounts.sync_status.title_complete'));
 });
 
+it('does not surface per-message retries while sync percent is shown', function (): void {
+    $account = importingAccount();
+
+    MailboxSyncTracker::markMessageRetrying($account, 'msg-1');
+    MailboxSyncTracker::markMessageRetrying($account, 'msg-2');
+
+    livewire(MailboxImportStatus::class)
+        ->assertSee(__('filament/pages/email-accounts.importing_percent', ['percent' => 57]))
+        ->assertDontSee(trans_choice('filament/pages/email-accounts.sync_status.retrying_messages', 2, ['count' => 2]));
+
+    livewire(EmailAccountsPage::class)
+        ->assertDontSee(trans_choice('filament/pages/email-accounts.sync_status.retrying_messages', 2, ['count' => 2]));
+});
+
+it('says nothing about retries when no message is being retried', function (): void {
+    importingAccount();
+
+    livewire(MailboxImportStatus::class)
+        ->assertDontSee(trans_choice('filament/pages/email-accounts.sync_status.retrying_messages', 1, ['count' => 1]));
+});
+
 it('hides a mailbox belonging to another user', function (): void {
     $other = User::factory()->withWorkspace()->create();
 

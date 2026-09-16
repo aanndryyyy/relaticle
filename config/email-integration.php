@@ -70,6 +70,21 @@ return [
             : (int) $days,
         'batch_size' => (int) env('EMAIL_SYNC_BATCH_SIZE', 50),
         'initial_store_attempts' => (int) env('EMAIL_SYNC_INITIAL_STORE_ATTEMPTS', 3),
+
+        // Retry spacing for a single message store, in seconds. Shorten it locally to
+        // walk the recovery path without waiting out the production schedule.
+        'store_backoff' => array_values(array_map(
+            static fn (string $seconds): int => (int) trim($seconds),
+            array_filter(
+                explode(',', (string) env('EMAIL_SYNC_STORE_BACKOFF', '60,300,900')),
+                static fn (string $seconds): bool => trim($seconds) !== '',
+            ),
+        )),
+
+        // Force store failures while working on sync recovery locally. Ignored outside
+        // the local environment. Clear the cache to pick a different set of messages.
+        'debug_fail_first_n' => (int) env('EMAIL_SYNC_DEBUG_FAIL_FIRST_N', 0),
+        'debug_fail_message_id' => env('EMAIL_SYNC_DEBUG_FAIL_MESSAGE_ID'),
     ],
 
     /*

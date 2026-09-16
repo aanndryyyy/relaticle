@@ -15,6 +15,7 @@ use Relaticle\EmailIntegration\Jobs\StoreEmailJob;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Email;
 use Relaticle\EmailIntegration\Services\Contracts\MailServiceFactoryInterface;
+use Relaticle\EmailIntegration\Services\EmailSyncDebugStoreFailure;
 use Relaticle\EmailIntegration\Services\Factories\MicrosoftGraphServiceFactory;
 use Relaticle\EmailIntegration\Services\MicrosoftGraphMailService;
 
@@ -320,6 +321,7 @@ it('maps a localized Graph drafts folder as drafts so unsent mail is excluded', 
     (new StoreEmailJob($account, 'DRAFT1'))->handle(
         resolve(MailServiceFactoryInterface::class),
         resolve(StoreEmailAction::class),
+        resolve(EmailSyncDebugStoreFailure::class),
     );
 
     expect(Email::query()->where('connected_account_id', $account->id)->count())->toBe(0);

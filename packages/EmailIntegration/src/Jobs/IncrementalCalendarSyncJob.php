@@ -141,11 +141,15 @@ final class IncrementalCalendarSyncJob implements ShouldBeUnique, ShouldQueue
         dispatch(new EnsureCalendarPushChannelJob($account));
     }
 
+    /**
+     * Keep the mailbox ACTIVE: calendar:incremental-sync dispatches for active accounts
+     * only, and the sync token stays put here, so the next run refetches exactly what
+     * failed. Parking it would end all future calendar sync for this mailbox.
+     */
     private static function recordBatchFailure(ConnectedAccount $account, int $failedJobs): void
     {
         $account->update([
             'last_calendar_synced_at' => now(),
-            'status' => EmailAccountStatus::ERROR,
             'last_error' => "{$failedJobs} calendar event(s) could not be stored during sync.",
         ]);
 

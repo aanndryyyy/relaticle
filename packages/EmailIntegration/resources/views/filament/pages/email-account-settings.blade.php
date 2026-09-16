@@ -6,7 +6,7 @@
     <x-filament::breadcrumbs :breadcrumbs="$this->getBreadcrumbs()" />
 
     <div
-        @if ($this->isImportingHistory())
+        @if ($this->isImportingHistory() || $account->showsMailboxHistoryImportFailureSummary())
             wire:poll.5s="refreshAccount"
         @endif
     >
@@ -44,6 +44,14 @@
                     {{ $this->accountActions($account->getKey(), includeSettings: false) }}
                 </div>
             </x-slot>
+
+            <x-email-integration::history-import-failure-callout :account="$account">
+                {{ ($this->retryFailedImportAction())(['account_id' => $account->getKey()]) }}
+            </x-email-integration::history-import-failure-callout>
+
+            <x-email-integration::sync-error-notice :account="$account" class="mb-6">
+                {{ ($this->retrySyncAction())(['account_id' => $account->getKey()]) }}
+            </x-email-integration::sync-error-notice>
 
             {{ $this->form }}
 

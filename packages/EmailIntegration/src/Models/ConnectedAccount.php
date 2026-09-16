@@ -18,9 +18,11 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Relaticle\EmailIntegration\Data\MailboxHistoryImportSummary;
 use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
 use Relaticle\EmailIntegration\Enums\EmailDirection;
 use Relaticle\EmailIntegration\Enums\EmailProvider;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 
 /**
@@ -52,6 +54,8 @@ use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
  * @property string|null $calendar_push_verification_token
  * @property CarbonInterface|null $calendar_push_expires_at
  * @property EmailAccountStatus $status
+ * @property string|null $last_error
+ * @property string|null $history_import_batch_id
  */
 final class ConnectedAccount extends Model
 {
@@ -90,6 +94,7 @@ final class ConnectedAccount extends Model
         'calendar_push_expires_at',
         'status',
         'last_error',
+        'history_import_batch_id',
         'sync_inbox',
         'sync_sent',
         'daily_send_limit',
@@ -264,6 +269,15 @@ final class ConnectedAccount extends Model
     }
 
     /**
+     * A store failure keeps the mailbox ACTIVE so scheduled syncs still retry it, so the
+     * recorded reason, not the status, is what tells the user something was dropped.
+     */
+    public function hasSyncError(): bool
+    {
+        return filled($this->last_error);
+    }
+
+    /**
      * True while the first mailbox or calendar backfill has not yet written a cursor.
      */
     public function isImportingHistory(): bool
@@ -276,7 +290,77 @@ final class ConnectedAccount extends Model
             return true;
         }
 
+        if ($this->hasEmail() && $this->isEmailHistoryImportRunning()) {
+            return true;
+        }
+
         return $this->hasCalendar() && $this->calendar_sync_cursor === null;
+    }
+
+    public function mailboxHistoryImportSummary(): ?MailboxHistoryImportSummary
+    {
+        return resolve(MailboxHistoryImportService::class)->summary($this);
+    }
+
+    public function isEmailHistoryImportRunning(): bool
+    {
+        return resolve(MailboxHistoryImportService::class)->isRunning($this);
+    }
+
+    public function showsMailboxHistoryImportProgressOnAccountsPage(): bool
+    {
+        return $this->isEmailHistoryImportRunning()
+            && ! $this->showsMailboxHistoryImportFailureSummary();
+    }
+
+    public function showsMailboxHistoryImportFailureSummary(): bool
+    {
+        $summary = $this->mailboxHistoryImportSummary();
+
+        return $summary instanceof MailboxHistoryImportSummary
+            && $summary->finished
+            && $summary->failedJobs > 0;
+    }
+
+    /**
+     * Provider pagination is done; store jobs may still be running or retrying on backoff.
+     */
+    public function isMailboxHistoryImportStoringPhase(): bool
+    {
+        return $this->hasEmail()
+            && filled($this->history_import_batch_id)
+            && $this->sync_cursor !== null
+            && $this->isEmailHistoryImportRunning();
+    }
+
+    /**
+     * Percent in the badge misleads during store (e.g. 99% while three jobs retry). Use counts instead.
+     */
+    public function showsPercentOnImportBadge(): bool
+    {
+        if ($this->showsMailboxHistoryImportFailureSummary() || $this->isMailboxHistoryImportStoringPhase()) {
+            return false;
+        }
+
+        return $this->showsSyncProgress();
+    }
+
+    public function historyImportProcessedLabel(): ?string
+    {
+        if (! filled($this->history_import_batch_id)) {
+            return null;
+        }
+
+        $import = resolve(MailboxHistoryImportService::class);
+
+        if ($import->totalJobCount($this) <= 0) {
+            return null;
+        }
+
+        return __('filament/pages/email-accounts.history_import.processed', [
+            'processed' => number_format($import->processedJobCount($this)),
+            'total' => number_format($import->totalJobCount($this)),
+        ]);
     }
 
     public function isImportingCalendarHistory(): bool
@@ -284,6 +368,15 @@ final class ConnectedAccount extends Model
         return $this->isActive()
             && $this->hasCalendar()
             && $this->calendar_sync_cursor === null;
+    }
+
+    /**
+     * Messages whose store threw and are waiting on a spaced retry. A stalled import
+     * percentage is otherwise unexplained, and reads as stuck.
+     */
+    public function retryingMessageCount(): int
+    {
+        return MailboxSyncTracker::retryingMessageCount($this);
     }
 
     public function isCalendarSyncing(): bool
@@ -304,7 +397,10 @@ final class ConnectedAccount extends Model
 
     public function showsSyncProgress(): bool
     {
-        return $this->isImportingHistory() || $this->isCalendarSyncing() || $this->isEmailSyncing();
+        return $this->isImportingHistory()
+            || $this->isEmailHistoryImportRunning()
+            || $this->isCalendarSyncing()
+            || $this->isEmailSyncing();
     }
 
     public function isIncrementalSyncing(): bool
@@ -357,6 +453,16 @@ final class ConnectedAccount extends Model
             return MailboxSyncTracker::emailProcessedCount($this);
         }
 
+        if ($this->hasEmail() && filled($this->history_import_batch_id)) {
+            $import = resolve(MailboxHistoryImportService::class);
+
+            if ($import->isRunning($this)
+                || $this->showsMailboxHistoryImportFailureSummary()
+                || $this->sync_cursor === null) {
+                return $import->processedJobCount($this);
+            }
+        }
+
         if ($this->isImportingHistory() && $this->hasEmail() && $this->sync_cursor === null) {
             return $this->initial_sync_imported;
         }
@@ -379,7 +485,17 @@ final class ConnectedAccount extends Model
 
     public function syncDisplayPercent(): int
     {
-        if ($this->isImportingHistory()) {
+        if ($this->hasEmail() && filled($this->history_import_batch_id)) {
+            $import = resolve(MailboxHistoryImportService::class);
+
+            if ($import->isRunning($this)
+                || $this->showsMailboxHistoryImportFailureSummary()
+                || $this->sync_cursor === null) {
+                return $import->progressPercent($this);
+            }
+        }
+
+        if ($this->isImportingHistory() && ! filled($this->history_import_batch_id)) {
             return $this->initialSyncProgressPercent();
         }
 

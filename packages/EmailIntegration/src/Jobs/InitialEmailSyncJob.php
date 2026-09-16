@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace Relaticle\EmailIntegration\Jobs;
 
+use Illuminate\Bus\Batch;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Config;
 use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
 use Relaticle\EmailIntegration\Jobs\Concerns\DetectsAuthErrors;
@@ -15,6 +17,8 @@ use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Email;
 use Relaticle\EmailIntegration\Notifications\MailboxHistoryImportCompletedNotification;
 use Relaticle\EmailIntegration\Services\Contracts\MailServiceFactoryInterface;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
+use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 use Throwable;
 
 #[DeleteWhenMissingModels]
@@ -33,6 +37,7 @@ final class InitialEmailSyncJob implements ShouldBeUnique, ShouldQueue
         public readonly ConnectedAccount $connectedAccount,
         public readonly ?string $pageToken = null,
         public readonly ?string $historyCursor = null,
+        public readonly ?string $historyImportBatchId = null,
     ) {
         $this->onQueue('emails-sync');
     }
@@ -40,8 +45,10 @@ final class InitialEmailSyncJob implements ShouldBeUnique, ShouldQueue
     /**
      * @throws Throwable
      */
-    public function handle(MailServiceFactoryInterface $mailFactory): void
-    {
+    public function handle(
+        MailServiceFactoryInterface $mailFactory,
+        MailboxHistoryImportService $mailboxHistoryImport,
+    ): void {
         $account = $this->connectedAccount;
         $service = $mailFactory->make($account);
         $page = $service->initialBackfill($this->initialDaysCap(), $this->pageToken);
@@ -62,14 +69,23 @@ final class InitialEmailSyncJob implements ShouldBeUnique, ShouldQueue
 
         $newIds = array_values(array_diff($allIds, $storedIds));
 
+        $historyBatchId = $this->resolveHistoryImportBatchId($account);
+
         if ($newIds === []) {
-            self::continueOrFinish($account, $historyCursor, $page->nextPageToken, $page->cursor);
+            self::continueOrFinish($account, $historyCursor, $page->nextPageToken, $page->cursor, $historyBatchId);
 
             return;
         }
 
         $nextPageToken = $page->nextPageToken;
         $pageCursor = $page->cursor;
+
+        if ($historyBatchId !== null) {
+            $mailboxHistoryImport->addStoreJobs($account, $newIds);
+            self::continueOrFinish($account, $historyCursor, $nextPageToken, $pageCursor, $historyBatchId);
+
+            return;
+        }
 
         InitialSyncPageStoreBatch::dispatchEmails(
             account: $account,
@@ -82,6 +98,17 @@ final class InitialEmailSyncJob implements ShouldBeUnique, ShouldQueue
                 self::continueOrFinish($account, $historyCursor, $nextPageToken, $pageCursor);
             },
         );
+    }
+
+    private function resolveHistoryImportBatchId(ConnectedAccount $account): ?string
+    {
+        $batchId = $this->historyImportBatchId ?? $account->history_import_batch_id;
+
+        if (! is_string($batchId) || $batchId === '') {
+            return null;
+        }
+
+        return $batchId;
     }
 
     public function failed(Throwable $exception): void
@@ -113,6 +140,7 @@ final class InitialEmailSyncJob implements ShouldBeUnique, ShouldQueue
         ?string $historyCursor,
         ?string $nextPageToken,
         ?string $pageCursor,
+        ?string $historyImportBatchId = null,
     ): void {
         $imported = Email::query()
             ->where('connected_account_id', $account->getKey())
@@ -121,7 +149,7 @@ final class InitialEmailSyncJob implements ShouldBeUnique, ShouldQueue
         $account->update(['initial_sync_imported' => $imported]);
 
         if ($nextPageToken !== null && $nextPageToken !== '') {
-            dispatch(new self($account, $nextPageToken, $historyCursor));
+            dispatch(new self($account, $nextPageToken, $historyCursor, $historyImportBatchId));
 
             return;
         }
@@ -135,6 +163,18 @@ final class InitialEmailSyncJob implements ShouldBeUnique, ShouldQueue
             'status' => EmailAccountStatus::ACTIVE,
             'last_error' => null,
         ]);
+
+        MailboxSyncTracker::clearMessageRetries($account);
+
+        if ($historyImportBatchId !== null) {
+            $batch = Bus::findBatch($historyImportBatchId);
+
+            if ($batch instanceof Batch && $batch->totalJobs === 0) {
+                $account->user?->notify(new MailboxHistoryImportCompletedNotification($account->fresh() ?? $account));
+            }
+
+            return;
+        }
 
         $account->user?->notify(new MailboxHistoryImportCompletedNotification($account->fresh() ?? $account));
     }

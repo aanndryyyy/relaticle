@@ -117,7 +117,11 @@
                         >
                             <div class="flex items-center justify-between gap-3">
                                 <p class="truncate text-sm text-gray-700 dark:text-gray-300">{{ $mailbox['email'] }}</p>
-                                @if ($mailbox['importing'])
+                                @if ($mailbox['importing'] && $mailbox['historyStoring'])
+                                    <span class="shrink-0 rounded-full bg-primary-50 px-2 py-0.5 text-xs font-semibold text-primary-700 dark:bg-primary-400/10 dark:text-primary-300">
+                                        {{ __('filament/pages/email-accounts.finishing_import') }}
+                                    </span>
+                                @elseif ($mailbox['importing'])
                                     <span class="shrink-0 rounded-full bg-primary-50 px-2 py-0.5 text-xs font-semibold tabular-nums text-primary-700 dark:bg-primary-400/10 dark:text-primary-300">
                                         {{ __('filament/pages/email-accounts.importing_percent', ['percent' => $mailbox['percent']]) }}
                                     </span>

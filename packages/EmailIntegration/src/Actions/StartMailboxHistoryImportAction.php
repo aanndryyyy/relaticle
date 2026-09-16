@@ -4,39 +4,69 @@ declare(strict_types=1);
 
 namespace Relaticle\EmailIntegration\Actions;
 
+use Illuminate\Support\Facades\Cache;
 use Relaticle\EmailIntegration\Jobs\IncrementalCalendarSyncJob;
 use Relaticle\EmailIntegration\Jobs\InitialCalendarSyncJob;
 use Relaticle\EmailIntegration\Jobs\InitialEmailSyncJob;
 use Relaticle\EmailIntegration\Jobs\RelinkMailboxHistoryJob;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
+use RuntimeException;
 
 final readonly class StartMailboxHistoryImportAction
 {
+    public function __construct(
+        private MailboxHistoryImportService $mailboxHistoryImport,
+    ) {}
+
     public function execute(ConnectedAccount $connectedAccount): void
     {
-        dispatch(new RelinkMailboxHistoryJob($connectedAccount))->afterCommit();
+        $account = $connectedAccount->fresh() ?? $connectedAccount;
 
-        if ($connectedAccount->sync_cursor !== null) {
-            $connectedAccount->update([
-                'sync_cursor' => null,
-                'initial_sync_estimated' => null,
-            ]);
+        $lock = Cache::lock($this->mailboxHistoryImport->lockKey($account), 60);
+
+        if (! $lock->get()) {
+            throw new RuntimeException('A mailbox history import is already starting for this account.');
         }
 
-        dispatch(new InitialEmailSyncJob($connectedAccount))->afterCommit();
+        try {
+            if ($account->sync_cursor === null && $this->mailboxHistoryImport->isRunning($account)) {
+                throw new RuntimeException('A mailbox history import is already running for this account.');
+            }
 
-        if (! $connectedAccount->hasCalendar()) {
-            return;
+            $hadSyncCursor = $account->sync_cursor !== null;
+
+            $batch = $this->mailboxHistoryImport->startBatch($account);
+
+            $account->update(['history_import_batch_id' => $batch->id]);
+
+            if ($hadSyncCursor) {
+                $account->update([
+                    'sync_cursor' => null,
+                    'initial_sync_estimated' => null,
+                ]);
+            }
+
+            $account = $account->fresh() ?? $account;
+
+            dispatch(new RelinkMailboxHistoryJob($account))->afterCommit();
+            dispatch(new InitialEmailSyncJob($account, historyImportBatchId: $batch->id))->afterCommit();
+
+            if (! $account->hasCalendar()) {
+                return;
+            }
+
+            if ($account->calendar_sync_cursor !== null) {
+                MailboxSyncTracker::markCalendarStarted($account);
+                dispatch(new IncrementalCalendarSyncJob($account, reconcileAfter: true))->afterCommit();
+
+                return;
+            }
+
+            dispatch(new InitialCalendarSyncJob($account))->afterCommit();
+        } finally {
+            $lock->release();
         }
-
-        if ($connectedAccount->calendar_sync_cursor !== null) {
-            MailboxSyncTracker::markCalendarStarted($connectedAccount);
-            dispatch(new IncrementalCalendarSyncJob($connectedAccount, reconcileAfter: true))->afterCommit();
-
-            return;
-        }
-
-        dispatch(new InitialCalendarSyncJob($connectedAccount))->afterCommit();
     }
 }

@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 use App\Models\User;
 use App\Models\Workspace;
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Facades\DB;
 use Relaticle\EmailIntegration\Enums\EmailBlocklistType;
 use Relaticle\EmailIntegration\Enums\EmailPrivacyTier;
 use Relaticle\EmailIntegration\Filament\Pages\EmailAccountSettingsPage;
@@ -13,6 +15,7 @@ use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Email;
 use Relaticle\EmailIntegration\Models\EmailBlocklist;
 use Relaticle\EmailIntegration\Models\EmailSignature;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 
 mutates(EmailAccountSettingsPage::class);
 
@@ -253,6 +256,28 @@ it('does not touch another account\'s signature', function (): void {
         ->toThrow(ModelNotFoundException::class);
 
     $this->assertDatabaseHas(EmailSignature::class, ['id' => $signature->id]);
+});
+
+it('shows a dismissible callout with retry when history import has failures', function (): void {
+    $batch = resolve(MailboxHistoryImportService::class)->startBatch($this->account);
+
+    $this->account->update([
+        'sync_cursor' => 'history-done',
+        'history_import_batch_id' => $batch->id,
+    ]);
+
+    DB::table('job_batches')->where('id', $batch->id)->update([
+        'total_jobs' => 5,
+        'pending_jobs' => 0,
+        'failed_jobs' => 2,
+        'failed_job_ids' => json_encode(['failed-1', 'failed-2']),
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    livewire(EmailAccountSettingsPage::class, ['account' => $this->account->id])
+        ->assertSee(__('filament/pages/email-account-settings.history_import_failure.heading'))
+        ->assertSee(__('filament/pages/email-accounts.history_import.failed_jobs', ['count' => '2']))
+        ->assertActionVisible(TestAction::make('retryFailedImport')->arguments(['account_id' => $this->account->id]));
 });
 
 it('shows syncing percent while mailbox history is importing', function (): void {

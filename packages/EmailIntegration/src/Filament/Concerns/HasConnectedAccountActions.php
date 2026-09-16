@@ -17,6 +17,8 @@ use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\HtmlString;
 use Relaticle\EmailIntegration\Actions\DisconnectConnectedAccountAction;
+use Relaticle\EmailIntegration\Actions\RetryMailboxHistoryImportFailuresAction;
+use Relaticle\EmailIntegration\Actions\RetryMailboxSyncAction;
 use Relaticle\EmailIntegration\Actions\SetDefaultConnectedAccountAction;
 use Relaticle\EmailIntegration\Actions\StartMailboxHistoryImportAction;
 use Relaticle\EmailIntegration\Actions\StopCalendarPushChannelAction;
@@ -111,6 +113,57 @@ trait HasConnectedAccountActions
 
                 return MailboxOAuthWorkspace::redirectUrl($account->provider->value, $account->workspace);
             }, true);
+    }
+
+    public function retryFailedImportAction(): Action
+    {
+        return Action::make('retryFailedImport')
+            ->label(__('filament/pages/email-accounts.actions.retry_failed_import.label'))
+            ->icon('heroicon-o-arrow-path')
+            ->color('primary')
+            ->size(Size::Small)
+            ->visible(fn (array $arguments): bool => $this instanceof EmailAccountSettingsPage
+                && (bool) $this->findAccount($arguments)?->showsMailboxHistoryImportFailureSummary())
+            ->action(function (array $arguments): void {
+                $account = $this->findOwnedAccountOrFail($arguments);
+
+                resolve(RetryMailboxHistoryImportFailuresAction::class)->execute($account);
+
+                $this->afterAccountChanged();
+
+                Notification::make()
+                    ->success()
+                    ->title(__('filament/pages/email-accounts.notifications.retry_failed_import_queued.title'))
+                    ->body(__('filament/pages/email-accounts.notifications.retry_failed_import_queued.body'))
+                    ->send();
+            });
+    }
+
+    /**
+     * Rendered inside the sync-error notice, so it appears exactly when a mailbox has
+     * an error to clear. {@see RetryMailboxSyncAction}
+     */
+    public function retrySyncAction(): Action
+    {
+        return Action::make('retrySync')
+            ->label(__('filament/pages/email-accounts.actions.retry_sync'))
+            ->icon('heroicon-o-arrow-path')
+            ->color('warning')
+            ->size(Size::Small)
+            ->visible(fn (array $arguments): bool => (bool) $this->findAccount($arguments)?->hasSyncError())
+            ->action(function (array $arguments): void {
+                $account = $this->findOwnedAccountOrFail($arguments);
+
+                resolve(RetryMailboxSyncAction::class)->execute($account);
+
+                $this->afterAccountChanged();
+
+                Notification::make()
+                    ->success()
+                    ->title(__('filament/pages/email-accounts.notifications.sync_retry_queued.title'))
+                    ->body(__('filament/pages/email-accounts.notifications.sync_retry_queued.body'))
+                    ->send();
+            });
     }
 
     public function syncCalendarAction(): Action

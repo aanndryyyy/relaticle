@@ -175,7 +175,23 @@ it('does not advance the cursor when the store batch fails', function (): void {
         return true;
     });
 
-    expect($account->refresh()->sync_cursor)->toBe('old-cursor');
+    expect($account->refresh()->sync_cursor)->toBe('old-cursor')
+        ->and($account->status)->toBe(EmailAccountStatus::ACTIVE)
+        ->and($account->last_error)->toContain('1 email(s)');
+});
+
+it('keeps a mailbox that failed to store messages eligible for the scheduled sync', function (): void {
+    $account = syncableAccount();
+    $account->update(['last_error' => '1 email(s) could not be stored during sync.']);
+
+    Bus::fake();
+
+    $this->artisan('email:incremental-sync')->assertSuccessful();
+
+    Bus::assertDispatched(
+        IncrementalEmailSyncJob::class,
+        fn (IncrementalEmailSyncJob $job): bool => $job->connectedAccount->is($account),
+    );
 });
 
 it('advances the cursor inline when the delta has no new messages', function (): void {

@@ -72,7 +72,7 @@ final class MailboxImportStatus extends Component
     }
 
     /**
-     * @return list<array{id: string, email: string, imported: int, meetingsImported: int, hasCalendar: bool, percent: ?int, importing: bool, incrementalOnly: bool, incrementalLabel: ?string, settings_url: string}>
+     * @return list<array{id: string, email: string, imported: int, meetingsImported: int, hasCalendar: bool, percent: ?int, importing: bool, incrementalOnly: bool, incrementalLabel: ?string, historyStoring: bool, settings_url: string}>
      */
     public function visibleMailboxes(): array
     {
@@ -106,6 +106,7 @@ final class MailboxImportStatus extends Component
                 'importing' => $importing,
                 'incrementalOnly' => $incrementalOnly,
                 'incrementalLabel' => null,
+                'historyStoring' => $account->isMailboxHistoryImportStoringPhase(),
                 'settings_url' => EmailAccountSettingsPage::getUrl(['account' => $id]),
             ];
         }

@@ -294,7 +294,24 @@ it('records a batch failure, holds the cursor, and clears the calendar sync badg
     });
 
     expect($account->fresh()?->calendar_sync_cursor)->toBe('valid-token')
-        ->and($account->fresh()?->status)->toBe(EmailAccountStatus::ERROR)
+        ->and($account->fresh()?->status)->toBe(EmailAccountStatus::ACTIVE)
         ->and($account->fresh()?->last_error)->toContain('1 calendar event(s)')
         ->and(MailboxSyncTracker::isCalendarSyncing($account))->toBeFalse();
+});
+
+it('keeps a mailbox that failed to store events eligible for the scheduled calendar sync', function (): void {
+    $account = ConnectedAccount::withoutEvents(fn () => ConnectedAccount::factory()->create([
+        'capabilities' => ['email' => true, 'calendar' => true],
+        'calendar_sync_cursor' => 'valid-token',
+        'last_error' => '1 calendar event(s) could not be stored during sync.',
+    ]));
+
+    Bus::fake();
+
+    $this->artisan('calendar:incremental-sync')->assertSuccessful();
+
+    Bus::assertDispatched(
+        IncrementalCalendarSyncJob::class,
+        fn (IncrementalCalendarSyncJob $job): bool => $job->connectedAccount->is($account),
+    );
 });

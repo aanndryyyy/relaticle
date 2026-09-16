@@ -19,8 +19,14 @@ use Relaticle\EmailIntegration\Models\Email;
 use Relaticle\EmailIntegration\Notifications\MailboxHistoryImportCompletedNotification;
 use Relaticle\EmailIntegration\Services\Contracts\MailServiceFactoryInterface;
 use Relaticle\EmailIntegration\Services\Contracts\MailServiceInterface;
+use Relaticle\EmailIntegration\Services\EmailSyncDebugStoreFailure;
 
 mutates(InitialEmailSyncJob::class);
+
+function handleInitialEmailSync(InitialEmailSyncJob $job, MailServiceFactoryInterface $factory): void
+{
+    app()->call([$job, 'handle'], ['mailFactory' => $factory]);
+}
 
 function invokeInitialEmailSyncBatchFinallyCallbacks(int $failedJobs = 0): void
 {
@@ -62,7 +68,7 @@ it('does not cap the first import when EMAIL_SYNC_INITIAL_DAYS is unset', functi
     $factory = Mockery::mock(MailServiceFactoryInterface::class);
     $factory->shouldReceive('make')->andReturn($service);
 
-    (new InitialEmailSyncJob($account))->handle($factory);
+    handleInitialEmailSync(new InitialEmailSyncJob($account), $factory);
 
     expect($account->fresh()?->sync_cursor)->toBe('history-1');
 });
@@ -87,7 +93,7 @@ it('passes the optional day cap through to the mail service', function (): void 
     $factory = Mockery::mock(MailServiceFactoryInterface::class);
     $factory->shouldReceive('make')->andReturn($service);
 
-    (new InitialEmailSyncJob($account))->handle($factory);
+    handleInitialEmailSync(new InitialEmailSyncJob($account), $factory);
 });
 
 it('batches one page of messages and leaves the cursor unset until the page stores', function (): void {
@@ -107,7 +113,7 @@ it('batches one page of messages and leaves the cursor unset until the page stor
     $factory = Mockery::mock(MailServiceFactoryInterface::class);
     $factory->shouldReceive('make')->andReturn($service);
 
-    (new InitialEmailSyncJob($account))->handle($factory);
+    handleInitialEmailSync(new InitialEmailSyncJob($account), $factory);
 
     Bus::assertBatched(fn (PendingBatch $batch): bool => $batch->queue() === 'emails-sync'
         && $batch->jobs->count() === 2
@@ -146,7 +152,7 @@ it('serializes the store-batch continuation without the running queue worker', f
         }
     };
 
-    $syncJob->handle($factory);
+    handleInitialEmailSync($syncJob, $factory);
 
     Bus::assertBatched(function (PendingBatch $batch): bool {
         expect($batch->thenCallbacks())->toBeEmpty()
@@ -176,7 +182,7 @@ it('chains the next page after the store batch completes', function (): void {
     $factory = Mockery::mock(MailServiceFactoryInterface::class);
     $factory->shouldReceive('make')->andReturn($service);
 
-    (new InitialEmailSyncJob($account))->handle($factory);
+    handleInitialEmailSync(new InitialEmailSyncJob($account), $factory);
 
     Email::factory()->create([
         'workspace_id' => $account->workspace_id,
@@ -211,7 +217,7 @@ it('chains the next page when the current page has no new ids', function (): voi
     $factory = Mockery::mock(MailServiceFactoryInterface::class);
     $factory->shouldReceive('make')->andReturn($service);
 
-    (new InitialEmailSyncJob($account))->handle($factory);
+    handleInitialEmailSync(new InitialEmailSyncJob($account), $factory);
 
     Bus::assertDispatched(
         InitialEmailSyncJob::class,
@@ -238,7 +244,7 @@ it('sets the cursor and notifies the owner when the last page is stored', functi
     $factory = Mockery::mock(MailServiceFactoryInterface::class);
     $factory->shouldReceive('make')->andReturn($service);
 
-    (new InitialEmailSyncJob($account))->handle($factory);
+    handleInitialEmailSync(new InitialEmailSyncJob($account), $factory);
 
     expect($account->fresh()?->sync_cursor)->toBe('history-1')
         ->and($account->fresh()?->last_synced_at)->not->toBeNull();
@@ -265,7 +271,7 @@ it('sets the cursor after the last page store batch finishes', function (): void
     $factory = Mockery::mock(MailServiceFactoryInterface::class);
     $factory->shouldReceive('make')->andReturn($service);
 
-    (new InitialEmailSyncJob($account))->handle($factory);
+    handleInitialEmailSync(new InitialEmailSyncJob($account), $factory);
 
     Email::factory()->create([
         'workspace_id' => $account->workspace_id,
@@ -320,9 +326,9 @@ it('advances after a disabled direction skips every message in a page', function
     $factory = Mockery::mock(MailServiceFactoryInterface::class);
     $factory->shouldReceive('make')->andReturn($service);
 
-    (new InitialEmailSyncJob($account))->handle($factory);
+    handleInitialEmailSync(new InitialEmailSyncJob($account), $factory);
 
-    (new StoreEmailJob($account, 'M1'))->handle($factory, resolve(StoreEmailAction::class));
+    (new StoreEmailJob($account, 'M1'))->handle($factory, resolve(StoreEmailAction::class), resolve(EmailSyncDebugStoreFailure::class));
 
     invokeInitialEmailSyncBatchFinallyCallbacks();
 
@@ -350,7 +356,7 @@ it('does not advance the initial import while page messages are still missing', 
     $factory = Mockery::mock(MailServiceFactoryInterface::class);
     $factory->shouldReceive('make')->andReturn($service);
 
-    (new InitialEmailSyncJob($account))->handle($factory);
+    handleInitialEmailSync(new InitialEmailSyncJob($account), $factory);
 
     invokeInitialEmailSyncBatchFinallyCallbacks(1);
 
@@ -378,7 +384,7 @@ it('re-dispatches store jobs for missing messages before advancing the page', fu
     $factory = Mockery::mock(MailServiceFactoryInterface::class);
     $factory->shouldReceive('make')->andReturn($service);
 
-    (new InitialEmailSyncJob($account))->handle($factory);
+    handleInitialEmailSync(new InitialEmailSyncJob($account), $factory);
 
     Email::factory()->create([
         'workspace_id' => $account->workspace_id,

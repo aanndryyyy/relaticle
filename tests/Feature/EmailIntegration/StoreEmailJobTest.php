@@ -7,6 +7,9 @@ use GuzzleHttp\Psr7\Response as Psr7Response;
 use Illuminate\Contracts\Queue\Job as QueueJob;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Relaticle\EmailIntegration\Actions\StoreEmailAction;
 use Relaticle\EmailIntegration\Data\FetchedEmailData;
 use Relaticle\EmailIntegration\Enums\EmailDirection;
@@ -18,6 +21,7 @@ use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Email;
 use Relaticle\EmailIntegration\Services\Contracts\MailServiceFactoryInterface;
 use Relaticle\EmailIntegration\Services\Contracts\MailServiceInterface;
+use Relaticle\EmailIntegration\Services\EmailSyncDebugStoreFailure;
 use Relaticle\EmailIntegration\Services\ProviderRateLimit;
 
 mutates(StoreEmailJob::class, ProviderRateLimit::class, ReleasesOnProviderRateLimit::class);
@@ -44,6 +48,29 @@ JSON;
     return new GoogleServiceException($message, 429);
 }
 
+function inboundFetchedEmail(string $providerMessageId): FetchedEmailData
+{
+    return new FetchedEmailData(
+        providerMessageId: $providerMessageId,
+        rfcMessageId: "<{$providerMessageId}@example.com>",
+        threadId: "thread-{$providerMessageId}",
+        inReplyTo: null,
+        subject: 'Quarterly review',
+        snippet: 'Notes attached',
+        sentAt: now(),
+        direction: EmailDirection::INBOUND,
+        folder: EmailFolder::Inbox,
+        hasAttachments: false,
+        isRead: false,
+        bodyText: 'Notes attached',
+        bodyHtml: '<p>Notes attached</p>',
+        participants: [
+            ['email_address' => 'sender@example.com', 'name' => 'Sender', 'role' => 'from'],
+        ],
+        attachments: [],
+    );
+}
+
 function runStoreEmailJobWithQueue(
     ConnectedAccount $account,
     string $messageId,
@@ -52,8 +79,71 @@ function runStoreEmailJobWithQueue(
 ): void {
     $job = new StoreEmailJob($account, $messageId);
     $job->setJob($queueJob);
-    $job->handle($factory, resolve(StoreEmailAction::class));
+    $job->handle($factory, resolve(StoreEmailAction::class), resolve(EmailSyncDebugStoreFailure::class));
 }
+
+it('uses the same retry schedule as the other email sync jobs', function (): void {
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create());
+
+    Queue::connection('database')->push(new StoreEmailJob($account, 'msg-policy'), '', 'emails-sync');
+
+    $payload = json_decode((string) DB::table('jobs')->value('payload'), true);
+
+    expect($payload['maxTries'])->toBe(3)
+        ->and($payload['maxExceptions'])->toBe(3)
+        ->and($payload['backoff'])->toBe('60,300,900');
+});
+
+it('reports a message as retrying after a store failure and clears it once stored', function (): void {
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'sync_inbox' => true,
+        'sync_sent' => true,
+    ]));
+
+    $failing = Mockery::mock(MailServiceInterface::class);
+    $failing->shouldReceive('fetchMessage')->once()->andThrow(new GoogleServiceException('Backend Error', 500));
+
+    $failingFactory = Mockery::mock(MailServiceFactoryInterface::class);
+    $failingFactory->shouldReceive('make')->once()->andReturn($failing);
+
+    expect(fn () => runStoreEmailJobWithQueue($account, 'msg-retry', $failingFactory, Mockery::mock(QueueJob::class)))
+        ->toThrow(GoogleServiceException::class)
+        ->and($account->retryingMessageCount())->toBe(1);
+
+    $succeeding = Mockery::mock(MailServiceInterface::class);
+    $succeeding->shouldReceive('fetchMessage')->once()->andReturn(inboundFetchedEmail('msg-retry'));
+
+    $succeedingFactory = Mockery::mock(MailServiceFactoryInterface::class);
+    $succeedingFactory->shouldReceive('make')->once()->andReturn($succeeding);
+
+    runStoreEmailJobWithQueue($account, 'msg-retry', $succeedingFactory, Mockery::mock(QueueJob::class));
+
+    expect($account->retryingMessageCount())->toBe(0)
+        ->and(Email::query()->where('connected_account_id', $account->id)->count())->toBe(1);
+});
+
+it('throws on a 429 for history import batch jobs so tries and backoff apply', function (): void {
+    $this->travelTo('2026-09-07 14:36:30');
+
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create());
+    $batch = Bus::batch([])->name('history')->allowFailures()->dispatch();
+
+    $service = Mockery::mock(MailServiceInterface::class);
+    $service->shouldReceive('fetchMessage')
+        ->once()
+        ->andThrow(gmailUserRateLimited('2026-09-07T14:51:30.000Z'));
+
+    $factory = Mockery::mock(MailServiceFactoryInterface::class);
+    $factory->shouldReceive('make')->once()->andReturn($service);
+
+    $queueJob = Mockery::mock(QueueJob::class);
+    $queueJob->shouldReceive('release')->never();
+
+    $job = (new StoreEmailJob($account, 'msg-batch-429'))->withBatchId($batch->id);
+    $job->setJob($queueJob);
+
+    $job->handle($factory, resolve(StoreEmailAction::class), resolve(EmailSyncDebugStoreFailure::class));
+})->throws(GoogleServiceException::class);
 
 it('releases until Google retry-after instead of failing a 429', function (): void {
     $this->travelTo('2026-09-07 14:36:30');
@@ -143,7 +233,7 @@ it('still fails when the provider error is not a rate limit', function (): void 
     $job = new StoreEmailJob($account, 'msg-500');
     $job->setJob($queueJob);
 
-    $job->handle($factory, resolve(StoreEmailAction::class));
+    $job->handle($factory, resolve(StoreEmailAction::class), resolve(EmailSyncDebugStoreFailure::class));
 })->throws(GoogleServiceException::class, 'Backend Error');
 
 it('adopts a pending Microsoft sent row when the canonical Graph id arrives', function (): void {
@@ -191,7 +281,7 @@ it('adopts a pending Microsoft sent row when the canonical Graph id arrives', fu
     $factory->shouldReceive('make')->once()->andReturn($service);
 
     $job = new StoreEmailJob($account, 'AAA1');
-    $job->handle($factory, resolve(StoreEmailAction::class));
+    $job->handle($factory, resolve(StoreEmailAction::class), resolve(EmailSyncDebugStoreFailure::class));
 
     expect(Email::query()->where('connected_account_id', $account->id)->count())->toBe(1)
         ->and($sent->refresh()->provider_message_id)->toBe('AAA1')
