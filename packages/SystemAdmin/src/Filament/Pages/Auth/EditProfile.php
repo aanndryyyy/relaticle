@@ -19,6 +19,7 @@ use Filament\Schemas\Schema;
 use Filament\Support\Enums\Size;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\Rule;
 use Livewire\Attributes\Locked;
 use Relaticle\SystemAdmin\Actions\Passkeys\DeletePasskey;
@@ -88,11 +89,9 @@ final class EditProfile extends BaseEditProfile
             ->icon(Heroicon::FingerPrint)
             ->link()
             ->schema([
-                OneTimeCodeInput::make('code')
-                    ->label(__('Enter the 6-digit code from the authenticator app'))
-                    ->required()
-                    ->rule($this->appAuthenticationCodeRule()),
+                $this->appAuthenticationCodeInput(),
             ])
+            ->rateLimit(5)
             // The ceremony runs in the browser, so the modal stays open until the
             // credential comes back; the view closes it.
             ->action(function (Action $action): void {
@@ -115,11 +114,9 @@ final class EditProfile extends BaseEditProfile
             ->size(Size::Small)
             ->color('danger')
             ->schema([
-                OneTimeCodeInput::make('code')
-                    ->label(__('Enter the 6-digit code from the authenticator app'))
-                    ->required()
-                    ->rule($this->appAuthenticationCodeRule()),
+                $this->appAuthenticationCodeInput(),
             ])
+            ->rateLimit(5)
             ->action(function (array $arguments, DeletePasskey $deletePasskey): void {
                 $administrator = $this->administrator();
 
@@ -158,21 +155,47 @@ final class EditProfile extends BaseEditProfile
             ]);
     }
 
-    /**
-     * Managing a sign-in credential needs the same proof as turning the second
-     * factor off, which Filament's own actions on this page take as a code.
-     */
+    private function appAuthenticationCodeInput(): OneTimeCodeInput
+    {
+        return OneTimeCodeInput::make('code')
+            ->label(__('Enter the 6-digit code from the authenticator app'))
+            ->required()
+            ->rule($this->appAuthenticationCodeRule());
+    }
+
+    // Mirrors Filament's DisableAppAuthenticationAction rule: managing a sign-in
+    // credential needs the same proof as turning the second factor off.
     private function appAuthenticationCodeRule(): Closure
     {
         return fn (): Closure => function (string $attribute, #[SensitiveParameter] mixed $value, Closure $fail): void {
-            $secret = $this->administrator()->getAppAuthenticationSecret();
+            $administrator = $this->administrator();
+            $rateLimitingKey = 'sysadmin-passkey-management:'.$administrator->getAuthIdentifier();
 
-            if (is_string($value) && filled($secret) && AppAuthentication::make()->verifyCode($value, $secret)) {
+            if (RateLimiter::tooManyAttempts($rateLimitingKey, maxAttempts: 5)) {
+                $fail(__('filament-panels::auth/multi-factor/app/actions/disable.modal.form.code.messages.rate_limited'));
+
+                return;
+            }
+
+            RateLimiter::hit($rateLimitingKey);
+
+            $secret = $administrator->getAppAuthenticationSecret();
+
+            if (is_string($value) && filled($secret) && $this->appAuthentication()->verifyCode($value, $secret, shouldPreventCodeReuse: true)) {
                 return;
             }
 
             $fail(__('filament-panels::auth/multi-factor/app/provider.login_form.code.messages.invalid'));
         };
+    }
+
+    // A fresh AppAuthentication::make() would silently drop a codeWindow() or
+    // recoverable() the panel configured.
+    private function appAuthentication(): AppAuthentication
+    {
+        $provider = Filament::getCurrentPanel()?->getMultiFactorAuthenticationProviders()['app'] ?? null;
+
+        return $provider instanceof AppAuthentication ? $provider : AppAuthentication::make();
     }
 
     private function administrator(): SystemAdministrator

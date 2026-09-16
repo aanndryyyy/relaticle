@@ -501,3 +501,48 @@ describe('Staff passkeys', function () {
         expect(SystemAdministratorPasskey::query()->where('credential_id', 'cascade-credential')->exists())->toBeFalse();
     });
 });
+
+describe('Passkey management proof of identity', function () {
+    beforeEach(function () {
+        Filament::setCurrentPanel('sysadmin');
+    });
+
+    it('refuses an authenticator code that was already spent on this account', function () {
+        $secret = app(Google2FA::class)->generateSecretKey(16);
+        $administrator = SystemAdministrator::factory()->create(['app_authentication_secret' => $secret]);
+        $this->actingAs($administrator, 'sysadmin');
+        $code = app(Google2FA::class)->getCurrentOtp($secret);
+
+        livewire(EditProfile::class)
+            ->callAction(TestAction::make('registerPasskey'), ['code' => $code])
+            ->assertHasNoActionErrors();
+
+        expect(session()->has(PasskeyRegistrationRequest::GRANT_KEY))->toBeTrue();
+
+        session()->forget(PasskeyRegistrationRequest::GRANT_KEY);
+
+        livewire(EditProfile::class)
+            ->callAction(TestAction::make('registerPasskey'), ['code' => $code])
+            ->assertHasActionErrors(['code']);
+
+        expect(session()->has(PasskeyRegistrationRequest::GRANT_KEY))->toBeFalse();
+    });
+
+    it('stops guessing authenticator codes after five attempts', function () {
+        $administrator = SystemAdministrator::factory()->create();
+        $this->actingAs($administrator, 'sysadmin');
+
+        foreach (range(1, 5) as $ignored) {
+            livewire(EditProfile::class)
+                ->callAction(TestAction::make('registerPasskey'), ['code' => '000000'])
+                ->assertHasActionErrors(['code']);
+        }
+
+        livewire(EditProfile::class)->callAction(TestAction::make('registerPasskey'), [
+            'code' => app(Google2FA::class)->getCurrentOtp($administrator->getAppAuthenticationSecret()),
+        ]);
+
+        expect(session()->has(PasskeyRegistrationRequest::GRANT_KEY))->toBeFalse();
+    });
+
+});
