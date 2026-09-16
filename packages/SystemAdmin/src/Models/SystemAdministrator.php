@@ -7,6 +7,10 @@ namespace Relaticle\SystemAdmin\Models;
 use Carbon\CarbonImmutable;
 use Database\Factories\SystemAdministratorFactory;
 use Exception;
+use Filament\Auth\MultiFactor\App\Concerns\InteractsWithAppAuthentication;
+use Filament\Auth\MultiFactor\App\Concerns\InteractsWithAppAuthenticationRecovery;
+use Filament\Auth\MultiFactor\App\Contracts\HasAppAuthentication;
+use Filament\Auth\MultiFactor\App\Contracts\HasAppAuthenticationRecovery;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Models\Contracts\HasAvatar;
 use Filament\Panel;
@@ -16,8 +20,11 @@ use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Laravel\Passkeys\Contracts\PasskeyUser;
+use Laravel\Passkeys\PasskeyAuthenticatable;
 use Laravel\Sanctum\HasApiTokens;
 use Relaticle\SystemAdmin\Enums\SystemAdministratorRole;
 
@@ -27,6 +34,8 @@ use Relaticle\SystemAdmin\Enums\SystemAdministratorRole;
  * @property string $email
  * @property string|null $timezone
  * @property string $password
+ * @property string|null $app_authentication_secret
+ * @property array<string>|null $app_authentication_recovery_codes
  * @property SystemAdministratorRole $role
  * @property CarbonImmutable|null $email_verified_at
  * @property string|null $remember_token
@@ -45,7 +54,7 @@ use Relaticle\SystemAdmin\Enums\SystemAdministratorRole;
     'remember_token',
 ])]
 #[Table(name: 'system_administrators')]
-final class SystemAdministrator extends Authenticatable implements FilamentUser, HasAvatar, MustVerifyEmail
+final class SystemAdministrator extends Authenticatable implements FilamentUser, HasAppAuthentication, HasAppAuthenticationRecovery, HasAvatar, MustVerifyEmail, PasskeyUser
 {
     use HasApiTokens;
 
@@ -53,7 +62,10 @@ final class SystemAdministrator extends Authenticatable implements FilamentUser,
     use HasFactory;
 
     use HasUlids;
+    use InteractsWithAppAuthentication;
+    use InteractsWithAppAuthenticationRecovery;
     use Notifiable;
+    use PasskeyAuthenticatable;
 
     /**
      * Get the attributes that should be cast.
@@ -89,6 +101,14 @@ final class SystemAdministrator extends Authenticatable implements FilamentUser,
         }
 
         return parent::hasVerifiedEmail();
+    }
+
+    /**
+     * @return HasMany<SystemAdministratorPasskey, $this>
+     */
+    public function passkeys(): HasMany
+    {
+        return $this->hasMany(SystemAdministratorPasskey::class, 'user_id');
     }
 
     public function getFilamentAvatarUrl(): ?string

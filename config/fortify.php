@@ -173,22 +173,19 @@ return [
     'passkeys' => [
         'relying_party_id' => config('app.app_panel_domain')
             ?: parse_url((string) config('app.url'), PHP_URL_HOST),
-        'allowed_origins' => [
-            (function (): string {
-                $appUrl = (string) config('app.url');
-                $panelDomain = config('app.app_panel_domain');
+        // The customer panel only: one shared list lets either panel's origin complete
+        // the other's ceremony. Staff use StaffWebAuthn::allowedOrigin().
+        'allowed_origins' => (function (): array {
+            $parsed = parse_url((string) config('app.url'));
+            $scheme = $parsed['scheme'] ?? 'https';
+            $port = isset($parsed['port']) ? ":{$parsed['port']}" : '';
 
-                if (! $panelDomain) {
-                    return $appUrl;
-                }
+            // Built from a host, never from APP_URL itself: an origin is scheme, host
+            // and port, and a trailing path never matches one.
+            $host = config('app.app_panel_domain') ?: ($parsed['host'] ?? null);
 
-                $parsed = parse_url($appUrl);
-                $scheme = $parsed['scheme'] ?? 'https';
-                $port = isset($parsed['port']) ? ":{$parsed['port']}" : '';
-
-                return "{$scheme}://{$panelDomain}{$port}";
-            })(),
-        ],
+            return $host ? ["{$scheme}://{$host}{$port}"] : [];
+        })(),
         'user_handle_secret' => env('PASSKEYS_USER_HANDLE_SECRET', config('app.key')),
         'timeout' => 60000,
     ],

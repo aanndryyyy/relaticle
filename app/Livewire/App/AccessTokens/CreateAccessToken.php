@@ -95,7 +95,7 @@ final class CreateAccessToken extends BaseLivewireComponent
                         Actions::make([
                             Action::make('create')
                                 ->label(__('access-tokens.actions.create'))
-                                ->submit('createToken'),
+                                ->action('createToken'),
                         ]),
                     ]),
             ])
