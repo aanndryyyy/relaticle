@@ -304,6 +304,19 @@ it('refuses an unsupported entity and a foreign attachment', function (): void {
     $this->get(route('chat.attachments.import', ['attachment' => $id, 'entity' => 'people']))->assertNotFound();
 });
 
+it('purges more than one stale attachment in a single sweep', function (): void {
+    $first = $this->postJson(route('chat.attachments.store'), ['file' => csvUpload(1)])->json();
+    $second = $this->postJson(route('chat.attachments.store'), ['file' => csvUpload(1)])->json();
+    Media::query()->whereIn('uuid', [$first['id'], $second['id']])->update(['created_at' => now()->subHours(25)]);
+
+    $this->artisan('chat:purge-unsent-attachments')
+        ->expectsOutputToContain('Purged 2 attachment(s).')
+        ->assertSuccessful();
+
+    expect(Media::query()->whereIn('uuid', [$first['id'], $second['id']])->exists())->toBeFalse()
+        ->and(AgentConversation::query()->whereKey([$first['conversation_id'], $second['conversation_id']])->exists())->toBeFalse();
+});
+
 it('purges unsent attachments older than a day with the conversation they opened, and keeps sent and fresh ones', function (): void {
     $staleUnsent = $this->postJson(route('chat.attachments.store'), ['file' => csvUpload(1)])->json();
     $staleSent = $this->postJson(route('chat.attachments.store'), ['file' => csvUpload(1)])->json();
