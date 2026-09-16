@@ -10,6 +10,7 @@ use Laravel\Passkeys\Exceptions\InvalidPasskeyException;
 use Laravel\Passkeys\Support\WebAuthn;
 use ParagonIE\ConstantTime\Base64UrlSafe;
 use Relaticle\SystemAdmin\Models\SystemAdministratorPasskey;
+use Throwable;
 use Webauthn\AuthenticatorAssertionResponse;
 use Webauthn\CredentialRecord;
 use Webauthn\PublicKeyCredential;
@@ -46,13 +47,19 @@ final readonly class VerifyPasskey
                 CredentialRecord::class,
             );
 
-            $verified = WebAuthn::assertionValidator()->check(
-                credentialRecord: $source,
-                authenticatorAssertionResponse: $response,
-                publicKeyCredentialRequestOptions: $options,
-                host: SystemAdministratorPasskey::relyingPartyId(),
-                userHandle: $source->userHandle,
-            );
+            // Forged assertion bytes surface as PHP warnings and bare
+            // InvalidArgumentExceptions, not only the documented WebauthnException.
+            try {
+                $verified = WebAuthn::assertionValidator()->check(
+                    credentialRecord: $source,
+                    authenticatorAssertionResponse: $response,
+                    publicKeyCredentialRequestOptions: $options,
+                    host: SystemAdministratorPasskey::relyingPartyId(),
+                    userHandle: $source->userHandle,
+                );
+            } catch (Throwable) {
+                throw InvalidPasskeyException::make('Unable to verify passkey. Please try again.');
+            }
 
             // Persisted after every use: the signature counter it carries is what
             // detects a cloned authenticator.
