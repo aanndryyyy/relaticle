@@ -184,4 +184,22 @@ it('shows a file sent on its own as a card with no empty text bubble', function 
     expect($bubble['cards'])->toBe(1)
         ->and($bubble['texts'])->toBe(0)
         ->and($bubble['label'])->toBe("contacts.csv\n40 rows");
+
+    $reloaded = $page->navigate("/app/{$workspace->slug}/chats/{$conversationId}")
+        ->waitForText('40 rows')
+        ->script(<<<'JS'
+            (() => {
+                const bubble = document.querySelector('[data-chat-context="conversation"] [data-user-bubble]');
+
+                return {
+                    cards: bubble.querySelectorAll('[data-user-attachment]').length,
+                    texts: bubble.querySelectorAll('[data-user-text]').length,
+                    label: bubble.innerText.trim(),
+                };
+            })()
+        JS);
+
+    expect($reloaded['cards'])->toBe(1)
+        ->and($reloaded['texts'])->toBe(0)
+        ->and($reloaded['label'])->toBe("contacts.csv\n40 rows");
 });

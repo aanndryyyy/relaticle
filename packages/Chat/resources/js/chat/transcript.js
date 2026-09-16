@@ -1246,9 +1246,10 @@ export const transcriptModule = ({ messagesUrl, messageSearchUrlTemplate, messag
     },
 
     // A file sent on its own says everything the turn has to say, so the text
-    // bubble would paint as an empty pill above the card.
+    // bubble would paint as an empty pill beside the card. Measured on the
+    // rendered output: a stored turn carries an empty paragraph, not "".
     showsTextBubble(message) {
-        return !message.attachment || (message.content ?? '').trim() !== '';
+        return !message.attachment || htmlToText(this.renderMessageContent(message)) !== '';
     },
 
     attachmentRowLabel(count) {
