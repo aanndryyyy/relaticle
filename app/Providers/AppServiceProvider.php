@@ -464,7 +464,7 @@ final class AppServiceProvider extends ServiceProvider
             $workspace = new Workspace;
             $workspace->forceFill(['id' => 'scribe-workspace-id', 'name' => 'Scribe Workspace', 'user_id' => $user->id, 'personal_workspace' => true]);
             $workspace->setRelation('owner', $user);
-            $workspace->setRelation('users', collect());
+            $workspace->setRelation('users', $user->newCollection());
 
             $user->forceFill(['current_workspace_id' => $workspace->id]);
             $user->setRelation('currentWorkspace', $workspace);
