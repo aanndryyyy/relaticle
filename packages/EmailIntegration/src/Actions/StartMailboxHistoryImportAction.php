@@ -26,14 +26,10 @@ final readonly class StartMailboxHistoryImportAction
 
         $lock = Cache::lock($this->mailboxHistoryImport->lockKey($account), 60);
 
-        if (! $lock->get()) {
-            throw new RuntimeException('A mailbox history import is already starting for this account.');
-        }
+        throw_unless($lock->get(), RuntimeException::class, 'A mailbox history import is already starting for this account.');
 
         try {
-            if ($account->sync_cursor === null && $this->mailboxHistoryImport->isRunning($account)) {
-                throw new RuntimeException('A mailbox history import is already running for this account.');
-            }
+            throw_if($account->sync_cursor === null && $this->mailboxHistoryImport->isRunning($account), RuntimeException::class, 'A mailbox history import is already running for this account.');
 
             $hadSyncCursor = $account->sync_cursor !== null;
 

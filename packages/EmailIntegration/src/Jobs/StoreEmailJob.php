@@ -40,13 +40,13 @@ final class StoreEmailJob implements ShouldBeUnique, ShouldQueue
         public readonly string $messageId,
     ) {
         $this->onQueue('emails-sync');
-        $this->backoff = self::resolveStoreBackoff();
+        $this->backoff = $this->resolveStoreBackoff();
     }
 
     /**
      * @return list<int>
      */
-    private static function resolveStoreBackoff(): array
+    private function resolveStoreBackoff(): array
     {
         $configured = Config::array('email-integration.sync.store_backoff');
 
@@ -75,7 +75,7 @@ final class StoreEmailJob implements ShouldBeUnique, ShouldQueue
     public function middleware(): array
     {
         return [
-            (new WithoutOverlapping($this->uniqueId()))
+            new WithoutOverlapping($this->uniqueId())
                 ->releaseAfter(15)
                 ->expireAfter(300),
         ];

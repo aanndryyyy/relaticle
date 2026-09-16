@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Relaticle\EmailIntegration\Jobs\Concerns;
 
+use Illuminate\Bus\Batchable;
 use Relaticle\EmailIntegration\Services\ProviderRateLimit;
 use RuntimeException;
 use Throwable;
@@ -18,9 +19,7 @@ trait ReleasesOnProviderRateLimit
             return false;
         }
 
-        if ($this->shouldFailBatchJobOnProviderRateLimit()) {
-            throw new RuntimeException("Mailbox is rate limited for {$seconds} more seconds.");
-        }
+        throw_if($this->shouldFailBatchJobOnProviderRateLimit(), RuntimeException::class, "Mailbox is rate limited for {$seconds} more seconds.");
 
         $this->release($seconds);
 
@@ -52,7 +51,7 @@ trait ReleasesOnProviderRateLimit
      */
     protected function shouldFailBatchJobOnProviderRateLimit(): bool
     {
-        if (! method_exists($this, 'batch')) {
+        if (! in_array(Batchable::class, class_uses_recursive(static::class), true)) {
             return false;
         }
 

@@ -55,7 +55,7 @@ final readonly class MailboxHistoryImportService
         }
 
         if ($batch->totalJobs === 0) {
-            return $account->sync_cursor === null;
+            return false;
         }
 
         return ! $this->batchIsComplete($batch);
@@ -198,7 +198,9 @@ final readonly class MailboxHistoryImportService
             return 0;
         }
 
-        return min(100, (int) round(($this->batchProcessedJobCount($batch) / $batch->totalJobs) * 100));
+        $percent = (int) round(($this->batchProcessedJobCount($batch) / $batch->totalJobs) * 100);
+
+        return max(0, min(100, $percent));
     }
 
     private function historyImportBatch(ConnectedAccount $account): ?Batch

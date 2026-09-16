@@ -468,7 +468,7 @@ final class ConnectedAccount extends Model
             }
         }
 
-        if ($this->isImportingHistory() && ! filled($this->history_import_batch_id)) {
+        if ($this->isImportingHistory() && blank($this->history_import_batch_id)) {
             return $this->initialSyncProgressPercent();
         }
 
