@@ -564,12 +564,8 @@ final class ProcessChatMessage implements ShouldQueue
         TurnPresence::clear($this->conversationId, $this->turnId);
     }
 
-    /**
-     * The setup greeting: a continuation that resumes nothing. There is no user
-     * turn to make coherent, and a persisted error row would satisfy
-     * StartSetupGreeting's empty-thread guard forever, so the owner would never
-     * be greeted. Leaving the thread empty is what lets the next open retry.
-     */
+    // The setup greeting, the one continuation that resumes nothing. A row
+    // persisted here satisfies StartSetupGreeting's empty-thread guard forever.
     private function opensTheThread(): bool
     {
         return $this->isContinuation && $this->resumesTurnId === null;

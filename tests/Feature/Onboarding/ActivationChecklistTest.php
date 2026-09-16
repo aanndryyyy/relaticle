@@ -63,6 +63,13 @@ function seedSampleRecords(Workspace $workspace, User $owner): void
     }
 }
 
+function expectSampleRecordsIntact(Workspace $workspace): void
+{
+    foreach ([Company::class, People::class, Opportunity::class, Task::class, Note::class] as $model) {
+        expect($model::query()->where('workspace_id', $workspace->getKey())->where('creation_source', CreationSource::SYSTEM)->exists())->toBeTrue();
+    }
+}
+
 it('starts every step incomplete in a fresh workspace', function (): void {
     livewire(ActivationChecklist::class)
         ->assertSeeHtml(stepState('first_record', false))
@@ -428,9 +435,7 @@ it('refuses removal while the workspace has no own record', function (): void {
         ->call('removeSampleData')
         ->assertStatus(422);
 
-    foreach ([Company::class, People::class, Opportunity::class, Task::class, Note::class] as $model) {
-        expect($model::query()->where('workspace_id', $this->workspace->getKey())->where('creation_source', CreationSource::SYSTEM)->exists())->toBeTrue();
-    }
+    expectSampleRecordsIntact($this->workspace);
 });
 
 it('hides the checklist from a non-owner admin and refuses the call', function (): void {
@@ -460,9 +465,7 @@ it('hides the checklist from a non-owner admin and refuses the call', function (
         expect($exception->getStatusCode())->toBe(403);
     }
 
-    foreach ([Company::class, People::class, Opportunity::class, Task::class, Note::class] as $model) {
-        expect($model::query()->where('workspace_id', $this->workspace->getKey())->where('creation_source', CreationSource::SYSTEM)->exists())->toBeTrue();
-    }
+    expectSampleRecordsIntact($this->workspace);
 });
 
 it('refuses removal from the owner of a different workspace', function (): void {
@@ -477,17 +480,8 @@ it('refuses removal from the owner of a different workspace', function (): void 
         expect($exception->getStatusCode())->toBe(403);
     }
 
-    foreach ([Company::class, People::class, Opportunity::class, Task::class, Note::class] as $model) {
-        expect($model::query()->where('workspace_id', $this->workspace->getKey())->where('creation_source', CreationSource::SYSTEM)->exists())->toBeTrue();
-    }
+    expectSampleRecordsIntact($this->workspace);
 });
-
-it('refuses sample removal from a member', function (): void {
-    $member = User::factory()->create();
-    $this->workspace->users()->attach($member, ['role' => WorkspaceRole::Editor->value]);
-
-    resolve(RemoveSampleData::class)->execute($member, $this->workspace);
-})->throws(HttpException::class);
 
 it('refuses the removeSampleData call from a member through the component', function (): void {
     seedSampleRecords($this->workspace, $this->owner);
@@ -507,7 +501,5 @@ it('refuses the removeSampleData call from a member through the component', func
         ->call('removeSampleData')
         ->assertStatus(403);
 
-    foreach ([Company::class, People::class, Opportunity::class, Task::class, Note::class] as $model) {
-        expect($model::query()->where('workspace_id', $this->workspace->getKey())->where('creation_source', CreationSource::SYSTEM)->exists())->toBeTrue();
-    }
+    expectSampleRecordsIntact($this->workspace);
 });

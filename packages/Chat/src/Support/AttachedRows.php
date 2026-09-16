@@ -13,17 +13,11 @@ final readonly class AttachedRows
 
     public const int CELL_LIMIT = 200;
 
-    /**
-     * The row cap alone bounds height, not width: 25 rows of a 2,000-column
-     * file still assemble megabytes of prompt, which then replays on every
-     * later turn in the conversation. A file over this goes to the wizard,
-     * the same door a file over the row cap takes.
-     */
-    public const int INLINE_CHAR_LIMIT = 65536;
+    // The row cap bounds height, not width: 25 rows of a 2,000-column file
+    // still assemble megabytes that replay on every later turn. Bytes, not
+    // characters, because the queue payload and the content column meter bytes.
+    public const int INLINE_BYTE_LIMIT = 65536;
 
-    /**
-     * The inlined message, or null when the file belongs in the import wizard.
-     */
     public static function inline(string $text, ChatAttachment $attachment): ?string
     {
         if ($attachment->rowCount() > self::INLINE_ROW_LIMIT) {
@@ -32,7 +26,7 @@ final readonly class AttachedRows
 
         $block = self::block($attachment);
 
-        if (mb_strlen($block) > self::INLINE_CHAR_LIMIT) {
+        if (strlen($block) > self::INLINE_BYTE_LIMIT) {
             return null;
         }
 
@@ -40,7 +34,7 @@ final readonly class AttachedRows
     }
 
     // The block is the tail of the content and holds no blank line, so the
-    // last "\n\n" before the lead is append()'s separator, never typed text.
+    // last "\n\n" before the lead is inline()'s separator, never typed text.
     public static function typedText(string $content): string
     {
         $marker = 'Attached file "';

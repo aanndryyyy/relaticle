@@ -11,9 +11,8 @@ return new class extends Migration
 {
     public function up(): void
     {
-        // bpchar to varchar is a function cast, so this rewrites the table and
-        // both its indexes under ACCESS EXCLUSIVE. Bounded so an in-flight media
-        // write cannot queue every read of the table behind a pending lock.
+        // bpchar to varchar is a function cast, so this rewrites the table under
+        // ACCESS EXCLUSIVE; unbounded, one in-flight write blocks every read.
         DB::statement("SET LOCAL lock_timeout = '5s'");
 
         Schema::table('media', function (Blueprint $table): void {
