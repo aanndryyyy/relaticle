@@ -95,7 +95,8 @@ use Relaticle\Ink\Models\Post;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
 use SocialiteProviders\Manager\SocialiteWasCalled;
 use SocialiteProviders\Microsoft\MicrosoftExtendSocialite;
-use Spatie\Activitylog\Facades\Activity as ActivityLogger;
+use Spatie\Activitylog\Contracts\Activity as ActivityContract;
+use Spatie\Activitylog\Support\PendingActivityLog;
 use Spatie\LaravelMarkdown\MarkdownRenderer;
 use Spatie\Onboard\OnboardingSteps;
 
@@ -310,8 +311,9 @@ final class AppServiceProvider extends ServiceProvider
      */
     private function configureActivityLog(): void
     {
-        ActivityLogger::beforeLogging(function (ActivityModel $activity): void {
-            if (blank($activity->getAttribute('batch_uuid'))) {
+        // The facade resolves authentication before hostname-specific sessions are configured.
+        PendingActivityLog::beforeLogging(function (ActivityContract $activity): void {
+            if ($activity instanceof ActivityModel && blank($activity->getAttribute('batch_uuid'))) {
                 $activity->setAttribute('batch_uuid', $this->app->make(RequestActivityBatch::class)->id());
             }
         });
