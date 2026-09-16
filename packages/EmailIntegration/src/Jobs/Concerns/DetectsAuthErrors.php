@@ -59,6 +59,11 @@ trait DetectsAuthErrors
         return false;
     }
 
+    protected function authErrorLastError(): string
+    {
+        return __('filament/pages/email-accounts.errors.reauth_required');
+    }
+
     /**
      * Extract an HTTP status from any exception that carries an HTTP response,
      * independent of the client library (Laravel HTTP, Guzzle/PSR-18, or SDKs

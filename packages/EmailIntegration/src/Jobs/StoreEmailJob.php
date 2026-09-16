@@ -125,7 +125,7 @@ final class StoreEmailJob implements ShouldBeUnique, ShouldQueue
                 ? EmailAccountStatus::REAUTH_REQUIRED
                 : EmailAccountStatus::ERROR,
             'last_error' => $this->isAuthError($exception)
-                ? $exception->getMessage()
+                ? $this->authErrorLastError()
                 : __('filament/pages/email-accounts.errors.import_store_failed'),
         ]);
     }

@@ -161,7 +161,9 @@ final class EnsureCalendarPushChannelJob implements ShouldBeUnique, ShouldQueue
 
         $account->update([
             'status' => $this->isAuthError($exception) ? EmailAccountStatus::REAUTH_REQUIRED : $account->status,
-            'last_error' => 'Calendar push notifications could not be renewed: '.$exception->getMessage(),
+            'last_error' => $this->isAuthError($exception)
+                ? $this->authErrorLastError()
+                : 'Calendar push notifications could not be renewed: '.$exception->getMessage(),
         ]);
     }
 }

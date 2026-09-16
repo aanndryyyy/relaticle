@@ -81,6 +81,7 @@ return [
     'errors' => [
         'import_store_failed' => 'Some emails could not be imported during sync.',
         'import_store_failed_with_count' => '{1}One email could not be imported during sync.|[2,*]:count emails could not be imported during sync.',
+        'reauth_required' => 'This account needs to be reconnected.',
     ],
     'default_badge' => 'Default',
     'sections' => [

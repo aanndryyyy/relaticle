@@ -89,7 +89,9 @@ final class InitialEmailSyncJob implements ShouldBeUnique, ShouldQueue
     {
         $this->connectedAccount->update([
             'status' => $this->isAuthError($exception) ? EmailAccountStatus::REAUTH_REQUIRED : EmailAccountStatus::ERROR,
-            'last_error' => $exception->getMessage(),
+            'last_error' => $this->isAuthError($exception)
+                ? $this->authErrorLastError()
+                : $exception->getMessage(),
         ]);
     }
 
