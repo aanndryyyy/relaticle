@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace Relaticle\SystemAdmin;
 
 use Exception;
-use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Facades\Filament;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -34,6 +33,7 @@ use Illuminate\View\Middleware\ShareErrorsFromSession;
 use Relaticle\Ink\InkPlugin;
 use Relaticle\Ink\Models\Category;
 use Relaticle\Ink\Models\Post;
+use Relaticle\SystemAdmin\Auth\RequiredAppAuthentication;
 use Relaticle\SystemAdmin\Filament\Pages\Auth\EditProfile;
 use Relaticle\SystemAdmin\Filament\Pages\Dashboard;
 use Relaticle\SystemAdmin\Http\Controllers\PasskeyLoginController;
@@ -41,6 +41,7 @@ use Relaticle\SystemAdmin\Http\Controllers\PasskeyRegistrationController;
 use Relaticle\SystemAdmin\Http\Middleware\DenySearchIndexing;
 use Relaticle\SystemAdmin\Http\Middleware\RequireSecondFactor;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
+use Relaticle\SystemAdmin\Models\SystemAdministratorPasskey;
 use Relaticle\SystemAdmin\Policies\CategoryPolicy;
 use Relaticle\SystemAdmin\Policies\PostPolicy;
 
@@ -147,7 +148,7 @@ final class SystemAdminPanelProvider extends PanelProvider
             // A SuperAdministrator password reaches every customer's data and, through
             // impersonation, a signed-in session as any of them.
             ->multiFactorAuthentication(
-                AppAuthentication::make()->recoverable(),
+                RequiredAppAuthentication::make()->recoverable(),
                 isRequired: true,
             )
             ->multiFactorAuthenticationRequiredMiddlewareName(RequireSecondFactor::class)
@@ -239,7 +240,9 @@ final class SystemAdminPanelProvider extends PanelProvider
             })
             ->renderHook(
                 PanelsRenderHook::AUTH_LOGIN_FORM_AFTER,
-                fn (): View => view('system-admin::auth.passkey-login'),
+                fn (): View|string => SystemAdministratorPasskey::hasDedicatedRelyingParty()
+                    ? view('system-admin::auth.passkey-login')
+                    : '',
             )
             ->renderHook(
                 PanelsRenderHook::AUTH_LOGIN_FORM_BEFORE,

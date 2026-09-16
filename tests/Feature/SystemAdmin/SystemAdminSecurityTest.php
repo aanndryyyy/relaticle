@@ -9,6 +9,7 @@ use App\Models\People;
 use App\Models\Task;
 use App\Models\User;
 use App\Models\Workspace;
+use Filament\Actions\Action;
 use Filament\Actions\Testing\TestAction;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Auth\Pages\Login;
@@ -534,6 +535,36 @@ describe('Staff passkeys', function () {
 describe('Passkey management proof of identity', function () {
     beforeEach(function () {
         Filament::setCurrentPanel('sysadmin');
+        config()->set('app.sysadmin_domain', 'sysadmin.example.test');
+    });
+
+    it('never offers to turn the required factor off, but keeps recovery codes regenerable', function () {
+        $this->actingAs(SystemAdministrator::factory()->create(), 'sysadmin');
+
+        $names = array_map(
+            fn (Action $action): string => $action->getName(),
+            Filament::getPanel('sysadmin')->getMultiFactorAuthenticationProviders()['app']->getActions(),
+        );
+
+        expect($names)->not->toContain('disableAppAuthentication')
+            ->and($names)->toContain('regenerateAppAuthenticationRecoveryCodes');
+    });
+
+    it('offers no passkey registration while staff and customer credentials share a relying party', function () {
+        config()->set('app.sysadmin_domain', null);
+        $this->actingAs(SystemAdministrator::factory()->create(), 'sysadmin');
+
+        expect(SystemAdministratorPasskey::hasDedicatedRelyingParty())->toBeFalse();
+
+        livewire(EditProfile::class)->assertActionHidden(TestAction::make('registerPasskey'));
+    });
+
+    it('offers passkey registration once the panel has its own relying party', function () {
+        $this->actingAs(SystemAdministrator::factory()->create(), 'sysadmin');
+
+        expect(SystemAdministratorPasskey::hasDedicatedRelyingParty())->toBeTrue();
+
+        livewire(EditProfile::class)->assertActionVisible(TestAction::make('registerPasskey'));
     });
 
     it('refuses an authenticator code that was already spent on this account', function () {

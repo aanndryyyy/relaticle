@@ -7,6 +7,7 @@ namespace Relaticle\SystemAdmin\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Laravel\Passkeys\Passkey;
+use Laravel\Passkeys\Passkeys;
 
 /**
  * @property string $user_id
@@ -32,6 +33,17 @@ final class SystemAdministratorPasskey extends Passkey
         }
 
         return (string) parse_url((string) config('app.url'), PHP_URL_HOST);
+    }
+
+    /**
+     * Whether a browser can tell a staff credential from a customer one. Sharing a
+     * relying party means the sign-in picker offers both and the staff endpoint
+     * rejects whichever customer credential it is handed, so the feature is offered
+     * only once SYSADMIN_DOMAIN separates the two.
+     */
+    public static function hasDedicatedRelyingParty(): bool
+    {
+        return self::relyingPartyId() !== Passkeys::relyingPartyId();
     }
 
     /**

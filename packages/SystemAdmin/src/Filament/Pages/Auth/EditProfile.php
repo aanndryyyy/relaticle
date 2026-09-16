@@ -88,6 +88,7 @@ final class EditProfile extends BaseEditProfile
             ->modalSubmitActionLabel(__('Continue'))
             ->icon(Heroicon::FingerPrint)
             ->link()
+            ->visible(fn (): bool => SystemAdministratorPasskey::hasDedicatedRelyingParty())
             ->schema([
                 $this->appAuthenticationCodeInput(),
             ])
@@ -149,6 +150,9 @@ final class EditProfile extends BaseEditProfile
             ->description(__('Sign in with a device unlock instead of a password and a code.'))
             ->compact()
             ->secondary()
+            // Still shown without a dedicated relying party when credentials already
+            // exist, so they stay removable after the panel moves back onto one host.
+            ->visible(fn (): bool => SystemAdministratorPasskey::hasDedicatedRelyingParty() || filled($this->passkeys))
             ->schema([
                 View::make('system-admin::profile.passkeys'),
                 ActionsComponent::make([$this->registerPasskeyAction()]),
