@@ -67,10 +67,11 @@ authored a message is its `origin` column, owned by `MessageOrigin`: the saved r
 only the enum's short `opener()`, and the instructions for the turn travel in a `<turn>`
 block of `dynamicInstructions()`, so they are never stored or replayed. The job hands the
 origin to the store through `Context::scope()`, and `SupersededAwareConversationStore`
-writes it in the same insert as the row. "Typed by the user" has one owner,
-`TypedMessages` (the `typed()` scope delegates to it). A new reader that filters user
-rows any other way is the bug this design removed: `sentBy()` once skipped the filter and
-tagged users `has-ai-usage` who had only seen the greeting. The setup greeting
+writes it in the same insert as the row. "Typed by the user" is the `typed()` scope on
+`AgentConversationMessage`, and "not synthetic" is `withoutSynthetic()`; the transcript
+(`visibleTo()`) and conversation search read through the latter. A new reader that
+filters user rows any other way is the bug this design removed: `sentBy()` once skipped
+the filter and tagged users `has-ai-usage` who had only seen the greeting. The setup greeting
 (`StartSetupGreeting`) uses the same mechanism with `MessageOrigin::Greeting`.
 Prompt and UI follow from this: the assistant must never ask the user to say "continue"
 or "next", and a decided proposal card collapses to one line (pending stays fully

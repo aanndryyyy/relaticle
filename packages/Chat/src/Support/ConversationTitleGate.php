@@ -6,6 +6,7 @@ namespace Relaticle\Chat\Support;
 
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Relaticle\Chat\Models\AgentConversationMessage;
 
 /**
  * The single definition of "this conversation may still be auto-titled".
@@ -120,9 +121,11 @@ final readonly class ConversationTitleGate
      */
     private static function typedMessages(string $conversationId): Collection
     {
-        return TypedMessages::apply(DB::table('agent_conversation_messages'))
+        return AgentConversationMessage::query()
+            ->typed()
             ->where('conversation_id', $conversationId)
             ->orderBy('id')
+            ->toBase()
             ->get(['content', 'meta'])
             ->map(function (object $row): string {
                 $meta = $row->meta === null ? null : json_decode((string) $row->meta, true);

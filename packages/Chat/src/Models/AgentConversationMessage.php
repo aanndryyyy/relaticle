@@ -15,7 +15,6 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Relaticle\Chat\Enums\MessageOrigin;
-use Relaticle\Chat\Support\TypedMessages;
 
 /**
  * Read model over the laravel/ai message store. Backs the SystemAdmin
@@ -63,7 +62,18 @@ final class AgentConversationMessage extends Model
     #[Scope]
     protected function typed(Builder $query): void
     {
-        TypedMessages::apply($query->getQuery());
+        $query->where('role', 'user')
+            ->where('origin', MessageOrigin::Typed->value);
+    }
+
+    /** @param Builder<self> $query */
+    #[Scope]
+    protected function withoutSynthetic(Builder $query): void
+    {
+        $query->where(function (Builder $visible): void {
+            $visible->where('role', '<>', 'user')
+                ->orWhere('origin', MessageOrigin::Typed->value);
+        });
     }
 
     /** @param Builder<self> $query */
@@ -71,9 +81,27 @@ final class AgentConversationMessage extends Model
     protected function sentBy(Builder $query, User $user): void
     {
         $query->where('participant_type', $user->getMorphClass())
-            ->where('participant_id', (string) $user->getKey());
+            ->where('participant_id', (string) $user->getKey())
+            ->typed();
+    }
 
-        TypedMessages::apply($query->getQuery());
+    /** @param Builder<self> $query */
+    #[Scope]
+    protected function ownedBy(Builder $query, User $user): void
+    {
+        $query->where('participant_type', $user->getMorphClass())
+            ->where('participant_id', (string) $user->getKey())
+            ->whereRelation('conversation', 'workspace_id', $user->current_workspace_id);
+    }
+
+    /** @param Builder<self> $query */
+    #[Scope]
+    protected function visibleTo(Builder $query, User $user, string $conversationId): void
+    {
+        $query->where('conversation_id', $conversationId)
+            ->ownedBy($user)
+            ->whereNull('superseded_at')
+            ->withoutSynthetic();
     }
 
     /**

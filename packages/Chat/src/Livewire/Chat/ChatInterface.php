@@ -8,19 +8,18 @@ use App\Actions\Onboarding\StartSetupGreeting;
 use App\Livewire\BaseLivewireComponent;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\Date;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Renderless;
 use Relaticle\Chat\Actions\FindConversation;
 use Relaticle\Chat\Actions\ListConversationMessages;
 use Relaticle\Chat\Enums\MessageOrigin;
 use Relaticle\Chat\Enums\PendingActionStatus;
+use Relaticle\Chat\Models\AgentConversationMessage;
 use Relaticle\Chat\Models\PendingAction;
 use Relaticle\Chat\Support\DisplayBlocks;
 use Relaticle\Chat\Support\NextSteps;
 use Relaticle\Chat\Support\RecordReferenceResolver;
 use Relaticle\Chat\Support\TitleSanitizer;
-use Relaticle\Chat\Support\TranscriptScope;
 use Relaticle\Chat\Support\TurnPresence;
 
 final class ChatInterface extends BaseLivewireComponent
@@ -316,11 +315,13 @@ final class ChatInterface extends BaseLivewireComponent
 
         $user = $this->authUser();
 
-        $row = TranscriptScope::apply(DB::table('agent_conversation_messages as m'), $user, $conversationId)
-            ->where('m.role', 'assistant')
-            ->latest('m.created_at')
-            ->orderByDesc('m.id')
-            ->first(['m.id', 'm.content', 'm.tool_results', 'm.meta']);
+        $row = AgentConversationMessage::query()
+            ->visibleTo($user, $conversationId)
+            ->where('role', 'assistant')
+            ->latest()
+            ->orderByDesc('id')
+            ->toBase()
+            ->first(['id', 'content', 'tool_results', 'meta']);
 
         if ($row === null) {
             return null;

@@ -5,15 +5,16 @@ declare(strict_types=1);
 namespace Relaticle\Chat\Actions;
 
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Relaticle\Chat\Models\AgentConversationMessage;
 use Relaticle\Chat\Support\AttachedRows;
 use Relaticle\Chat\Support\DisplayBlocks;
 use Relaticle\Chat\Support\MarkdownRenderer;
 use Relaticle\Chat\Support\NextSteps;
 use Relaticle\Chat\Support\RecordReferenceResolver;
-use Relaticle\Chat\Support\TranscriptScope;
 use stdClass;
 
 final readonly class ListConversationMessages
@@ -28,20 +29,13 @@ final readonly class ListConversationMessages
      */
     public function execute(User $user, string $conversationId, ?string $beforeMessageId = null, int $limit = 50): array
     {
-        $query = TranscriptScope::apply(
-            DB::table('agent_conversation_messages as m'),
-            $user,
-            $conversationId,
-        );
-
-        if ($beforeMessageId !== null) {
-            $query->where('m.id', '<', $beforeMessageId);
-        }
-
-        $messages = $query
-            ->orderByDesc('m.id')
+        $messages = AgentConversationMessage::query()
+            ->visibleTo($user, $conversationId)
+            ->when($beforeMessageId !== null, fn (Builder $query): Builder => $query->where('id', '<', $beforeMessageId))
+            ->orderByDesc('id')
             ->limit($limit)
-            ->get(['m.id', 'm.role', 'm.content', 'm.document', 'm.tool_results', 'm.meta', 'm.created_at'])
+            ->toBase()
+            ->get(['id', 'role', 'content', 'document', 'tool_results', 'meta', 'created_at'])
             ->reverse()
             ->values();
 
