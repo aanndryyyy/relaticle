@@ -10,6 +10,7 @@ use App\Http\Middleware\RedirectToPrimaryHost;
 use App\Http\Middleware\RequireIdentityConfirmation;
 use App\Http\Middleware\RequireOperationGrant;
 use App\Http\Middleware\SetApiWorkspaceContext;
+use App\Http\Middleware\StopImpersonationOnLogout;
 use App\Http\Middleware\SubdomainRootResponse;
 use App\Http\Middleware\ThrottleBeforeAuthentication;
 use App\Http\Middleware\ValidateSignature;
@@ -98,6 +99,7 @@ return Application::configure(basePath: dirname(__DIR__))
                 'auth.context',
                 RedirectToPrimaryHost::class,
                 EnsureAuthenticationComplete::class,
+                StopImpersonationOnLogout::class,
             ],
         );
 

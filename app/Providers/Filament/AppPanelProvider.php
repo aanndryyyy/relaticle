@@ -29,6 +29,7 @@ use App\Http\Middleware\CheckScheduledDeletion;
 use App\Http\Middleware\DenySearchIndexing;
 use App\Http\Middleware\EnsureAuthenticationComplete;
 use App\Http\Middleware\EnsureHostedWorkspaceAccess;
+use App\Http\Middleware\StopImpersonationOnLogout;
 use App\Listeners\SwitchWorkspace;
 use App\Livewire\App\AppDatabaseNotifications;
 use App\Livewire\App\AppSidebar;
@@ -36,6 +37,7 @@ use App\Livewire\App\Profile\ScheduledDeletionInterstitial;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Support\BrandColors;
+use App\Support\Impersonation\Impersonator;
 use App\Support\SupportForms;
 use Asmit\ResizedColumn\ResizedColumnPlugin;
 use Exception;
@@ -338,6 +340,7 @@ final class AppPanelProvider extends PanelProvider
             ->authPasswordBroker('users')
             ->authMiddleware([
                 Authenticate::class,
+                StopImpersonationOnLogout::class,
                 EnsureAuthenticationComplete::class,
                 CheckScheduledDeletion::class,
             ])
@@ -390,6 +393,22 @@ final class AppPanelProvider extends PanelProvider
             ->renderHook(
                 PanelsRenderHook::HEAD_END,
                 fn (): View|Factory => view('filament.app.analytics')
+            )
+            /**
+             * BODY_START rather than a topbar slot: the banner has to be present on
+             * every page of the panel, including the ones that render no topbar.
+             */
+            ->renderHook(
+                PanelsRenderHook::BODY_START,
+                function (): View|Factory|string {
+                    $user = $this->signedInUser();
+
+                    if (! $user instanceof User || ! resolve(Impersonator::class)->active(request())) {
+                        return '';
+                    }
+
+                    return view('filament.app.impersonation-banner', ['user' => $user]);
+                }
             )
             /**
              * The sidebar collapse toggle is panel chrome, so the panel owns it.

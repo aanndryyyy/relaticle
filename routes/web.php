@@ -22,6 +22,8 @@ use App\Http\Controllers\ComparisonController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\Dev\MailPreviewController;
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\Impersonation\StartImpersonationController;
+use App\Http\Controllers\Impersonation\StopImpersonationController;
 use App\Http\Controllers\JoinWorkspaceViaLinkController;
 use App\Http\Controllers\Mail\UnsubscribeController;
 use App\Http\Controllers\Media\ShowMediaController;
@@ -158,6 +160,17 @@ Route::middleware([ProvideMarkdownResponse::class, AddVaryAcceptHeader::class])-
 });
 
 Route::get('/dashboard', fn () => redirect()->to(url()->getAppUrl()))->name('dashboard');
+
+// Minted on the sysadmin host, consumed on the app host: the two keep separate
+// sessions, so the signed link carries the administrator instead of a guard.
+Route::prefix('impersonate')->group(function (): void {
+    Route::get('/{user}', StartImpersonationController::class)
+        ->middleware('signed:relative')
+        ->name('impersonation.start');
+
+    Route::delete('/', StopImpersonationController::class)
+        ->name('impersonation.stop');
+});
 
 Route::middleware(['auth', 'verified', 'no-referrer', AuthenticateSession::class])->group(function (): void {
     // Separate buckets: a shared one lets repeated views of the invite page

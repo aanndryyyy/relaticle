@@ -43,6 +43,7 @@ use App\Support\ActivityLog\RequestActivityBatch;
 use App\Support\BrandColors;
 use App\Support\CustomFields\CustomFieldInput;
 use App\Support\CustomFields\RecordNameResolver;
+use App\Support\Impersonation\Impersonator;
 use App\Support\Markdown\TableAwareLeagueDriver;
 use App\Support\Media\MediaLookup;
 use App\Support\Passport\ClientRepository;
@@ -67,7 +68,10 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Request;
+use Illuminate\Log\Context\Repository as ContextRepository;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades;
+use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -313,8 +317,29 @@ final class AppServiceProvider extends ServiceProvider
     {
         // The facade resolves authentication before hostname-specific sessions are configured.
         PendingActivityLog::beforeLogging(function (ActivityContract $activity): void {
-            if ($activity instanceof ActivityModel && blank($activity->getAttribute('batch_uuid'))) {
+            if (! $activity instanceof ActivityModel) {
+                return;
+            }
+
+            if (blank($activity->getAttribute('batch_uuid'))) {
                 $activity->setAttribute('batch_uuid', $this->app->make(RequestActivityBatch::class)->id());
+            }
+
+            // The causer stays the impersonated user because the record is theirs.
+            $administratorId = $this->app->make(Impersonator::class)->administratorId(request())
+                ?? Context::getHidden('impersonated_by');
+
+            if (is_string($administratorId)) {
+                $activity->properties = ($activity->properties ?? new Collection)
+                    ->put('impersonated_by', $administratorId);
+            }
+        });
+
+        Context::dehydrating(function (ContextRepository $context): void {
+            $administratorId = $this->app->make(Impersonator::class)->administratorId(request());
+
+            if ($administratorId !== null) {
+                $context->addHidden('impersonated_by', $administratorId);
             }
         });
 
@@ -323,6 +348,11 @@ final class AppServiceProvider extends ServiceProvider
 
     private function configurePolicies(): void
     {
+        // The impersonation routes are plain web routes, so the panel-scoped policy
+        // discovery below never runs for them.
+        Gate::define('impersonate', fn (Authenticatable $account): bool => $account instanceof SystemAdministrator
+            && $account->role->canImpersonate());
+
         Gate::guessPolicyNamesUsing(function (string $modelClass): ?string {
             try {
                 $currentPanelId = Filament::getCurrentPanel()?->getId();

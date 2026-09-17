@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Filament\Pages\Auth\Login;
+use App\Models\ActivityLog\Activity;
+use App\Models\ActivityLog\Scopes\WorkspaceScope;
 use App\Models\User;
 use Filament\Auth\Pages\Login as StaffLogin;
 use Filament\Facades\Filament;
@@ -26,6 +28,7 @@ use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 use PragmaRX\Google2FAQRCode\Google2FA;
 use Relaticle\Ink\Models\Post;
+use Relaticle\SystemAdmin\Filament\Resources\UserResource\Pages\ViewUser;
 use Relaticle\SystemAdmin\Http\Middleware\EnsureAuthenticationContext;
 use Relaticle\SystemAdmin\Http\Middleware\IsolateAuthenticationSession;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
@@ -599,4 +602,75 @@ it('requires second factor enrollment on an existing staff Livewire page', funct
             'calls' => [['path' => '', 'method' => '$refresh', 'params' => []]],
         ]],
     ])->assertRedirect(Filament::getPanel('sysadmin')->getSetUpRequiredMultiFactorAuthenticationUrl());
+});
+
+function mintImpersonationLink(SystemAdministrator $administrator, User $customer): string
+{
+    Filament::setCurrentPanel('sysadmin');
+    test()->actingAs($administrator, 'sysadmin');
+
+    $exceptions = Exceptions::getFacadeRoot();
+    $handler = $exceptions->handler();
+
+    $link = livewire(ViewUser::class, ['record' => $customer->getKey()])
+        ->callAction('impersonate')
+        ->effects['redirect'];
+
+    $exceptions->setHandler($handler);
+
+    return $link;
+}
+
+it('hands an impersonation from the staff host to the customer host', function (): void {
+    $cookies = [];
+    $administrator = SystemAdministrator::factory()->create();
+    $customer = User::factory()->withWorkspace()->create();
+
+    signInIsolatedStaff($cookies, $administrator);
+    $link = mintImpersonationLink($administrator, $customer);
+
+    expect(parse_url($link, PHP_URL_HOST))->toBe('app.example.test');
+
+    isolatedAuthRequest($cookies, 'GET', $link)->assertRedirect('https://app.example.test');
+    isolatedAuthRequest($cookies, 'GET', 'https://app.example.test/passkeys/confirm/options')->assertOk();
+
+    expect(DB::table('sessions')->where('user_id', $customer->id)->exists())->toBeTrue()
+        ->and(DB::table('system_administrator_sessions')->where('user_id', $administrator->id)->exists())->toBeTrue();
+});
+
+it('refuses the impersonation link on the staff host and a second use on the customer host', function (): void {
+    $cookies = [];
+    $administrator = SystemAdministrator::factory()->create();
+    $customer = User::factory()->withWorkspace()->create();
+
+    signInIsolatedStaff($cookies, $administrator);
+    $link = mintImpersonationLink($administrator, $customer);
+
+    isolatedAuthRequest($cookies, 'GET', str_replace('app.example.test', 'staff.example.test', $link))->assertNotFound();
+    isolatedAuthRequest($cookies, 'GET', $link)->assertRedirect();
+
+    $replayed = [];
+    isolatedAuthRequest($replayed, 'GET', $link)->assertForbidden();
+
+    expect(DB::table('sessions')->where('user_id', $customer->id)->count())->toBe(1);
+});
+
+it('returns to the staff host on stop and credits both records to the administrator', function (): void {
+    $cookies = [];
+    $administrator = SystemAdministrator::factory()->create();
+    $customer = User::factory()->withWorkspace()->create();
+
+    signInIsolatedStaff($cookies, $administrator);
+    isolatedAuthRequest($cookies, 'GET', mintImpersonationLink($administrator, $customer))->assertRedirect();
+
+    isolatedAuthRequest($cookies, 'DELETE', 'https://app.example.test/impersonate')
+        ->assertRedirect('https://staff.example.test/users');
+
+    $events = Activity::withoutGlobalScope(WorkspaceScope::class)
+        ->whereIn('event', ['impersonation_started', 'impersonation_stopped'])
+        ->get();
+
+    expect($events)->toHaveCount(2)
+        ->and($events->pluck('causer_id')->unique()->all())->toBe([$administrator->getKey()])
+        ->and(DB::table('sessions')->where('user_id', $customer->id)->exists())->toBeFalse();
 });
