@@ -7,7 +7,6 @@ namespace App\Http\Controllers\Impersonation;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Support\Impersonation\Impersonator;
-use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -20,7 +19,7 @@ final readonly class StartImpersonationController
     {
         $administrator = $this->impersonator->administrator($request->query('administrator'));
 
-        abort_unless($administrator instanceof Authenticatable, 403);
+        abort_if($administrator === null, 403);
         abort_unless(Gate::forUser($administrator)->allows('impersonate'), 403);
 
         $target = User::query()->findOrFail($user);

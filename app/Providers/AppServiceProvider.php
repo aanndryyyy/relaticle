@@ -323,8 +323,7 @@ final class AppServiceProvider extends ServiceProvider
                 $activity->setAttribute('batch_uuid', $this->app->make(RequestActivityBatch::class)->id());
             }
 
-            // Causer stays the impersonated user, because the record is theirs. Without
-            // this tag nothing distinguishes a support write from one they made.
+            // The causer stays the impersonated user because the record is theirs.
             $administratorId = $this->app->make(Impersonator::class)->administratorId(request());
 
             if ($administratorId !== null) {

@@ -21,11 +21,8 @@ final readonly class Impersonator
 
     private const string PREVIOUS_USER_ID = 'impersonation.previous_user_id';
 
-    /**
-     * Laravel's and Filament's AuthenticateSession both key off the default guard
-     * name and only write the hash when it is absent, so swapping the user without
-     * rewriting it logs the target straight back out.
-     */
+    // AuthenticateSession only writes the hash when absent, so a stale one logs the
+    // assumed user straight back out.
     private const string PASSWORD_HASH = 'password_hash_web';
 
     public function start(Request $request, string $administratorId, User $target): void
@@ -139,15 +136,8 @@ final readonly class Impersonator
             ->log($event);
     }
 
-    /**
-     * Swaps the web guard's user without firing Login or Logout. Login writes
-     * `last_login_at`, which feeds the engagement buckets and the Mailcoach
-     * subscriber tags; logout cycles the remember token, signing the customer
-     * out of every device they stayed signed in on.
-     *
-     * Proofs are session-scoped, so they are cleared and re-stamped as at login;
-     * the administrator's authority stands in for the assumed user's second factor.
-     */
+    // Never login()/logout(): Login stamps last_login_at (engagement, Mailcoach tags) and
+    // Logout cycles the remember token, signing the customer out of every device.
     private function assume(Session $session, User $user): void
     {
         $guard = Auth::guard('web');
