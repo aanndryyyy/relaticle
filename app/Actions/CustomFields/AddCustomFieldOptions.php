@@ -6,6 +6,7 @@ namespace App\Actions\CustomFields;
 
 use App\Models\CustomField;
 use App\Models\User;
+use App\Support\CustomFieldDefinitionValidator;
 use Illuminate\Database\Eloquent\Model;
 use Relaticle\CustomFields\Models\Scopes\CustomFieldsActivableScope;
 use Relaticle\CustomFields\Services\TenantContextService;
@@ -17,20 +18,20 @@ final readonly class AddCustomFieldOptions
      */
     public function execute(User $user, array $data): Model
     {
-        abort_unless($user->ownsTeam($user->currentTeam), 403, 'Only team owners can manage custom field definitions.');
+        abort_unless($user->ownsWorkspace($user->currentWorkspace), 403, 'Only workspace owners can manage custom field definitions.');
 
         $fieldId = $data['_record_id'] ?? null;
 
         abort_if(! is_string($fieldId) && ! is_int($fieldId), 422, 'Missing field ID (_record_id).');
 
-        $teamId = $user->currentTeam->getKey();
+        $workspaceId = $user->currentWorkspace->getKey();
         $previousTenantId = TenantContextService::getCurrentTenantId();
-        TenantContextService::setTenantId($teamId);
+        TenantContextService::setTenantId($workspaceId);
 
         try {
             $field = CustomField::query()
                 ->withoutGlobalScope(CustomFieldsActivableScope::class)
-                ->where('tenant_id', $teamId)
+                ->where('tenant_id', $workspaceId)
                 ->findOrFail($fieldId);
 
             abort_unless(
@@ -39,25 +40,15 @@ final readonly class AddCustomFieldOptions
                 "Field type \"{$field->type}\" does not support options. Only select, multi-select, radio, checkbox-list, and toggle-buttons fields can have options.",
             );
 
-            $newOptions = is_array($data['options'] ?? null) ? $data['options'] : [];
-            abort_if($newOptions === [], 422, 'At least one option must be provided.');
+            // Re-validated here, not just at proposal time: options approved after the
+            // same labels were added elsewhere must fail rather than write duplicates.
+            $validated = CustomFieldDefinitionValidator::forNewOptions($user, $field, $data);
 
-            $maxOptions = (int) config('chat.max_field_options', 50);
-            $existingCount = $field->options()->withoutGlobalScopes()->count();
-
-            abort_if(
-                ($existingCount + count($newOptions)) > $maxOptions,
-                422,
-                "Adding these options would exceed the limit of {$maxOptions} options per field.",
-            );
-
-            $tenantKey = config('custom-fields.database.column_names.tenant_foreign_key');
             $nextSortOrder = (int) $field->options()->withoutGlobalScopes()->max('sort_order') + 1;
 
-            foreach (array_values($newOptions) as $index => $option) {
-                $optionName = is_array($option) ? (string) ($option['name'] ?? '') : (string) $option;
+            foreach (array_column($validated['options'], 'name') as $index => $optionName) {
                 $field->options()->create([
-                    $tenantKey => $teamId,
+                    config('custom-fields.database.column_names.tenant_foreign_key') => $workspaceId,
                     'name' => $optionName,
                     'sort_order' => $nextSortOrder + $index,
                 ]);

@@ -19,13 +19,15 @@ RUN composer install \
 ###########################################
 # Stage 2: Build frontend assets
 ###########################################
-FROM node:22-alpine AS frontend
+FROM node:26-alpine AS frontend
 
 WORKDIR /app
 
-# Copy package files and install
-COPY package.json package-lock.json ./
-RUN npm ci --ignore-scripts
+# Corepack is gone from Node 25+, and letting pnpm fetch its own pinned version
+# needs glibc, so install the exact version package.json already pins.
+COPY package.json pnpm-lock.yaml ./
+RUN npm install -g "$(node -p 'require("./package.json").packageManager')" \
+    && pnpm install --frozen-lockfile --ignore-scripts
 
 # Copy source files needed for build
 COPY vite.config.js ./
@@ -36,12 +38,12 @@ COPY packages ./packages
 # Copy vendor for Filament theme CSS
 COPY --from=composer /app/vendor ./vendor
 
-RUN npm run build
+RUN pnpm run build
 
 ###########################################
 # Stage 3: Production image
 ###########################################
-FROM serversideup/php:8.4-fpm-nginx AS production
+FROM serversideup/php:8.5-fpm-nginx AS production
 
 LABEL org.opencontainers.image.title="Relaticle CRM"
 LABEL org.opencontainers.image.description="Modern, open-source CRM platform"

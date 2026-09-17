@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace App\Filament\Resources;
 
 use App\Enums\CreationSource;
+use App\Enums\CrmEntity;
+use App\Filament\Components\Forms\WorkspaceMemberSelect;
+use App\Filament\Components\RecordChip;
+use App\Filament\Components\Tables\RecordChipColumn;
 use App\Filament\Exports\CompanyExporter;
 use App\Filament\Resources\CompanyResource\Pages\ListCompanies;
 use App\Filament\Resources\CompanyResource\Pages\ViewCompany;
@@ -20,7 +24,6 @@ use Filament\Actions\ForceDeleteBulkAction;
 use Filament\Actions\RestoreAction;
 use Filament\Actions\RestoreBulkAction;
 use Filament\Actions\ViewAction;
-use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
@@ -28,7 +31,9 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
+use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Relaticle\CustomFields\Facades\CustomFields;
 
@@ -38,7 +43,7 @@ final class CompanyResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'name';
 
-    protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-home-modern';
+    protected static string|\BackedEnum|null $navigationIcon = null;
 
     protected static ?int $navigationSort = 2;
 
@@ -48,12 +53,11 @@ final class CompanyResource extends Resource
             ->components([
                 TextInput::make('name')
                     ->required(),
-                Select::make('account_owner_id')
+                WorkspaceMemberSelect::make('account_owner_id')
                     ->relationship('accountOwner', 'name')
                     ->label(__('filament/resources/company.fields.account_owner_id.label'))
-                    ->nullable()
-                    ->preload()
-                    ->searchable(),
+                    ->default(fn (): ?string => auth()->user()?->id)
+                    ->nullable(),
 
                 CustomFields::form()->build()->columnSpanFull()->columns(1),
             ]);
@@ -63,12 +67,11 @@ final class CompanyResource extends Resource
     {
         return $table
             ->columns([
-                TextColumn::make('name')
+                RecordChipColumn::make('name')
                     ->label(__('filament/resources/company.fields.name.label'))
                     ->searchable()
-                    ->sortable()
-                    ->view('filament.tables.columns.logo-name-column'),
-                TextColumn::make('accountOwner.name')
+                    ->sortable(),
+                RecordChipColumn::make('accountOwner.name')
                     ->label(__('filament/resources/company.fields.account_owner.label'))
                     ->searchable()
                     ->sortable()
@@ -90,9 +93,13 @@ final class CompanyResource extends Resource
                     ->searchable()
                     ->sortable()
                     ->toggleable(),
+                // "2 hours ago" is the friendlier read, but it was the one datetime in the
+                // panel a user could not check: no absolute value and no tooltip. Keep the
+                // relative label and put the exact time behind a hover.
                 TextColumn::make('updated_at')
                     ->label(__('filament/resources/company.fields.updated_at.label'))
                     ->since()
+                    ->dateTimeTooltip()
                     ->searchable()
                     ->sortable()
                     ->toggleable(),
@@ -148,15 +155,30 @@ final class CompanyResource extends Resource
         return __('filament/resources/company.navigation_label');
     }
 
+    public static function getNavigationIcon(): string
+    {
+        return CrmEntity::Company->icon();
+    }
+
     public static function getGloballySearchableAttributes(): array
     {
         return ['name'];
     }
 
+    public static function getGlobalSearchResultTitle(Model $record): Htmlable
+    {
+        return RecordChip::forRecord($record);
+    }
+
+    public static function getGlobalSearchEloquentQuery(): Builder
+    {
+        return parent::getGlobalSearchEloquentQuery()->with('media');
+    }
+
     public static function getEloquentQuery(): Builder
     {
         return parent::getEloquentQuery()
-            ->with(['customFieldValues.customField.options'])
+            ->with(['accountOwner', 'media', 'customFieldValues.customField.options'])
             ->withoutGlobalScopes([
                 SoftDeletingScope::class,
             ]);

@@ -7,7 +7,7 @@
 <script>
 window.addEventListener('load', function() {
     function normalizeUrl(pathname) {
-        // Panel-level pages carry no tenant slug — track them as-is so the
+        // Panel-level pages carry no tenant slug, so track them as-is and the
         // auth funnel (/login, /register, …) doesn't collapse into /dashboard.
         var tenantless = ['/login', '/register', '/forgot-password', '/password-reset', '/email-verification', '/two-factor-authentication', '/new', '/logout'];
         for (var i = 0; i < tenantless.length; i++) {
@@ -16,7 +16,7 @@ window.addEventListener('load', function() {
             }
         }
 
-        // Remove tenant slug: /my-team/people → /people
+        // Remove tenant slug: /my-workspace/people → /people
         pathname = pathname.replace(/^\/[^\/]+/, '');
 
         // Normalize record IDs (numeric or ULID) out of paths:
@@ -44,6 +44,18 @@ window.addEventListener('load', function() {
     setTimeout(function () {
         if (typeof fathom !== 'undefined') {
             fathom.trackEvent('signup');
+        }
+    }, 150);
+    @endif
+
+    @if(session()->pull('fathom.track_workspace_created'))
+    // One-time conversion event, flagged when the onboarding wizard finishes.
+    // The workspaces table already records that a workspace exists; what this adds
+    // is the referrer still attached to the session, so a channel can be
+    // credited with an activated workspace and not just a signup.
+    setTimeout(function () {
+        if (typeof fathom !== 'undefined') {
+            fathom.trackEvent('workspace_created');
         }
     }, 150);
     @endif

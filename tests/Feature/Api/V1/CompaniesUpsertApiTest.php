@@ -16,20 +16,20 @@ mutates(
 );
 
 beforeEach(function (): void {
-    $this->user = User::factory()->withPersonalTeam()->create();
-    $this->team = $this->user->personalTeam();
+    $this->user = User::factory()->withPersonalWorkspace()->create();
+    $this->workspace = $this->user->personalWorkspace();
 });
 
 /**
  * @param  array<int, array<string, string>>  $validationRules
  */
-function createCompanyCustomField(string $teamId, string $code, string $type, array $validationRules = []): CustomField
+function createCompanyCustomField(string $workspaceId, string $code, string $type, array $validationRules = []): CustomField
 {
     return CustomField::forceCreate([
-        'tenant_id' => $teamId,
+        'tenant_id' => $workspaceId,
         'custom_field_section_id' => CustomField::query()
             ->withoutGlobalScopes()
-            ->where('tenant_id', $teamId)
+            ->where('tenant_id', $workspaceId)
             ->where('entity_type', 'company')
             ->firstOrFail()
             ->custom_field_section_id,
@@ -62,7 +62,7 @@ it('creates a company and returns 201 when no company carries that name', functi
 
     $response->assertCreated()->assertValid();
 
-    $this->assertDatabaseHas('companies', ['name' => 'Acme Corp', 'team_id' => $this->team->id]);
+    $this->assertDatabaseHas('companies', ['name' => 'Acme Corp', 'workspace_id' => $this->workspace->id]);
 });
 
 it('matches an existing company by name case-insensitively and returns 200', function (): void {
@@ -73,7 +73,7 @@ it('matches an existing company by name case-insensitively and returns 200', fun
         'name' => 'Acme Corp',
     ])->assertCreated();
 
-    $companiesBefore = Company::query()->withoutGlobalScopes()->where('team_id', $this->team->id)->count();
+    $companiesBefore = Company::query()->withoutGlobalScopes()->where('workspace_id', $this->workspace->id)->count();
 
     $response = $this->postJson('/api/v1/companies/upsert', [
         'match' => ['field' => 'name', 'value' => 'acme corp'],
@@ -85,7 +85,7 @@ it('matches an existing company by name case-insensitively and returns 200', fun
 
     expect($response->json('data.id'))->toBe($created->json('data.id'))
         ->and($response->json('data.attributes.name'))->toBe('Acme Corporation')
-        ->and(Company::query()->withoutGlobalScopes()->where('team_id', $this->team->id)->count())
+        ->and(Company::query()->withoutGlobalScopes()->where('workspace_id', $this->workspace->id)->count())
         ->toBe($companiesBefore);
 });
 
@@ -129,9 +129,9 @@ it('merges custom fields on update without wiping unmapped fields', function ():
         ->toBe(['acme.com']);
 });
 
-it('does not match a company in another team', function (): void {
-    $otherUser = User::factory()->withPersonalTeam()->create();
-    $otherTeam = $otherUser->personalTeam();
+it('does not match a company in another workspace', function (): void {
+    $otherUser = User::factory()->withPersonalWorkspace()->create();
+    $otherWorkspace = $otherUser->personalWorkspace();
 
     Sanctum::actingAs($otherUser);
 
@@ -151,15 +151,15 @@ it('does not match a company in another team', function (): void {
 
     expect($response->json('data.id'))->not->toBe($foreign->json('data.id'));
 
-    $this->assertDatabaseHas('companies', ['id' => $foreign->json('data.id'), 'team_id' => $otherTeam->id]);
+    $this->assertDatabaseHas('companies', ['id' => $foreign->json('data.id'), 'workspace_id' => $otherWorkspace->id]);
 });
 
 it('picks the oldest company when more than one carries the name', function (): void {
-    $oldest = Company::factory()->recycle([$this->user, $this->team])->create([
+    $oldest = Company::factory()->recycle([$this->user, $this->workspace])->create([
         'name' => 'Acme Corp',
         'created_at' => now()->subDays(3),
     ]);
-    Company::factory()->recycle([$this->user, $this->team])->create([
+    Company::factory()->recycle([$this->user, $this->workspace])->create([
         'name' => 'acme corp',
         'created_at' => now()->subDay(),
     ]);
@@ -208,7 +208,7 @@ it('refuses a token that can create but not update', function (): void {
         ])
         ->assertForbidden();
 
-    $this->assertDatabaseMissing('companies', ['name' => 'Acme Corp', 'team_id' => $this->team->id]);
+    $this->assertDatabaseMissing('companies', ['name' => 'Acme Corp', 'workspace_id' => $this->workspace->id]);
 });
 
 it('accepts a token holding both create and update', function (): void {
@@ -225,7 +225,7 @@ it('accepts a token holding both create and update', function (): void {
 it('rejects a boolean-backed match field instead of failing on the query', function (): void {
     Sanctum::actingAs($this->user);
 
-    // `icp` is a seeded toggle field present on every team, so this is reachable
+    // `icp` is a seeded toggle field present on every workspace, so this is reachable
     // with no customization at all. Comparing it to a string used to reach the
     // database and raise a driver error.
     $this->postJson('/api/v1/companies/upsert', [
@@ -235,11 +235,11 @@ it('rejects a boolean-backed match field instead of failing on the query', funct
         ->assertUnprocessable()
         ->assertInvalid(['match.field']);
 
-    $this->assertDatabaseMissing('companies', ['name' => 'Acme Corp', 'team_id' => $this->team->id]);
+    $this->assertDatabaseMissing('companies', ['name' => 'Acme Corp', 'workspace_id' => $this->workspace->id]);
 });
 
 it('rejects a numeric-backed match field', function (): void {
-    createCompanyCustomField($this->team->id, 'headcount', 'number');
+    createCompanyCustomField($this->workspace->id, 'headcount', 'number');
 
     Sanctum::actingAs($this->user);
 
@@ -252,7 +252,7 @@ it('rejects a numeric-backed match field', function (): void {
 });
 
 it('rejects a single-choice match field rather than silently creating a duplicate', function (): void {
-    createCompanyCustomField($this->team->id, 'tier', 'select');
+    createCompanyCustomField($this->workspace->id, 'tier', 'select');
 
     Sanctum::actingAs($this->user);
 
@@ -267,7 +267,7 @@ it('rejects a single-choice match field rather than silently creating a duplicat
 });
 
 it('updates a matched company when a required custom field is omitted', function (): void {
-    createCompanyCustomField($this->team->id, 'industry', 'text', [['name' => 'required']]);
+    createCompanyCustomField($this->workspace->id, 'industry', 'text', [['name' => 'required']]);
 
     Sanctum::actingAs($this->user);
 
@@ -292,7 +292,7 @@ it('updates a matched company when a required custom field is omitted', function
 it('does not let the upsert route shadow the show route', function (): void {
     Sanctum::actingAs($this->user);
 
-    $company = Company::factory()->recycle([$this->user, $this->team])->create();
+    $company = Company::factory()->recycle([$this->user, $this->workspace])->create();
 
     $this->getJson("/api/v1/companies/{$company->id}")
         ->assertOk()

@@ -8,8 +8,8 @@ use App\Http\Middleware\EnsureTokenHasAbility;
 use App\Models\Company;
 use App\Models\CustomField;
 use App\Models\People;
-use App\Models\Team;
 use App\Models\User;
+use App\Models\Workspace;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Laravel\Passport\AccessToken;
@@ -23,15 +23,15 @@ mutates(
 );
 
 beforeEach(function (): void {
-    $this->user = User::factory()->withPersonalTeam()->create();
-    $this->team = $this->user->personalTeam();
+    $this->user = User::factory()->withPersonalWorkspace()->create();
+    $this->workspace = $this->user->personalWorkspace();
 });
 
-function upsertCustomField(string $teamId, string $entityType, string $code): CustomField
+function upsertCustomField(string $workspaceId, string $entityType, string $code): CustomField
 {
     return CustomField::query()
         ->withoutGlobalScopes()
-        ->where('tenant_id', $teamId)
+        ->where('tenant_id', $workspaceId)
         ->where('entity_type', $entityType)
         ->where('code', $code)
         ->firstOrFail();
@@ -43,14 +43,14 @@ function upsertCustomField(string $teamId, string $entityType, string $code): Cu
  * The API path refuses duplicates on `emails` (unique_per_entity_type), so the
  * ambiguous-match fixture cannot be built through it.
  */
-function writeUpsertCustomFieldValue(string $teamId, string $entityType, string $entityId, string $code, mixed $value): void
+function writeUpsertCustomFieldValue(string $workspaceId, string $entityType, string $entityId, string $code, mixed $value): void
 {
     DB::table('custom_field_values')->insert([
         'id' => (string) Str::ulid(),
-        'tenant_id' => $teamId,
+        'tenant_id' => $workspaceId,
         'entity_type' => $entityType,
         'entity_id' => $entityId,
-        'custom_field_id' => upsertCustomField($teamId, $entityType, $code)->getKey(),
+        'custom_field_id' => upsertCustomField($workspaceId, $entityType, $code)->getKey(),
         'json_value' => json_encode($value),
     ]);
 }
@@ -60,13 +60,13 @@ function writeUpsertCustomFieldValue(string $teamId, string $entityType, string 
  * Maxforms connector actually presents.
  *
  * Mirrors the helper in OAuthTokenAbilitiesApiTest: Passport::actingAs() mints a
- * detached token with no backing row, whose team_id could never resolve in
- * SetApiTeamContext, so the row the consent flow would have written is inserted
+ * detached token with no backing row, whose workspace_id could never resolve in
+ * SetApiWorkspaceContext, so the row the consent flow would have written is inserted
  * and the token pointed at it.
  *
  * @param  list<string>  $scopes
  */
-function actAsUpsertOAuthClient(User $user, array $scopes, Team $team): void
+function actAsUpsertOAuthClient(User $user, array $scopes, Workspace $workspace): void
 {
     $client = Client::query()->forceCreate([
         'id' => (string) Str::uuid(),
@@ -84,7 +84,7 @@ function actAsUpsertOAuthClient(User $user, array $scopes, Team $team): void
         'id' => $tokenId,
         'user_id' => $user->getKey(),
         'client_id' => $client->getKey(),
-        'team_id' => $team->getKey(),
+        'workspace_id' => $workspace->getKey(),
         'name' => 'REST Connector',
         'scopes' => json_encode($scopes),
         'revoked' => false,
@@ -124,7 +124,7 @@ it('creates a person and returns 201 when nothing matches', function (): void {
 
     expect($response->json('data.attributes.name'))->toBe('Grace Hopper');
 
-    $this->assertDatabaseHas('people', ['name' => 'Grace Hopper', 'team_id' => $this->team->id]);
+    $this->assertDatabaseHas('people', ['name' => 'Grace Hopper', 'workspace_id' => $this->workspace->id]);
 });
 
 it('updates the matched person and returns 200 when the email array contains the value', function (): void {
@@ -137,7 +137,7 @@ it('updates the matched person and returns 200 when the email array contains the
     ])->assertCreated();
 
     $personId = $created->json('data.id');
-    $peopleBefore = People::query()->withoutGlobalScopes()->where('team_id', $this->team->id)->count();
+    $peopleBefore = People::query()->withoutGlobalScopes()->where('workspace_id', $this->workspace->id)->count();
 
     $response = $this->postJson('/api/v1/people/upsert', [
         'match' => ['field' => 'emails', 'value' => 'grace@navy.mil'],
@@ -149,7 +149,7 @@ it('updates the matched person and returns 200 when the email array contains the
 
     expect($response->json('data.id'))->toBe($personId)
         ->and($response->json('data.attributes.name'))->toBe('Grace Hopper (Rear Admiral)')
-        ->and(People::query()->withoutGlobalScopes()->where('team_id', $this->team->id)->count())
+        ->and(People::query()->withoutGlobalScopes()->where('workspace_id', $this->workspace->id)->count())
         ->toBe($peopleBefore);
 });
 
@@ -236,9 +236,9 @@ it('matches on a single-value custom field stored in its own column', function (
     expect($response->json('data.id'))->toBe($created->json('data.id'));
 });
 
-it('does not match a person in another team', function (): void {
-    $otherUser = User::factory()->withPersonalTeam()->create();
-    $otherTeam = $otherUser->personalTeam();
+it('does not match a person in another workspace', function (): void {
+    $otherUser = User::factory()->withPersonalWorkspace()->create();
+    $otherWorkspace = $otherUser->personalWorkspace();
 
     Sanctum::actingAs($otherUser);
 
@@ -262,16 +262,16 @@ it('does not match a person in another team', function (): void {
 
     expect($response->json('data.id'))->not->toBe($foreignId);
 
-    $this->assertDatabaseHas('people', ['id' => $foreignId, 'name' => 'Foreign Grace', 'team_id' => $otherTeam->id]);
-    $this->assertDatabaseHas('people', ['id' => $response->json('data.id'), 'team_id' => $this->team->id]);
+    $this->assertDatabaseHas('people', ['id' => $foreignId, 'name' => 'Foreign Grace', 'workspace_id' => $otherWorkspace->id]);
+    $this->assertDatabaseHas('people', ['id' => $response->json('data.id'), 'workspace_id' => $this->workspace->id]);
 });
 
 it('picks the oldest record when more than one matches', function (): void {
-    $oldest = People::factory()->recycle([$this->user, $this->team])->create(['created_at' => now()->subDays(3)]);
-    $newer = People::factory()->recycle([$this->user, $this->team])->create(['created_at' => now()->subDay()]);
+    $oldest = People::factory()->recycle([$this->user, $this->workspace])->create(['created_at' => now()->subDays(3)]);
+    $newer = People::factory()->recycle([$this->user, $this->workspace])->create(['created_at' => now()->subDay()]);
 
-    writeUpsertCustomFieldValue($this->team->id, 'people', $oldest->id, 'emails', ['grace@navy.mil']);
-    writeUpsertCustomFieldValue($this->team->id, 'people', $newer->id, 'emails', ['grace@navy.mil']);
+    writeUpsertCustomFieldValue($this->workspace->id, 'people', $oldest->id, 'emails', ['grace@navy.mil']);
+    writeUpsertCustomFieldValue($this->workspace->id, 'people', $newer->id, 'emails', ['grace@navy.mil']);
 
     Sanctum::actingAs($this->user);
 
@@ -308,7 +308,7 @@ it('rejects a match field belonging to another entity type', function (): void {
 });
 
 it('rejects an inactive match field', function (): void {
-    upsertCustomField($this->team->id, 'people', 'job_title')->forceFill(['active' => false])->save();
+    upsertCustomField($this->workspace->id, 'people', 'job_title')->forceFill(['active' => false])->save();
 
     Sanctum::actingAs($this->user);
 
@@ -339,12 +339,12 @@ describe('token abilities', function (): void {
             ])
             ->assertForbidden();
 
-        $this->assertDatabaseMissing('people', ['name' => 'Grace Hopper', 'team_id' => $this->team->id]);
+        $this->assertDatabaseMissing('people', ['name' => 'Grace Hopper', 'workspace_id' => $this->workspace->id]);
     });
 
     it('refuses a token that can create but not update from mutating a matched record', function (): void {
-        $person = People::factory()->recycle([$this->user, $this->team])->create(['name' => 'Grace Hopper']);
-        writeUpsertCustomFieldValue($this->team->id, 'people', $person->id, 'emails', ['grace@navy.mil']);
+        $person = People::factory()->recycle([$this->user, $this->workspace])->create(['name' => 'Grace Hopper']);
+        writeUpsertCustomFieldValue($this->workspace->id, 'people', $person->id, 'emails', ['grace@navy.mil']);
 
         $token = $this->user->createToken('create-only', ['create'])->plainTextToken;
 
@@ -382,18 +382,18 @@ describe('token abilities', function (): void {
     });
 
     it('refuses an oauth token scoped to create only', function (): void {
-        actAsUpsertOAuthClient($this->user, ['create'], $this->team);
+        actAsUpsertOAuthClient($this->user, ['create'], $this->workspace);
 
         $this->postJson('/api/v1/people/upsert', [
             'match' => ['field' => 'emails', 'value' => 'grace@navy.mil'],
             'name' => 'Grace Hopper',
         ])->assertForbidden();
 
-        $this->assertDatabaseMissing('people', ['name' => 'Grace Hopper', 'team_id' => $this->team->id]);
+        $this->assertDatabaseMissing('people', ['name' => 'Grace Hopper', 'workspace_id' => $this->workspace->id]);
     });
 
     it('accepts an oauth token scoped to both create and update', function (): void {
-        actAsUpsertOAuthClient($this->user, ['create', 'update'], $this->team);
+        actAsUpsertOAuthClient($this->user, ['create', 'update'], $this->workspace);
 
         $this->postJson('/api/v1/people/upsert', [
             'match' => ['field' => 'emails', 'value' => 'grace@navy.mil'],
@@ -401,14 +401,14 @@ describe('token abilities', function (): void {
             'custom_fields' => ['emails' => ['grace@navy.mil']],
         ])->assertCreated();
 
-        $this->assertDatabaseHas('people', ['name' => 'Grace Hopper', 'team_id' => $this->team->id]);
+        $this->assertDatabaseHas('people', ['name' => 'Grace Hopper', 'workspace_id' => $this->workspace->id]);
     });
 });
 
 it('does not let the upsert route shadow the show route', function (): void {
     Sanctum::actingAs($this->user);
 
-    $person = People::factory()->recycle([$this->user, $this->team])->create(['name' => 'Routable']);
+    $person = People::factory()->recycle([$this->user, $this->workspace])->create(['name' => 'Routable']);
 
     $this->getJson("/api/v1/people/{$person->id}")
         ->assertOk()
@@ -418,7 +418,7 @@ it('does not let the upsert route shadow the show route', function (): void {
 it('associates the person with a company on create', function (): void {
     Sanctum::actingAs($this->user);
 
-    $company = Company::factory()->recycle([$this->user, $this->team])->create();
+    $company = Company::factory()->recycle([$this->user, $this->workspace])->create();
 
     $response = $this->postJson('/api/v1/people/upsert', [
         'match' => ['field' => 'emails', 'value' => 'grace@navy.mil'],
@@ -432,8 +432,8 @@ it('associates the person with a company on create', function (): void {
     expect($response->json('data.attributes.company_id'))->toBe($company->id);
 });
 
-it('rejects a company from another team', function (): void {
-    $foreignCompany = Company::withoutEvents(fn () => Company::factory()->for(Team::factory())->create());
+it('rejects a company from another workspace', function (): void {
+    $foreignCompany = Company::withoutEvents(fn () => Company::factory()->for(Workspace::factory())->create());
 
     Sanctum::actingAs($this->user);
 

@@ -10,7 +10,7 @@ use Tests\Helpers\ChatDocument;
 mutates(ListConversationMessages::class);
 
 it('hides synthetic [approval] user messages from the visible message list', function (): void {
-    $user = User::factory()->withPersonalTeam()->create();
+    $user = User::factory()->withPersonalWorkspace()->create();
     $this->actingAs($user);
 
     $convId = '019df800-2222-7000-8000-000000000001';
@@ -18,7 +18,7 @@ it('hides synthetic [approval] user messages from the visible message list', fun
         'id' => $convId,
         'participant_type' => 'user',
         'participant_id' => (string) $user->getKey(),
-        'team_id' => $user->currentTeam->getKey(),
+        'workspace_id' => $user->currentWorkspace->getKey(),
         'title' => '',
         'created_at' => now(),
         'updated_at' => now(),
@@ -52,7 +52,5 @@ it('hides synthetic [approval] user messages from the visible message list', fun
     expect(implode("\n", $contents))->toContain('I have proposed creating a person.');
     expect(implode("\n", $contents))->toContain('Now proposing the linked task.');
 
-    foreach ($contents as $content) {
-        expect($content)->not->toStartWith('[approval]');
-    }
+    expect($contents)->each->not->toStartWith('[approval]');
 });

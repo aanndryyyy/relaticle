@@ -3,10 +3,10 @@
 declare(strict_types=1);
 
 use App\Http\Middleware\EnsureTokenHasAbility;
-use App\Http\Middleware\SetApiTeamContext;
+use App\Http\Middleware\SetApiWorkspaceContext;
 use App\Models\People;
-use App\Models\Team;
 use App\Models\User;
+use App\Models\Workspace;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Str;
@@ -17,24 +17,24 @@ use Laravel\Passport\Passport;
 use Laravel\Passport\TransientToken as PassportTransientToken;
 use League\OAuth2\Server\Exception\OAuthServerException;
 
-mutates(EnsureTokenHasAbility::class, SetApiTeamContext::class);
+mutates(EnsureTokenHasAbility::class, SetApiWorkspaceContext::class);
 
 beforeEach(function (): void {
-    $this->user = User::factory()->withPersonalTeam()->create();
-    $this->team = $this->user->personalTeam();
+    $this->user = User::factory()->withPersonalWorkspace()->create();
+    $this->workspace = $this->user->personalWorkspace();
 });
 
 /**
  * Authenticate the given user through the Passport `api` guard.
  *
  * Passport::actingAs() mints a detached AccessToken with no backing row, so its
- * team_id could never resolve and every request would die in SetApiTeamContext.
- * Inserting the row the consent flow would have written (team_id included) and
+ * workspace_id could never resolve and every request would die in SetApiWorkspaceContext.
+ * Inserting the row the consent flow would have written (workspace_id included) and
  * pointing the token at it exercises the real binding instead.
  *
  * @param  list<string>  $scopes
  */
-function actAsOAuthClient(User $user, array $scopes, ?Team $team): void
+function actAsOAuthClient(User $user, array $scopes, ?Workspace $workspace): void
 {
     $client = Client::query()->forceCreate([
         'id' => (string) Str::uuid(),
@@ -52,7 +52,7 @@ function actAsOAuthClient(User $user, array $scopes, ?Team $team): void
         'id' => $tokenId,
         'user_id' => $user->getKey(),
         'client_id' => $client->getKey(),
-        'team_id' => $team?->getKey(),
+        'workspace_id' => $workspace?->getKey(),
         'name' => 'REST Connector',
         'scopes' => json_encode($scopes),
         'revoked' => false,
@@ -87,16 +87,16 @@ describe('scope catalog', function (): void {
 
 describe('create-scoped oauth token', function (): void {
     beforeEach(function (): void {
-        actAsOAuthClient($this->user, ['create'], $this->team);
+        actAsOAuthClient($this->user, ['create'], $this->workspace);
     });
 
-    it('can create a person in the team bound to the token', function (): void {
+    it('can create a person in the workspace bound to the token', function (): void {
         $this->postJson('/api/v1/people', ['name' => 'Ada Lovelace'])
             ->assertCreated();
 
         $this->assertDatabaseHas('people', [
             'name' => 'Ada Lovelace',
-            'team_id' => $this->team->getKey(),
+            'workspace_id' => $this->workspace->getKey(),
         ]);
     });
 
@@ -105,14 +105,14 @@ describe('create-scoped oauth token', function (): void {
     });
 
     it('cannot update a person', function (): void {
-        $person = People::factory()->recycle([$this->user, $this->team])->create();
+        $person = People::factory()->recycle([$this->user, $this->workspace])->create();
 
         $this->putJson("/api/v1/people/{$person->id}", ['name' => 'Blocked'])
             ->assertForbidden();
     });
 
     it('cannot delete a person', function (): void {
-        $person = People::factory()->recycle([$this->user, $this->team])->create();
+        $person = People::factory()->recycle([$this->user, $this->workspace])->create();
 
         $this->deleteJson("/api/v1/people/{$person->id}")->assertForbidden();
     });
@@ -120,11 +120,11 @@ describe('create-scoped oauth token', function (): void {
 
 describe('read-scoped oauth token', function (): void {
     beforeEach(function (): void {
-        actAsOAuthClient($this->user, ['read'], $this->team);
+        actAsOAuthClient($this->user, ['read'], $this->workspace);
     });
 
     it('can list people', function (): void {
-        $person = People::factory()->recycle([$this->user, $this->team])->create();
+        $person = People::factory()->recycle([$this->user, $this->workspace])->create();
 
         $response = $this->getJson('/api/v1/people')->assertOk();
 
@@ -141,18 +141,18 @@ describe('read-scoped oauth token', function (): void {
 
 describe('update- and delete-scoped oauth tokens', function (): void {
     it('can update a person with the update scope', function (): void {
-        $person = People::factory()->recycle([$this->user, $this->team])->create();
+        $person = People::factory()->recycle([$this->user, $this->workspace])->create();
 
-        actAsOAuthClient($this->user, ['update'], $this->team);
+        actAsOAuthClient($this->user, ['update'], $this->workspace);
 
         $this->putJson("/api/v1/people/{$person->id}", ['name' => 'Renamed'])
             ->assertOk();
     });
 
     it('can delete a person with the delete scope', function (): void {
-        $person = People::factory()->recycle([$this->user, $this->team])->create();
+        $person = People::factory()->recycle([$this->user, $this->workspace])->create();
 
-        actAsOAuthClient($this->user, ['delete'], $this->team);
+        actAsOAuthClient($this->user, ['delete'], $this->workspace);
 
         $this->deleteJson("/api/v1/people/{$person->id}")->assertNoContent();
     });
@@ -160,7 +160,7 @@ describe('update- and delete-scoped oauth tokens', function (): void {
 
 describe('scope-less oauth token', function (): void {
     beforeEach(function (): void {
-        actAsOAuthClient($this->user, [], $this->team);
+        actAsOAuthClient($this->user, [], $this->workspace);
     });
 
     it('cannot read', function (): void {
@@ -177,7 +177,7 @@ describe('scope-less oauth token', function (): void {
 
 describe('mcp-only oauth token', function (): void {
     it('cannot reach the REST API with only the mcp scope', function (): void {
-        actAsOAuthClient($this->user, [Registrar::OAUTH_SCOPE], $this->team);
+        actAsOAuthClient($this->user, [Registrar::OAUTH_SCOPE], $this->workspace);
 
         $this->getJson('/api/v1/people')->assertForbidden();
         $this->postJson('/api/v1/people', ['name' => 'Blocked'])->assertForbidden();
@@ -185,12 +185,12 @@ describe('mcp-only oauth token', function (): void {
 });
 
 describe('unbound oauth token', function (): void {
-    it('is rejected when the token carries no team', function (): void {
+    it('is rejected when the token carries no workspace', function (): void {
         actAsOAuthClient($this->user, ['read'], null);
 
         $this->getJson('/api/v1/people')
             ->assertForbidden()
-            ->assertJson(['message' => 'No team found.']);
+            ->assertJson(['message' => 'No workspace found.']);
     });
 });
 

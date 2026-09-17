@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Http\Middleware\AddVaryAcceptHeader;
 use App\Models\User;
 use Spatie\MarkdownResponse\Middleware\ProvideMarkdownResponse;
 
@@ -27,7 +28,7 @@ return [
     /*
      * Our own marketing views render through ink's controllers, so we get the
      * package's listing SEO, search and pagination without duplicating it. These
-     * are app views, not published copies of ink's — nothing to drift.
+     * are app views, not published copies of ink's, so nothing can drift.
      */
     'views' => [
         'index' => 'blog.index',
@@ -38,7 +39,7 @@ return [
         'feed' => 'blog.feed',
     ],
 
-    'middleware' => ['web', ProvideMarkdownResponse::class],
+    'middleware' => ['web', ProvideMarkdownResponse::class, AddVaryAcceptHeader::class],
 
     /*
      * ink's Mcp::web() route already carries ReorderJsonAccept and

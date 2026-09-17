@@ -59,19 +59,19 @@ trait ResolvesUpsertMatch
         }
 
         return $this->matchedRecord = resolve(FindEntityByFieldValue::class)
-            ->execute($modelClass, $this->teamId(), $field, $value, $nativeColumns);
+            ->execute($modelClass, $this->workspaceId(), $field, $value, $nativeColumns);
     }
 
-    protected function teamId(): string
+    protected function workspaceId(): string
     {
         /** @var User $user */
         $user = $this->user();
 
-        return (string) $user->currentTeam->getKey();
+        return (string) $user->currentWorkspace->getKey();
     }
 
     /**
-     * Codes a caller may match on: the team's active fields, narrowed to the
+     * Codes a caller may match on: the workspace's active fields, narrowed to the
      * types a submitted string can actually be compared against.
      *
      * @return array<int, string>
@@ -80,7 +80,7 @@ trait ResolvesUpsertMatch
     {
         return CustomField::query()
             ->withoutGlobalScopes()
-            ->where('tenant_id', $this->teamId())
+            ->where('tenant_id', $this->workspaceId())
             ->where('entity_type', $entityType)
             ->active()
             ->get()

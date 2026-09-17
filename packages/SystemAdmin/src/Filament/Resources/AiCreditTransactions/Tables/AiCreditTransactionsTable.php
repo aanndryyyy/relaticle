@@ -13,6 +13,10 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Relaticle\Chat\Enums\AiCreditType;
 use Relaticle\Chat\Models\AiCreditTransaction;
+use Relaticle\SystemAdmin\Filament\Resources\UserResource;
+use Relaticle\SystemAdmin\Filament\Resources\WorkspaceResource;
+use Relaticle\SystemAdmin\Filament\Support\RecordLink;
+use Relaticle\SystemAdmin\Filament\Support\ViewerTime;
 
 final class AiCreditTransactionsTable
 {
@@ -24,16 +28,20 @@ final class AiCreditTransactionsTable
                 TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable(),
-                TextColumn::make('team.name')
-                    ->label('Team')
+                TextColumn::make('workspace.name')
+                    ->label('Workspace')
                     ->searchable()
-                    ->sortable(),
+                    ->sortable()
+                    ->color('primary')
+                    ->url(RecordLink::to(WorkspaceResource::class, 'workspace')),
                 TextColumn::make('user.name')
                     ->label('User')
                     ->placeholder('—')
                     ->searchable()
                     ->sortable()
-                    ->toggleable(),
+                    ->toggleable()
+                    ->color('primary')
+                    ->url(RecordLink::to(UserResource::class, 'user')),
                 TextColumn::make('type')
                     ->badge(),
                 TextColumn::make('model')
@@ -57,8 +65,8 @@ final class AiCreditTransactionsTable
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
-                SelectFilter::make('team')
-                    ->relationship('team', 'name')
+                SelectFilter::make('workspace')
+                    ->relationship('workspace', 'name')
                     ->searchable(),
                 SelectFilter::make('type')
                     ->options(
@@ -74,9 +82,14 @@ final class AiCreditTransactionsTable
                         DatePicker::make('from'),
                         DatePicker::make('until'),
                     ])
+                    /**
+                     * The picked dates are days on the administrator's calendar,
+                     * which is what the table renders too, so they widen to that
+                     * day's UTC bounds rather than being compared with whereDate.
+                     */
                     ->query(fn (Builder $query, array $data): Builder => $query
-                        ->when($data['from'] ?? null, fn (Builder $q, mixed $date): Builder => $q->whereDate('created_at', '>=', $date))
-                        ->when($data['until'] ?? null, fn (Builder $q, mixed $date): Builder => $q->whereDate('created_at', '<=', $date))),
+                        ->when($data['from'] ?? null, fn (Builder $q, mixed $date): Builder => $q->where('created_at', '>=', ViewerTime::startOfDayUtc((string) $date)))
+                        ->when($data['until'] ?? null, fn (Builder $q, mixed $date): Builder => $q->where('created_at', '<=', ViewerTime::endOfDayUtc((string) $date)))),
             ])
             ->recordActions([
                 ViewAction::make(),

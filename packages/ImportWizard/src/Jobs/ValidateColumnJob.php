@@ -5,14 +5,11 @@ declare(strict_types=1);
 namespace Relaticle\ImportWizard\Jobs;
 
 use Illuminate\Bus\Batchable;
-use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Connection;
-use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\Timeout;
 use Illuminate\Queue\Attributes\Tries;
-use Illuminate\Queue\InteractsWithQueue;
-use Illuminate\Queue\SerializesModels;
 use Relaticle\ImportWizard\Data\ColumnData;
 use Relaticle\ImportWizard\Data\ImportField;
 use Relaticle\ImportWizard\Data\RelationshipMatch;
@@ -27,10 +24,7 @@ use Relaticle\ImportWizard\Support\Validation\ColumnValidator;
 final class ValidateColumnJob implements ShouldQueue
 {
     use Batchable;
-    use Dispatchable;
-    use InteractsWithQueue;
     use Queueable;
-    use SerializesModels;
 
     public function __construct(
         private readonly string $importId,
@@ -82,7 +76,7 @@ final class ValidateColumnJob implements ShouldQueue
             return;
         }
 
-        $validator = new EntityLinkValidator($import->team_id);
+        $validator = new EntityLinkValidator($import->workspace_id);
         $errorMap = $validator->batchValidateFromColumn($this->column, $import->getImporter(), $uniqueValues);
 
         $results = [];
@@ -225,7 +219,7 @@ final class ValidateColumnJob implements ShouldQueue
         }
 
         $importer = $import->getImporter();
-        $this->column->importField = $importer->allFields()->get($this->column->target);
+        $this->column->importField = $importer->allFields()->getByKey($this->column->target);
     }
 
     /**

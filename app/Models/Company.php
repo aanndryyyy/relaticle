@@ -5,13 +5,16 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\CreationSource;
-use App\Models\Concerns\BelongsToTeamCreator;
+use App\Enums\MediaCollection;
+use App\Models\Concerns\BelongsToWorkspaceCreator;
 use App\Models\Concerns\HasCreator;
 use App\Models\Concerns\HasNotes;
-use App\Models\Concerns\HasTeam;
+use App\Models\Concerns\HasWorkspace;
 use App\Observers\CompanyObserver;
-use App\Services\AvatarService;
+use App\Support\Media\UploadAllowlist;
+use Carbon\CarbonImmutable;
 use Database\Factories\CompanyFactory;
+use Filament\Models\Contracts\HasAvatar;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
@@ -21,7 +24,6 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
-use Illuminate\Support\Carbon;
 use Relaticle\ActivityLog\Concerns\InteractsWithTimeline;
 use Relaticle\ActivityLog\Contracts\HasTimeline;
 use Relaticle\ActivityLog\Timeline\TimelineBuilder;
@@ -34,7 +36,7 @@ use Spatie\MediaLibrary\InteractsWithMedia;
 
 /**
  * @property string $name
- * @property Carbon|null $deleted_at
+ * @property CarbonImmutable|null $deleted_at
  * @property CreationSource $creation_source
  * @property-read string $created_by
  */
@@ -43,24 +45,24 @@ use Spatie\MediaLibrary\InteractsWithMedia;
     'name',
     'creation_source',
 ])]
-final class Company extends Model implements HasCustomFields, HasMedia, HasTimeline
+final class Company extends Model implements HasAvatar, HasCustomFields, HasMedia, HasTimeline
 {
-    use BelongsToTeamCreator;
+    use BelongsToWorkspaceCreator;
     use HasCreator;
 
     /** @use HasFactory<CompanyFactory> */
     use HasFactory;
 
     use HasNotes;
-    use HasTeam;
     use HasUlids;
+    use HasWorkspace;
     use InteractsWithMedia;
     use InteractsWithTimeline;
     use LogsActivity;
     use SoftDeletes;
     use UsesCustomFields;
 
-    public const string LOGO_MEDIA_COLLECTION = 'logo';
+    public const string LOGO_MEDIA_COLLECTION = MediaCollection::Logo->value;
 
     /**
      * @var array<string, mixed>
@@ -81,15 +83,34 @@ final class Company extends Model implements HasCustomFields, HasMedia, HasTimel
         ];
     }
 
-    protected function getLogoAttribute(): string
+    /**
+     * Null when no logo has been uploaded. A company with no mark falls back to
+     * the shared entity icon (App\Enums\CrmEntity), not a generated initials
+     * tile: 57% of companies carry a real logo, so colour in a company column
+     * should only ever mean "this is the brand's own mark".
+     */
+    protected function getLogoAttribute(): ?string
     {
         $logo = $this->getFirstMediaUrl(self::LOGO_MEDIA_COLLECTION);
 
-        return $logo === '' || $logo === '0' ? resolve(AvatarService::class)->generateAuto(name: $this->name) : $logo;
+        return $logo === '' || $logo === '0' ? null : $logo;
+    }
+
+    public function getFilamentAvatarUrl(): ?string
+    {
+        return $this->logo;
+    }
+
+    public function registerMediaCollections(): void
+    {
+        $this->addMediaCollection(self::LOGO_MEDIA_COLLECTION)->useDisk('public');
+
+        $this->addMediaCollection(MediaCollection::Attachments->value)
+            ->acceptsMimeTypes(UploadAllowlist::mimeTypes());
     }
 
     /**
-     * Team member responsible for managing the company account
+     * Workspace member responsible for managing the company account
      *
      * @return BelongsTo<User, $this>
      */
@@ -129,7 +150,7 @@ final class Company extends Model implements HasCustomFields, HasMedia, HasTimel
             ->logOnlyDirty()
             ->dontLogEmptyChanges()
             ->logExcept([
-                'id', 'team_id', 'creator_id', 'creation_source', 'custom_fields',
+                'id', 'workspace_id', 'creator_id', 'creation_source', 'custom_fields',
                 'created_at', 'updated_at', 'deleted_at', 'account_owner_id',
             ])
             ->useLogName('crm')

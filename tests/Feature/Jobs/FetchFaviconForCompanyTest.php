@@ -16,13 +16,13 @@ use Illuminate\Support\Facades\Storage;
 mutates(FetchFaviconForCompany::class);
 
 beforeEach(function (): void {
-    $this->user = User::factory()->withTeam()->create();
+    $this->user = User::factory()->withWorkspace()->create();
     $this->actingAs($this->user);
-    Filament::setTenant($this->user->currentTeam);
+    Filament::setTenant($this->user->currentWorkspace);
 });
 
 test('job declares timeout, tries, uniqueFor consistent with horizon worker timeout', function (): void {
-    $job = new FetchFaviconForCompany(Company::factory()->for($this->user->currentTeam)->create());
+    $job = new FetchFaviconForCompany(Company::factory()->for($this->user->currentWorkspace)->create());
 
     expect($job->tries)->toBe(1)
         ->and($job->timeout)->toBe(30)
@@ -30,7 +30,7 @@ test('job declares timeout, tries, uniqueFor consistent with horizon worker time
 });
 
 test('job swallows throwable from favicon driver instead of letting it escape', function (): void {
-    $company = Company::factory()->for($this->user->currentTeam)->create();
+    $company = Company::factory()->for($this->user->currentWorkspace)->create();
 
     $domainsField = CustomField::query()
         ->where('code', CompanyField::DOMAINS->value)
@@ -38,7 +38,7 @@ test('job swallows throwable from favicon driver instead of letting it escape', 
         ->firstOrFail();
 
     CustomFieldValue::forceCreate([
-        'tenant_id' => $this->user->currentTeam->getKey(),
+        'tenant_id' => $this->user->currentWorkspace->getKey(),
         'entity_type' => 'company',
         'entity_id' => $company->getKey(),
         'custom_field_id' => $domainsField->getKey(),
@@ -57,7 +57,7 @@ test('job swallows throwable from favicon driver instead of letting it escape', 
 });
 
 test('job rejects favicon url that resolves to private address', function (): void {
-    $company = Company::factory()->for($this->user->currentTeam)->create();
+    $company = Company::factory()->for($this->user->currentWorkspace)->create();
 
     $domainsField = CustomField::query()
         ->where('code', CompanyField::DOMAINS->value)
@@ -65,7 +65,7 @@ test('job rejects favicon url that resolves to private address', function (): vo
         ->firstOrFail();
 
     CustomFieldValue::forceCreate([
-        'tenant_id' => $this->user->currentTeam->getKey(),
+        'tenant_id' => $this->user->currentWorkspace->getKey(),
         'entity_type' => 'company',
         'entity_id' => $company->getKey(),
         'custom_field_id' => $domainsField->getKey(),
@@ -81,13 +81,13 @@ test('job rejects favicon url that resolves to private address', function (): vo
 
     (new FetchFaviconForCompany($company->fresh()))->handle();
 
-    expect($company->fresh()->getMedia('logo'))->toHaveCount(0);
+    expect($company->fresh()->getMedia('logo'))->toBeEmpty();
 });
 
 test('downloads the favicon through the guarded client and stores it', function (): void {
     Storage::fake('public');
 
-    $company = Company::factory()->for($this->user->currentTeam)->create();
+    $company = Company::factory()->for($this->user->currentWorkspace)->create();
 
     $domainsField = CustomField::query()
         ->where('code', CompanyField::DOMAINS->value)
@@ -95,7 +95,7 @@ test('downloads the favicon through the guarded client and stores it', function 
         ->firstOrFail();
 
     CustomFieldValue::forceCreate([
-        'tenant_id' => $this->user->currentTeam->getKey(),
+        'tenant_id' => $this->user->currentWorkspace->getKey(),
         'entity_type' => 'company',
         'entity_id' => $company->getKey(),
         'custom_field_id' => $domainsField->getKey(),
@@ -115,5 +115,35 @@ test('downloads the favicon through the guarded client and stores it', function 
     (new FetchFaviconForCompany($company->fresh()))->handle();
 
     Http::assertSent(fn ($request): bool => $request->url() === 'https://1.1.1.1/favicon.png');
+    expect($company->fresh()->getMedia('logo'))->toHaveCount(1);
+});
+
+test('downloads the favicon when the company carries several custom field values', function (): void {
+    Storage::fake('public');
+
+    $company = Company::factory()->for($this->user->currentWorkspace)->create();
+
+    foreach ([CompanyField::DOMAINS->value => ['example.com'], CompanyField::LINKEDIN->value => 'www.linkedin.com/company/example'] as $code => $value) {
+        CustomFieldValue::forceCreate([
+            'tenant_id' => $this->user->currentWorkspace->getKey(),
+            'entity_type' => 'company',
+            'entity_id' => $company->getKey(),
+            'custom_field_id' => CustomField::query()->where('code', $code)->forEntity(Company::class)->firstOrFail()->getKey(),
+            'json_value' => $value,
+        ]);
+    }
+
+    $favicon = Mockery::mock(AshAllenDesign\FaviconFetcher\Favicon::class);
+    $favicon->shouldReceive('getFaviconUrl')->andReturn('https://1.1.1.1/favicon.png');
+    $favicon->shouldReceive('getIconSize')->andReturn(180);
+    $favicon->shouldReceive('getIconType')->andReturn('apple-touch-icon');
+
+    Favicon::shouldReceive('driver->fetch')->andReturn($favicon);
+
+    $pngBytes = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==');
+    Http::fake(['https://1.1.1.1/favicon.png' => Http::response($pngBytes, 200)]);
+
+    (new FetchFaviconForCompany($company->fresh()))->handle();
+
     expect($company->fresh()->getMedia('logo'))->toHaveCount(1);
 });

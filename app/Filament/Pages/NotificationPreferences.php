@@ -7,16 +7,16 @@ namespace App\Filament\Pages;
 use App\Filament\Clusters\Settings;
 use Filament\Clusters\Cluster;
 use Filament\Pages\Page;
-use Illuminate\Contracts\Support\Htmlable;
-use Illuminate\Support\HtmlString;
 
 final class NotificationPreferences extends Page
 {
     protected string $view = 'filament.pages.notification-preferences';
 
+    protected static string $layout = 'filament.layouts.settings';
+
     protected static ?string $slug = 'notifications';
 
-    protected static ?int $navigationSort = 2;
+    protected static ?int $navigationSort = 3;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-bell';
 
@@ -31,11 +31,6 @@ final class NotificationPreferences extends Page
     public function getHeading(): string
     {
         return __('notifications.title');
-    }
-
-    public function getSubheading(): Htmlable
-    {
-        return new HtmlString(e(__('notifications.subtitle')));
     }
 
     public static function getLabel(): string

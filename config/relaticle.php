@@ -8,25 +8,33 @@ return [
         'email' => env('CONTACT_EMAIL', 'hello@relaticle.com'),
     ],
 
+    'enterprise' => [
+        'starting_price_yearly' => 20_000,
+    ],
+
     'company' => [
         'name' => env('RELATICLE_COMPANY_NAME', 'Relaticle'),
         'address' => env('RELATICLE_COMPANY_ADDRESS', ''),
     ],
 
-    /*
-    |--------------------------------------------------------------------------
-    | Feature Flags
-    |--------------------------------------------------------------------------
-    |
-    | Toggle Relaticle features on or off. Useful for forks and custom
-    | deployments that want to disable specific functionality without
-    | modifying upstream code. All features are enabled by default.
-    |
-    */
-
     'deletion' => [
         'grace_period_days' => 30,
         'reminder_days_before' => 5,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Workspaces
+    |--------------------------------------------------------------------------
+    |
+    | How many workspaces one user may own. Workspaces they were invited into
+    | belong to someone else and never count. A workspace scheduled for
+    | deletion still occupies a slot until the grace period above elapses.
+    |
+    */
+
+    'workspaces' => [
+        'max_owned_per_user' => (int) env('RELATICLE_MAX_OWNED_WORKSPACES', 10),
     ],
 
     /*
@@ -48,13 +56,15 @@ return [
     ],
 
     'features' => [
+        'account_deletion' => (bool) env('RELATICLE_FEATURE_ACCOUNT_DELETION', false),
         'onboard_seed' => (bool) env('RELATICLE_FEATURE_ONBOARD_SEED', true),
         'social_auth' => (bool) env('RELATICLE_FEATURE_SOCIAL_AUTH', true),
         'documentation' => (bool) env('RELATICLE_FEATURE_DOCUMENTATION', true),
         'billing' => (bool) env('RELATICLE_FEATURE_BILLING', false),
+        'signup_challenge' => (bool) env('RELATICLE_FEATURE_SIGNUP_CHALLENGE', false),
         'support_menu' => (bool) env('RELATICLE_FEATURE_SUPPORT_MENU', false),
         'blog' => (bool) env('RELATICLE_FEATURE_BLOG', false),
-        'marketing' => (bool) env('RELATICLE_FEATURE_MARKETING', true),
+        'setup_conversation' => (bool) env('RELATICLE_FEATURE_SETUP_CONVERSATION', true),
     ],
 
 ];

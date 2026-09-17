@@ -36,13 +36,13 @@ final readonly class ListPeople
         $filterSchema = new CustomFieldFilterSchema;
 
         $query = QueryBuilder::for(
-            People::query()->withCustomFieldValues()->whereBelongsTo($user->currentTeam),
+            People::query()->withCustomFieldValues()->whereBelongsTo($user->currentWorkspace),
             $request,
         )
             ->allowedFilters(
                 AllowedFilter::partial('name'),
                 AllowedFilter::exact('company_id'),
-                AllowedFilter::custom('custom_fields', new CustomFieldFilter('people')),
+                CustomFieldFilter::allowedFilter('people'),
                 AllowedFilter::callback('created_after', fn (Builder $query, string $value) => $query->whereDate('people.created_at', '>=', $value)),
                 AllowedFilter::callback('created_before', fn (Builder $query, string $value) => $query->whereDate('people.created_at', '<=', $value)),
             )

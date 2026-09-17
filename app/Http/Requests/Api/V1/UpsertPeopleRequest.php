@@ -19,7 +19,7 @@ final class UpsertPeopleRequest extends FormRequest
      */
     public function rules(): array
     {
-        $teamId = $this->teamId();
+        $workspaceId = $this->workspaceId();
         $person = $this->matchedPerson();
 
         // On the update branch a required custom field the caller omitted is
@@ -29,10 +29,10 @@ final class UpsertPeopleRequest extends FormRequest
             $this->matchRules('people'),
             [
                 'name' => ['required', 'string', 'max:255'],
-                'company_id' => ['nullable', 'string', Rule::exists('companies', 'id')->where('team_id', $teamId)],
+                'company_id' => ['nullable', 'string', Rule::exists('companies', 'id')->where('workspace_id', $workspaceId)],
             ],
             new ValidCustomFields(
-                $teamId,
+                $workspaceId,
                 'people',
                 isUpdate: $person instanceof People,
                 ignoreEntityId: $person?->getKey(),

@@ -23,9 +23,13 @@ use Relaticle\SystemAdmin\Filament\Resources\OpportunityResource\Pages\CreateOpp
 use Relaticle\SystemAdmin\Filament\Resources\OpportunityResource\Pages\EditOpportunity;
 use Relaticle\SystemAdmin\Filament\Resources\OpportunityResource\Pages\ListOpportunities;
 use Relaticle\SystemAdmin\Filament\Resources\OpportunityResource\Pages\ViewOpportunity;
+use Relaticle\SystemAdmin\Filament\Support\RecordLink;
+use Relaticle\SystemAdmin\Filament\Support\ResolvesTrashedRecords;
 
 final class OpportunityResource extends Resource
 {
+    use ResolvesTrashedRecords;
+
     protected static ?string $model = Opportunity::class;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-currency-dollar';
@@ -52,8 +56,10 @@ final class OpportunityResource extends Resource
     {
         return $schema
             ->components([
-                Select::make('team_id')
-                    ->relationship('team', 'name')
+                Select::make('workspace_id')
+                    ->relationship('workspace', 'name')
+                    ->disabled(fn (string $operation): bool => $operation === 'edit' && ! auth('sysadmin')->user()?->role->canManageCustomerAccess())
+                    ->dehydrated()
                     ->searchable()
                     ->required(),
                 TextInput::make('name')
@@ -83,18 +89,26 @@ final class OpportunityResource extends Resource
                 TextColumn::make('company.name')
                     ->label('Company')
                     ->searchable()
-                    ->sortable(),
+                    ->sortable()
+                    ->color('primary')
+                    ->url(RecordLink::to(CompanyResource::class, 'company')),
                 TextColumn::make('contact.name')
                     ->label('Contact')
-                    ->sortable(),
-                TextColumn::make('team.name')
-                    ->label('Team')
                     ->sortable()
-                    ->searchable(),
+                    ->color('primary')
+                    ->url(RecordLink::to(PeopleResource::class, 'contact')),
+                TextColumn::make('workspace.name')
+                    ->label('Workspace')
+                    ->sortable()
+                    ->searchable()
+                    ->color('primary')
+                    ->url(RecordLink::to(WorkspaceResource::class, 'workspace')),
                 TextColumn::make('creator.name')
                     ->label('Created by')
                     ->sortable()
-                    ->toggleable(),
+                    ->toggleable()
+                    ->color('primary')
+                    ->url(RecordLink::to(UserResource::class, 'creator')),
                 TextColumn::make('creation_source')
                     ->badge()
                     ->label('Source')
@@ -112,8 +126,8 @@ final class OpportunityResource extends Resource
             ])
             ->filters([
                 TrashedFilter::make(),
-                SelectFilter::make('team')
-                    ->relationship('team', 'name')
+                SelectFilter::make('workspace')
+                    ->relationship('workspace', 'name')
                     ->searchable()
                     ->preload(),
                 SelectFilter::make('company')
@@ -127,7 +141,7 @@ final class OpportunityResource extends Resource
             ])
             ->recordActions([
                 ViewAction::make(),
-                EditAction::make(),
+                EditAction::make()->action(null),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([

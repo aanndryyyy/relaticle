@@ -23,9 +23,15 @@ use Relaticle\SystemAdmin\Filament\Resources\CompanyResource\Pages\CreateCompany
 use Relaticle\SystemAdmin\Filament\Resources\CompanyResource\Pages\EditCompany;
 use Relaticle\SystemAdmin\Filament\Resources\CompanyResource\Pages\ListCompanies;
 use Relaticle\SystemAdmin\Filament\Resources\CompanyResource\Pages\ViewCompany;
+use Relaticle\SystemAdmin\Filament\Resources\CompanyResource\RelationManagers\OpportunitiesRelationManager;
+use Relaticle\SystemAdmin\Filament\Resources\CompanyResource\RelationManagers\PeopleRelationManager;
+use Relaticle\SystemAdmin\Filament\Support\RecordLink;
+use Relaticle\SystemAdmin\Filament\Support\ResolvesTrashedRecords;
 
 final class CompanyResource extends Resource
 {
+    use ResolvesTrashedRecords;
+
     protected static ?string $model = Company::class;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-building-office';
@@ -52,8 +58,10 @@ final class CompanyResource extends Resource
     {
         return $schema
             ->components([
-                Select::make('team_id')
-                    ->relationship('team', 'name')
+                Select::make('workspace_id')
+                    ->relationship('workspace', 'name')
+                    ->disabled(fn (string $operation): bool => $operation === 'edit' && ! auth('sysadmin')->user()?->role->canManageCustomerAccess())
+                    ->dehydrated()
                     ->searchable()
                     ->required(),
                 TextInput::make('name')
@@ -77,18 +85,24 @@ final class CompanyResource extends Resource
                 TextColumn::make('name')
                     ->searchable()
                     ->sortable(),
-                TextColumn::make('team.name')
-                    ->label('Team')
+                TextColumn::make('workspace.name')
+                    ->label('Workspace')
                     ->sortable()
-                    ->searchable(),
+                    ->searchable()
+                    ->color('primary')
+                    ->url(RecordLink::to(WorkspaceResource::class, 'workspace')),
                 TextColumn::make('creator.name')
                     ->label('Created by')
                     ->sortable()
-                    ->toggleable(),
+                    ->toggleable()
+                    ->color('primary')
+                    ->url(RecordLink::to(UserResource::class, 'creator')),
                 TextColumn::make('accountOwner.name')
                     ->label('Account Owner')
                     ->sortable()
-                    ->toggleable(),
+                    ->toggleable()
+                    ->color('primary')
+                    ->url(RecordLink::to(UserResource::class, 'accountOwner')),
                 TextColumn::make('creation_source')
                     ->badge()
                     ->label('Source')
@@ -106,8 +120,8 @@ final class CompanyResource extends Resource
             ])
             ->filters([
                 TrashedFilter::make(),
-                SelectFilter::make('team')
-                    ->relationship('team', 'name')
+                SelectFilter::make('workspace')
+                    ->relationship('workspace', 'name')
                     ->searchable()
                     ->preload(),
                 SelectFilter::make('creation_source')
@@ -117,7 +131,7 @@ final class CompanyResource extends Resource
             ])
             ->recordActions([
                 ViewAction::make(),
-                EditAction::make(),
+                EditAction::make()->action(null),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
@@ -129,7 +143,10 @@ final class CompanyResource extends Resource
     #[Override]
     public static function getRelations(): array
     {
-        return [];
+        return [
+            PeopleRelationManager::class,
+            OpportunitiesRelationManager::class,
+        ];
     }
 
     #[Override]

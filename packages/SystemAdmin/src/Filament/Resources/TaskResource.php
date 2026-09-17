@@ -23,9 +23,13 @@ use Relaticle\SystemAdmin\Filament\Resources\TaskResource\Pages\CreateTask;
 use Relaticle\SystemAdmin\Filament\Resources\TaskResource\Pages\EditTask;
 use Relaticle\SystemAdmin\Filament\Resources\TaskResource\Pages\ListTasks;
 use Relaticle\SystemAdmin\Filament\Resources\TaskResource\Pages\ViewTask;
+use Relaticle\SystemAdmin\Filament\Support\RecordLink;
+use Relaticle\SystemAdmin\Filament\Support\ResolvesTrashedRecords;
 
 final class TaskResource extends Resource
 {
+    use ResolvesTrashedRecords;
+
     protected static ?string $model = Task::class;
 
     protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-clipboard-document-check';
@@ -52,8 +56,10 @@ final class TaskResource extends Resource
     {
         return $schema
             ->components([
-                Select::make('team_id')
-                    ->relationship('team', 'name')
+                Select::make('workspace_id')
+                    ->relationship('workspace', 'name')
+                    ->disabled(fn (string $operation): bool => $operation === 'edit' && ! auth('sysadmin')->user()?->role->canManageCustomerAccess())
+                    ->dehydrated()
                     ->searchable()
                     ->required(),
                 TextInput::make('title')
@@ -74,14 +80,18 @@ final class TaskResource extends Resource
                 TextColumn::make('title')
                     ->searchable()
                     ->sortable(),
-                TextColumn::make('team.name')
-                    ->label('Team')
+                TextColumn::make('workspace.name')
+                    ->label('Workspace')
                     ->sortable()
-                    ->searchable(),
+                    ->searchable()
+                    ->color('primary')
+                    ->url(RecordLink::to(WorkspaceResource::class, 'workspace')),
                 TextColumn::make('creator.name')
                     ->label('Created by')
                     ->sortable()
-                    ->toggleable(),
+                    ->toggleable()
+                    ->color('primary')
+                    ->url(RecordLink::to(UserResource::class, 'creator')),
                 TextColumn::make('creation_source')
                     ->badge()
                     ->label('Source')
@@ -99,8 +109,8 @@ final class TaskResource extends Resource
             ])
             ->filters([
                 TrashedFilter::make(),
-                SelectFilter::make('team')
-                    ->relationship('team', 'name')
+                SelectFilter::make('workspace')
+                    ->relationship('workspace', 'name')
                     ->searchable()
                     ->preload(),
                 SelectFilter::make('creation_source')
@@ -110,7 +120,7 @@ final class TaskResource extends Resource
             ])
             ->recordActions([
                 ViewAction::make(),
-                EditAction::make(),
+                EditAction::make()->action(null),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([

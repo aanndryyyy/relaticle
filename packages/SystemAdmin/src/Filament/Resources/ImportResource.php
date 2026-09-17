@@ -19,6 +19,7 @@ use Relaticle\ImportWizard\Models\Import;
 use Relaticle\SystemAdmin\Filament\Resources\ImportResource\Pages\ListImports;
 use Relaticle\SystemAdmin\Filament\Resources\ImportResource\Pages\ViewImport;
 use Relaticle\SystemAdmin\Filament\Resources\ImportResource\RelationManagers\FailedRowsRelationManager;
+use Relaticle\SystemAdmin\Filament\Support\RecordLink;
 
 final class ImportResource extends Resource
 {
@@ -55,10 +56,14 @@ final class ImportResource extends Resource
                 TextEntry::make('status')
                     ->badge()
                     ->color(self::statusColor(...)),
-                TextEntry::make('team.name')
-                    ->label('Team'),
+                TextEntry::make('workspace.name')
+                    ->label('Workspace')
+                    ->color('primary')
+                    ->url(RecordLink::to(WorkspaceResource::class, 'workspace')),
                 TextEntry::make('user.name')
-                    ->label('User'),
+                    ->label('User')
+                    ->color('primary')
+                    ->url(RecordLink::to(UserResource::class, 'user')),
                 TextEntry::make('total_rows'),
                 TextEntry::make('created_rows'),
                 TextEntry::make('updated_rows'),
@@ -87,14 +92,18 @@ final class ImportResource extends Resource
                     ->badge()
                     ->color(self::statusColor(...))
                     ->sortable(),
-                TextColumn::make('team.name')
-                    ->label('Team')
+                TextColumn::make('workspace.name')
+                    ->label('Workspace')
                     ->sortable()
-                    ->searchable(),
+                    ->searchable()
+                    ->color('primary')
+                    ->url(RecordLink::to(WorkspaceResource::class, 'workspace')),
                 TextColumn::make('user.name')
                     ->label('User')
                     ->sortable()
-                    ->searchable(),
+                    ->searchable()
+                    ->color('primary')
+                    ->url(RecordLink::to(UserResource::class, 'user')),
                 TextColumn::make('total_rows')
                     ->numeric()
                     ->toggleable(),
@@ -119,8 +128,8 @@ final class ImportResource extends Resource
                 SelectFilter::make('status')
                     ->options(ImportStatus::class)
                     ->multiple(),
-                SelectFilter::make('team')
-                    ->relationship('team', 'name')
+                SelectFilter::make('workspace')
+                    ->relationship('workspace', 'name')
                     ->searchable()
                     ->preload(),
             ])
@@ -146,7 +155,7 @@ final class ImportResource extends Resource
         ];
     }
 
-    private static function statusColor(ImportStatus $state): string
+    public static function statusColor(ImportStatus $state): string
     {
         return match ($state) {
             ImportStatus::Completed => 'success',

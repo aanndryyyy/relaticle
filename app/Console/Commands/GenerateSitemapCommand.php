@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use App\Features\Blog;
-use App\Features\Marketing;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
@@ -29,9 +28,7 @@ final class GenerateSitemapCommand extends Command
      */
     public function handle(DocsRepository $docsRepository): void
     {
-        $sitemap = Feature::active(Marketing::class)
-            ? $this->crawlMarketingSitemap()
-            : Sitemap::create();
+        $sitemap = $this->crawlMarketingSitemap();
 
         $this->addDocumentationUrls($sitemap, $docsRepository);
 
@@ -42,15 +39,6 @@ final class GenerateSitemapCommand extends Command
         $sitemap->writeToFile(public_path('sitemap.xml'));
     }
 
-    /**
-     * Self-hosted forks with Marketing disabled have no public marketing surface
-     * to crawl -- `/` just redirects to the app login. Crawling it anyway is
-     * actively harmful: spatie/crawler follows redirects and resolves links found
-     * on the redirected-to page against its effective URL, so a link on the login
-     * screen would get enqueued and leak an app-panel-adjacent URL into the
-     * public sitemap. Documentation and blog URLs are added through their own
-     * non-crawl code paths below, so skipping the crawl entirely is safe.
-     */
     private function crawlMarketingSitemap(): Sitemap
     {
         // /dashboard and /forgot-password are not linked from any crawled page
@@ -60,7 +48,19 @@ final class GenerateSitemapCommand extends Command
         $excluded = ['/login', '/register', '/forgot-password', '/dashboard', '/discord'];
 
         return SitemapGenerator::create(config('app.url'))
-            ->shouldCrawl(fn (string $url): bool => ! in_array(parse_url($url, PHP_URL_PATH), $excluded, true))
+            ->shouldCrawl(function (string $url) use ($excluded): bool {
+                $path = (string) parse_url($url, PHP_URL_PATH);
+
+                if (in_array($path, $excluded, true)) {
+                    return false;
+                }
+
+                if (parse_url($url, PHP_URL_QUERY) !== null) {
+                    return false;
+                }
+
+                return pathinfo($path, PATHINFO_EXTENSION) === '';
+            })
             ->getSitemap();
     }
 
@@ -77,6 +77,7 @@ final class GenerateSitemapCommand extends Command
     {
         $this->ensureUrl($sitemap, route('help.index'));
         $this->ensureUrl($sitemap, route('documentation.index'));
+        $this->ensureUrl($sitemap, route('aiNativeCrm'));
 
         $docsRepository->categories()
             ->filter(fn (DocCategory $category): bool => $category->area === DocUrl::HELP)

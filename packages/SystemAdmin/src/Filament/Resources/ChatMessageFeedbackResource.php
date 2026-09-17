@@ -16,6 +16,7 @@ use Override;
 use Relaticle\Chat\Models\ChatMessageFeedback;
 use Relaticle\SystemAdmin\Filament\Resources\ChatMessageFeedbackResource\Pages\ListChatMessageFeedback;
 use Relaticle\SystemAdmin\Filament\Resources\ChatMessageFeedbackResource\Pages\ViewChatMessageFeedback;
+use Relaticle\SystemAdmin\Filament\Support\RecordLink;
 
 final class ChatMessageFeedbackResource extends Resource
 {
@@ -39,12 +40,22 @@ final class ChatMessageFeedbackResource extends Resource
         return $schema
             ->components([
                 Section::make([
-                    TextEntry::make('team.name')->label('Team'),
-                    TextEntry::make('user.name')->label('User'),
+                    TextEntry::make('workspace.name')
+                        ->label('Workspace')
+                        ->color('primary')
+                        ->url(RecordLink::to(WorkspaceResource::class, 'workspace')),
+                    TextEntry::make('user.name')
+                        ->label('User')
+                        ->color('primary')
+                        ->url(RecordLink::to(UserResource::class, 'user')),
                     TextEntry::make('rating')->badge()->color(fn (string $state): string => $state === ChatMessageFeedback::RATING_UP ? 'success' : 'danger'),
                     TextEntry::make('category')->placeholder('—'),
                     TextEntry::make('model')->placeholder('—'),
-                    TextEntry::make('conversation_id')->label('Conversation')->copyable(),
+                    TextEntry::make('conversation_id')
+                        ->label('Conversation')
+                        ->copyable()
+                        ->color('primary')
+                        ->url(RecordLink::to(AgentConversationResource::class, 'conversation')),
                     TextEntry::make('message_id')->label('Message')->copyable(),
                     TextEntry::make('comment')->placeholder('—')->columnSpanFull(),
                     TextEntry::make('created_at')->dateTime(),
@@ -61,10 +72,12 @@ final class ChatMessageFeedbackResource extends Resource
                 TextColumn::make('created_at')
                     ->dateTime()
                     ->sortable(),
-                TextColumn::make('team.name')
-                    ->label('Team')
+                TextColumn::make('workspace.name')
+                    ->label('Workspace')
                     ->searchable()
-                    ->sortable(),
+                    ->sortable()
+                    ->color('primary')
+                    ->url(RecordLink::to(WorkspaceResource::class, 'workspace')),
                 TextColumn::make('rating')
                     ->badge()
                     ->color(fn (string $state): string => $state === ChatMessageFeedback::RATING_UP ? 'success' : 'danger'),
@@ -88,8 +101,8 @@ final class ChatMessageFeedbackResource extends Resource
                     ]),
                 SelectFilter::make('category')
                     ->options(array_combine(ChatMessageFeedback::CATEGORIES, ChatMessageFeedback::CATEGORIES)),
-                SelectFilter::make('team')
-                    ->relationship('team', 'name')
+                SelectFilter::make('workspace')
+                    ->relationship('workspace', 'name')
                     ->searchable(),
             ])
             ->recordActions([

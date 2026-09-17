@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use App\Models\User;
+use Illuminate\JsonSchema\JsonSchemaTypeFactory;
+use Illuminate\JsonSchema\Serializer;
 use Laravel\Ai\Tools\Request;
 use Relaticle\Chat\Models\PendingAction;
 use Relaticle\Chat\Support\DestinationResolver;
@@ -12,8 +14,8 @@ mutates(GuideToPageTool::class);
 mutates(DestinationResolver::class);
 
 beforeEach(function (): void {
-    $this->user = User::factory()->withPersonalTeam()->create();
-    $this->user->switchTeam($this->user->ownedTeams()->first());
+    $this->user = User::factory()->withPersonalWorkspace()->create();
+    $this->user->switchWorkspace($this->user->ownedWorkspaces()->first());
     $this->actingAs($this->user);
 });
 
@@ -36,7 +38,30 @@ it('returns an error payload for an unknown destination', function (): void {
 });
 
 it('does not create a pending action because it is not a write', function (): void {
-    app(GuideToPageTool::class)->handle(new Request(['destination' => 'team_members']));
+    app(GuideToPageTool::class)->handle(new Request(['destination' => 'workspace_members']));
 
     expect(PendingAction::query()->count())->toBe(0);
+});
+
+/**
+ * The model picks a destination from the schema description, so a key the
+ * resolver knows but the description omits is unreachable. The two lists are
+ * written by hand in separate files; this is the only thing stopping drift.
+ */
+it('advertises every resolvable destination in its schema description', function (): void {
+    $schema = app(GuideToPageTool::class)->schema(new JsonSchemaTypeFactory);
+    $destination = (new Serializer)->serialize($schema['destination']);
+
+    foreach (DestinationResolver::DESTINATIONS as $key) {
+        expect($destination['description'])->toContain($key);
+    }
+});
+
+it('names the access tokens and connect assistant destinations in its schema description', function (): void {
+    $schema = app(GuideToPageTool::class)->schema(new JsonSchemaTypeFactory);
+    $destination = (new Serializer)->serialize($schema['destination']);
+
+    expect($destination['description'])
+        ->toContain('"access_tokens"')
+        ->toContain('"connect_assistant"');
 });

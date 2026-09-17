@@ -19,15 +19,15 @@ final class TaskExporter extends BaseExporter
         return [
             ExportColumn::make('id')
                 ->label(__('filament/exports.columns.id')),
-            ExportColumn::make('team.name'),
+            ExportColumn::make('workspace.name'),
             ExportColumn::make('creator.name'),
             ExportColumn::make('creation_source')
                 ->formatStateUsing(fn (mixed $state): string => $state->value ?? (string) $state),
             ExportColumn::make('title'),
-            ExportColumn::make('created_at'),
-            ExportColumn::make('updated_at'),
+            self::dateTimeColumn('created_at', __('filament/exports.columns.created_at')),
+            self::dateTimeColumn('updated_at', __('filament/exports.columns.updated_at')),
 
-            ...CustomFields::exporter()->forModel(self::getModel())->columns(),
+            ...self::customFieldColumns(CustomFields::exporter()->forModel(self::getModel())->columns()),
         ];
     }
 

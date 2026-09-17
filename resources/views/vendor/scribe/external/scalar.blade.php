@@ -1,8 +1,10 @@
 <!doctype html>
 <html>
 <head>
-    <title>{!! $metadata['title'] !!}</title>
+    {{-- Not config('scribe.title'): that one names the API for OpenAPI and Postman. --}}
+    <title>{{ __('REST API Reference for CRM Records') }} - {{ config('app.name') }}</title>
     <meta charset="utf-8"/>
+    <meta name="description" content="{{ config('scribe.description') }}"/>
     <meta
         name="viewport"
         content="width=device-width, initial-scale=1"/>
@@ -16,7 +18,7 @@
     <style>
         @font-face {
             font-family: 'Inter';
-            src: url('/fonts/inter/InterVariable.woff2') format('woff2');
+            src: url('{{ Vite::asset('resources/fonts/inter/InterVariable.woff2') }}') format('woff2');
             font-weight: 100 900;
             font-display: swap;
         }

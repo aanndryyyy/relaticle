@@ -27,6 +27,7 @@ final readonly class CompetitorFacts
      *     self_host: string,
      *     ai: string,
      *     extensibility: string,
+     *     source_urls: array{website: string, pricing: string, repository?: string},
      *     verified: string,
      * }>
      */
@@ -46,11 +47,21 @@ final readonly class CompetitorFacts
          *     self_host: string,
          *     ai: string,
          *     extensibility: string,
+         *     source_urls: array{website: string, pricing: string, repository?: string},
          *     verified: string,
          * }> $facts
          */
         $facts = require resource_path('data/competitor-facts.php');
 
         return $facts;
+    }
+
+    // Read from the `ai` fact rather than a fresh literal, so no marketing surface
+    // can drift from the tool count the MCP server actually registers.
+    public static function mcpToolCount(): int
+    {
+        preg_match('/^(\d+)/', self::all()['relaticle']['ai'], $matches);
+
+        return (int) ($matches[1] ?? 0);
     }
 }

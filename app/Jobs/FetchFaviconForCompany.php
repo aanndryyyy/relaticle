@@ -6,7 +6,7 @@ namespace App\Jobs;
 
 use App\Enums\CustomFields\CompanyField;
 use App\Models\Company;
-use App\Services\Favicon\SsrfGuard;
+use App\Support\Http\SsrfGuard;
 use AshAllenDesign\FaviconFetcher\Facades\Favicon;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -33,10 +33,16 @@ final class FetchFaviconForCompany implements ShouldBeUnique, ShouldQueue
     public function handle(): void
     {
         try {
+            // The custom-fields package registers the tenant relation under the name
+            // `team`, so the relation has to be named rather than guessed.
             $customFieldDomain = $this->company->customFields()
-                ->whereBelongsTo($this->company->team)
+                ->whereBelongsTo($this->company->workspace, 'team')
                 ->where('code', CompanyField::DOMAINS->value)
                 ->first();
+
+            // Reading a value walks every custom field value on the company, and a company
+            // with more than one of them trips strict lazy loading outside production.
+            $this->company->load('customFieldValues.customField.options');
 
             $domains = $this->company->getCustomFieldValue($customFieldDomain);
             $domainName = is_array($domains) ? ($domains[0] ?? null) : $domains;

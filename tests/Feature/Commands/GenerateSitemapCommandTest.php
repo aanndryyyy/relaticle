@@ -4,14 +4,12 @@ declare(strict_types=1);
 
 use App\Console\Commands\GenerateSitemapCommand;
 use App\Features\Blog;
-use App\Features\Marketing;
 use GuzzleHttp\HandlerStack;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 use Laravel\Pennant\Feature;
 use Relaticle\Ink\Models\Post;
-use Spatie\Crawler\CrawlResponse;
 use Spatie\Crawler\Faking\FakeHandler;
 
 mutates(GenerateSitemapCommand::class);
@@ -101,8 +99,9 @@ it('adds developer guide urls with lastmod from front matter', function (): void
     $xml = File::get($this->sitemap);
 
     expect($xml)->toContain('<loc>'.route('documentation.index').'</loc>')
-        ->and($xml)->toMatch('#developers/self-hosting</loc>\s*<lastmod>2026-08-14#')
-        ->and($xml)->toMatch('#developers/mcp</loc>\s*<lastmod>2026-08-12#');
+        ->and($xml)->toContain('<loc>'.route('aiNativeCrm').'</loc>')
+        ->and($xml)->toMatch('#developers/self-hosting</loc>\s*<lastmod>2026-08-30#')
+        ->and($xml)->toMatch('#developers/mcp</loc>\s*<lastmod>2026-09-15#');
 });
 
 it('omits lastmod for a help page with no updated front matter', function (): void {
@@ -130,6 +129,33 @@ it('omits lastmod for a help page with no updated front matter', function (): vo
         ->and($xml)->not->toMatch('#no-date/undated-page</loc>\s*<lastmod>#');
 });
 
+it('excludes query string variants of a page already in the sitemap', function (): void {
+    fakeSitemapCrawl([
+        config('app.url') => '<html><body><a href="'.url('/contact').'">Contact</a>'
+            .'<a href="'.url('/contact?plan=enterprise').'">Enterprise</a></body></html>',
+        url('/contact') => '<html><body>contact</body></html>',
+        url('/contact?plan=enterprise') => '<html><body>contact</body></html>',
+    ]);
+
+    $this->artisan('app:generate-sitemap')->assertSuccessful();
+
+    $xml = File::get($this->sitemap);
+
+    expect($xml)->toContain('<loc>'.url('/contact').'</loc>')
+        ->and($xml)->not->toContain('plan=enterprise');
+});
+
+it('excludes non-html assets from the sitemap', function (): void {
+    fakeSitemapCrawl([
+        config('app.url') => '<html><body><a href="'.url('/llms.txt').'">llms.txt</a></body></html>',
+        url('/llms.txt') => 'plain text',
+    ]);
+
+    $this->artisan('app:generate-sitemap')->assertSuccessful();
+
+    expect(File::get($this->sitemap))->not->toContain('llms.txt');
+});
+
 it('excludes auth and utility redirect urls from the sitemap', function (): void {
     $realHomepageWithLinksToLoginRegisterAndDiscord = (string) $this->get('/')->getContent();
 
@@ -148,31 +174,4 @@ it('excludes auth and utility redirect urls from the sitemap', function (): void
         ->and($xml)->not->toContain('<loc>'.url('/login').'</loc>')
         ->and($xml)->not->toContain('<loc>'.url('/register').'</loc>')
         ->and($xml)->not->toContain('<loc>'.url('/discord').'</loc>');
-});
-
-it('does not crawl the marketing surface when the feature is inactive, but keeps documentation urls', function (): void {
-    // With Marketing off, `/` 302s to the app login (same host). spatie/crawler
-    // follows redirects and resolves links found on the redirected-to body
-    // against its *effective* URL (CrawlRequestFulfilled::getBaseUrl), so a
-    // link on the login page used to get enqueued and end up in a self-hosted
-    // instance's public sitemap. Reproduce that exact chain.
-    Feature::for(null)->deactivate(Marketing::class);
-
-    $loginUrl = url()->getAppUrl('login');
-    $leakedPanelLink = url()->getAppUrl('register');
-
-    fakeSitemapCrawl([
-        config('app.url') => CrawlResponse::fake(status: 302, headers: ['Location' => $loginUrl]),
-        $loginUrl => '<html><body><a href="'.$leakedPanelLink.'">Register</a></body></html>',
-        $leakedPanelLink => '<html><body>register</body></html>',
-    ]);
-
-    $this->artisan('app:generate-sitemap')->assertSuccessful();
-
-    $xml = File::get($this->sitemap);
-
-    expect($xml)->not->toContain('<loc>'.url('/').'/</loc>')
-        ->and($xml)->not->toContain('<loc>'.$leakedPanelLink.'</loc>')
-        ->and($xml)->toContain('<loc>'.route('help.index').'</loc>')
-        ->and($xml)->toContain('<loc>'.route('documentation.index').'</loc>');
 });

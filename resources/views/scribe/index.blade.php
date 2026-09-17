@@ -1,8 +1,9 @@
 <!doctype html>
 <html>
 <head>
-    <title>Relaticle API</title>
+    <title>REST API Reference for CRM Records - Relaticle</title>
     <meta charset="utf-8"/>
+    <meta name="description" content="REST API reference for Relaticle records and custom fields, with personal access token setup, filtering, sorting and request limits."/>
     <meta
         name="viewport"
         content="width=device-width, initial-scale=1"/>
@@ -15,7 +16,7 @@
     <style>
         @font-face {
             font-family: 'Inter';
-            src: url('/fonts/inter/InterVariable.woff2') format('woff2');
+            src: url('{{ Vite::asset('resources/fonts/inter/InterVariable.woff2') }}') format('woff2');
             font-weight: 100 900;
             font-display: swap;
         }

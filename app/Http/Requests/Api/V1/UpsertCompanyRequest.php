@@ -28,7 +28,7 @@ final class UpsertCompanyRequest extends FormRequest
      */
     public function rules(): array
     {
-        $teamId = $this->teamId();
+        $workspaceId = $this->workspaceId();
         $company = $this->matchedCompany();
 
         // On the update branch a required custom field the caller omitted is
@@ -38,7 +38,7 @@ final class UpsertCompanyRequest extends FormRequest
             $this->matchRules('company', self::NATIVE_MATCH_COLUMNS),
             ['name' => ['required', 'string', 'max:255']],
             new ValidCustomFields(
-                $teamId,
+                $workspaceId,
                 'company',
                 isUpdate: $company instanceof Company,
                 ignoreEntityId: $company?->getKey(),

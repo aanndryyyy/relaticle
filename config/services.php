@@ -43,23 +43,23 @@ return [
         'redirect' => env('GOOGLE_REDIRECT_URI'),
     ],
 
-    'github' => [
-        'client_id' => env('GITHUB_CLIENT_ID'),
-        'client_secret' => env('GITHUB_CLIENT_SECRET'),
-        'redirect' => '/auth/callback/github',
+    'microsoft' => [
+        'client_id' => env('MICROSOFT_CLIENT_ID'),
+        'client_secret' => env('MICROSOFT_CLIENT_SECRET'),
+        'redirect' => '/auth/callback/microsoft',
     ],
 
     'fathom' => [
         'site_id' => env('FATHOM_ANALYTICS_SITE_ID'),
     ],
 
-    'discord' => [
-        'invite_url' => env('DISCORD_INVITE_URL'),
-    ],
-
     'turnstile' => [
         'key' => env('TURNSTILE_SITE_KEY'),
         'secret' => env('TURNSTILE_SECRET_KEY'),
+    ],
+
+    'discord' => [
+        'invite_url' => env('DISCORD_INVITE_URL'),
     ],
 
     'stripe' => [
@@ -72,9 +72,5 @@ return [
             'small' => ['price' => env('STRIPE_PRICE_CREDITS_1K'), 'credits' => 1_000],
             'large' => ['price' => env('STRIPE_PRICE_CREDITS_5K'), 'credits' => 5_000],
         ],
-    ],
-
-    'demo_account' => [
-        'password' => env('DEMO_ACCOUNT_PASSWORD'),
     ],
 ];

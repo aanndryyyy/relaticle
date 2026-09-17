@@ -5,40 +5,59 @@ declare(strict_types=1);
 namespace App\Providers;
 
 use App\Console\Commands\MakeFilamentUserCommand;
+use App\Enums\CrmEntity;
 use App\Enums\Plan;
+use App\Events\WorkspaceCreated;
+use App\Filament\CustomFields\DateFieldType;
+use App\Filament\CustomFields\DateTimeFieldType;
+use App\Filament\CustomFields\RichEditorFieldType;
 use App\Http\Responses\LoginResponse;
 use App\Listeners\Billing\SyncPlanOnStripeSubscriptionChange;
+use App\Listeners\CreateSetupConversationListener;
 use App\Listeners\Email\NewSubscriberListener;
 use App\Listeners\Email\RecordLoginTimestampListener;
-use App\Listeners\Email\TeamCreatedTagListener;
-use App\Listeners\Email\TeamMemberAddedListener;
-use App\Listeners\Mcp\CopyTeamIdToAccessToken;
-use App\Listeners\SeedTeamCreditBalanceListener;
+use App\Listeners\Email\WorkspaceCreatedTagListener;
+use App\Listeners\Email\WorkspaceMemberAddedListener;
+use App\Listeners\Mcp\CopyWorkspaceIdToAccessToken;
+use App\Listeners\SeedWorkspaceCreditBalanceListener;
 use App\Livewire\FilamentNotifications;
+use App\Mcp\Schema\McpSchemaCache;
 use App\Models\ActivityLog\Activity as ActivityModel;
-use App\Models\Company;
 use App\Models\CustomField;
 use App\Models\CustomFieldOption;
 use App\Models\CustomFieldSection;
 use App\Models\CustomFieldValue;
 use App\Models\Export;
-use App\Models\Note;
-use App\Models\Opportunity;
 use App\Models\Passport\AuthCode as McpAuthCode;
-use App\Models\People;
 use App\Models\PersonalAccessToken;
-use App\Models\Task;
-use App\Models\Team;
 use App\Models\User;
+use App\Models\Workspace;
+use App\Models\WorkspaceInvitation;
+use App\Onboarding\ActivationSteps;
 use App\Services\Billing\HostedWorkspaceAccess;
+use App\Services\DockerHubService;
 use App\Services\GitHubService;
-use App\Services\TurnstileClient;
+use App\Services\WorkspaceActivationFacts;
 use App\Support\ActivityLog\MergedActivityRenderer;
 use App\Support\ActivityLog\RequestActivityBatch;
+use App\Support\BrandColors;
+use App\Support\CustomFields\CustomFieldInput;
+use App\Support\CustomFields\RecordNameResolver;
 use App\Support\Markdown\TableAwareLeagueDriver;
+use App\Support\Media\MediaLookup;
+use App\Support\Passport\ClientRepository;
+use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
+use Filament\Auth\Notifications\NoticeOfEmailChangeRequest;
+use Filament\Auth\Notifications\ResetPassword;
+use Filament\Auth\Notifications\VerifyEmail;
+use Filament\Auth\Notifications\VerifyEmailChange;
 use Filament\Facades\Filament;
 use Filament\Livewire\Notifications;
+use Filament\Support\Assets\Js;
+use Filament\Support\Facades\FilamentAsset;
+use Filament\Support\Facades\FilamentColor;
+use Filament\Support\Facades\FilamentTimezone;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -49,32 +68,38 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades;
+use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\View\View;
 use Knuckles\Scribe\Scribe;
-use Laravel\Ai\AiManager;
 use Laravel\Cashier\Cashier;
 use Laravel\Cashier\Events\WebhookHandled;
-use Laravel\Jetstream\Events\TeamCreated;
 use Laravel\Jetstream\Events\TeamMemberAdded;
 use Laravel\Passport\AccessToken as PassportAccessToken;
+use Laravel\Passport\ClientRepository as BaseClientRepository;
 use Laravel\Passport\Events\AccessTokenCreated;
 use Laravel\Passport\Passport;
 use Laravel\Sanctum\Sanctum;
+use League\CommonMark\Extension\Table\TableExtension;
 use Livewire\Livewire;
 use Relaticle\ActivityLog\Facades\Timeline;
 use Relaticle\Chat\Support\ChatTelemetry;
 use Relaticle\CustomFields\CustomFields;
+use Relaticle\CustomFields\Facades\CustomFieldsType;
 use Relaticle\Ink\Filament\Resources\PostResource;
 use Relaticle\Ink\Ink;
 use Relaticle\Ink\Models\Category;
 use Relaticle\Ink\Models\Post;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
-use RyanChandler\LaravelCloudflareTurnstile\Contracts\ClientInterface;
-use Spatie\Activitylog\Facades\Activity as ActivityLogger;
+use SocialiteProviders\Manager\SocialiteWasCalled;
+use SocialiteProviders\Microsoft\MicrosoftExtendSocialite;
+use Spatie\Activitylog\Contracts\Activity as ActivityContract;
+use Spatie\Activitylog\Support\PendingActivityLog;
+use Spatie\LaravelMarkdown\MarkdownRenderer;
+use Spatie\Onboard\OnboardingSteps;
 
 final class AppServiceProvider extends ServiceProvider
 {
@@ -83,10 +108,14 @@ final class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        Date::use(CarbonImmutable::class);
+
         $this->app->bind(\Filament\Auth\Http\Responses\Contracts\LoginResponse::class, LoginResponse::class);
         $this->app->bind(\Filament\Actions\Exports\Models\Export::class, Export::class);
-
-        $this->app->scoped(AiManager::class, fn (Application $app): \App\Ai\AiManager => new \App\Ai\AiManager($app));
+        $this->app->bind(VerifyEmail::class, \App\Notifications\Auth\VerifyEmail::class);
+        $this->app->bind(VerifyEmailChange::class, \App\Notifications\Auth\VerifyEmailChange::class);
+        $this->app->bind(ResetPassword::class, \App\Notifications\Auth\ResetPassword::class);
+        $this->app->bind(NoticeOfEmailChangeRequest::class, \App\Notifications\Auth\NoticeOfEmailChangeRequest::class);
 
         // Ink registers its public routes from packageBooted(), which runs after every
         // provider's register(). Read the config key App\Features\Blog resolves from
@@ -94,24 +123,41 @@ final class AppServiceProvider extends ServiceProvider
         // bound this early. Same source of truth, so the flag stays the single switch.
         config(['ink.features.public_routes' => (bool) config('relaticle.features.blog', false)]);
 
-        Cashier::useCustomerModel(Team::class);
+        Cashier::useCustomerModel(Workspace::class);
         Cashier::keepPastDueSubscriptionsActive();
 
         // Cashier attaches signature verification only when the webhook secret
         // happens to be set, and also exposes an unauthenticated payment route
         // this app never links to. Register the webhook ourselves instead so
-        // verification is unconditional — see routes/web.php.
+        // verification is unconditional. See routes/web.php.
         Cashier::ignoreRoutes();
 
         // One batch_uuid per request/job, lazily generated and forgotten between
-        // them — the key the activity timeline groups a single save's rows on.
+        // them. It is the key the activity timeline groups a single save's rows on.
         $this->app->scoped(RequestActivityBatch::class);
 
-        // The turnstile package's own client discards Cloudflare's `success`
-        // flag and sets no timeout — see App\Services\TurnstileClient. Our
-        // provider registers after the package's, so this binding wins;
-        // Turnstile::fake() still swaps it, as it goes through the facade.
-        $this->app->scoped(ClientInterface::class, fn (): TurnstileClient => new TurnstileClient);
+        // Caches creation-source facts per workspace for the lifetime of a
+        // request/job, scoped so a queue worker resets it between jobs.
+        $this->app->scoped(WorkspaceActivationFacts::class);
+
+        $this->app->scoped(RecordNameResolver::class);
+        $this->app->scoped(MediaLookup::class);
+
+        // spatie/laravel-onboard binds OnboardingSteps as a SINGLETON, which
+        // makes every workspace share one OnboardingStep instance. Its complete()
+        // memoizes through once(), keyed on that shared object rather than the
+        // model, so the first workspace evaluated in a process poisons the answer for
+        // every later one, giving wrong onboarding state in any request or Horizon
+        // worker that touches two workspaces. Rebinding per resolve gives each
+        // lookup its own step objects, so once() memoizes within one lookup as
+        // intended. Registration lives here because a fresh registry starts empty.
+        $this->app->bind(function (): OnboardingSteps {
+            $steps = new OnboardingSteps;
+
+            ActivationSteps::registerOn($steps);
+
+            return $steps;
+        });
 
         // Spatie's LeagueDriver never registers TableConverter, so <table>
         // markup collapses to a run-on line in the markdown-response channel.
@@ -122,6 +168,22 @@ final class AppServiceProvider extends ServiceProvider
                 config('markdown-response.driver_options.league.options', []),
             ),
         );
+
+        // Passport self-binds this singleton, and every OAuth endpoint resolves the
+        // client it was handed through it.
+        $this->app->singleton(BaseClientRepository::class, ClientRepository::class);
+
+        // The shared MarkdownRenderer always loads HeadingPermalinkExtension, which
+        // stamps a docs-site anchor onto every heading regardless of add_anchors_to_headings.
+        $this->app->when(CustomFieldInput::class)
+            ->needs(MarkdownRenderer::class)
+            ->give(fn (): MarkdownRenderer => new MarkdownRenderer(
+                commonmarkOptions: (array) config('markdown.commonmark_options'),
+                highlightCode: false,
+                cacheStoreName: false,
+                renderAnchors: false,
+                extensions: [TableExtension::class],
+            ));
     }
 
     /**
@@ -135,18 +197,26 @@ final class AppServiceProvider extends ServiceProvider
             ]);
         }
 
+        // Panels register their own palette on boot and override this, so it only
+        // takes effect where no panel is active: the invitation, join, and
+        // scheduled-deletion interstitials, which would otherwise render
+        // Filament's default amber instead of the brand color.
+        FilamentColor::register(['primary' => BrandColors::primary()]);
+
         Event::listen(Login::class, RecordLoginTimestampListener::class);
         Event::listen(Verified::class, NewSubscriberListener::class);
-        Event::listen(TeamMemberAdded::class, TeamMemberAddedListener::class);
-        Event::listen(TeamCreated::class, TeamCreatedTagListener::class);
-        Event::listen(TeamCreated::class, SeedTeamCreditBalanceListener::class);
+        Event::listen(TeamMemberAdded::class, WorkspaceMemberAddedListener::class);
+        Event::listen(WorkspaceCreated::class, WorkspaceCreatedTagListener::class);
+        Event::listen(WorkspaceCreated::class, SeedWorkspaceCreditBalanceListener::class);
+        Event::listen(WorkspaceCreated::class, CreateSetupConversationListener::class);
+        Event::listen(SocialiteWasCalled::class, MicrosoftExtendSocialite::class);
 
         Event::listen(WebhookHandled::class, SyncPlanOnStripeSubscriptionChange::class);
 
         Sanctum::usePersonalAccessTokenModel(PersonalAccessToken::class);
 
         Passport::useAuthCodeModel(McpAuthCode::class);
-        Event::listen(AccessTokenCreated::class, CopyTeamIdToAccessToken::class);
+        Event::listen(AccessTokenCreated::class, CopyWorkspaceIdToAccessToken::class);
 
         // The grantable scopes for the v1 REST API -- EnsureTokenHasAbility maps
         // each HTTP method onto one of them. laravel/mcp appends its own
@@ -167,32 +237,32 @@ final class AppServiceProvider extends ServiceProvider
         Passport::authorizationView(function (array $parameters) {
             $user = $parameters['user'] ?? null;
 
-            $teams = $user instanceof User ? $user->allTeams() : collect();
+            $workspaces = $user instanceof User ? $user->allWorkspaces() : collect();
             $access = resolve(HostedWorkspaceAccess::class);
 
-            // Re-read the teams with their subscriptions eager-loaded: isPaused() reaches
-            // for $team->subscription(), and allTeams() hydrates more than one row, which
+            // Re-read the workspaces with their subscriptions eager-loaded: isPaused() reaches
+            // for $workspace->subscription(), and allWorkspaces() hydrates more than one row, which
             // is exactly when strict lazy loading throws.
-            /** @var list<string> $pausedTeamIds */
-            $pausedTeamIds = Team::query()
-                ->whereIn('id', $teams->pluck('id')->all())
+            /** @var list<string> $pausedWorkspaceIds */
+            $pausedWorkspaceIds = Workspace::query()
+                ->whereIn('id', $workspaces->pluck('id')->all())
                 ->with('subscriptions')
                 ->get()
-                ->filter(fn (Team $team): bool => $access->isPaused($team))
-                ->map(fn (Team $team): string => (string) $team->getKey())
+                ->filter(fn (Workspace $workspace): bool => $access->isPaused($workspace))
+                ->map(fn (Workspace $workspace): string => (string) $workspace->getKey())
                 ->values()
                 ->all();
 
-            $parameters['teams'] = $teams;
-            $parameters['pausedTeamIds'] = $pausedTeamIds;
+            $parameters['workspaces'] = $workspaces;
+            $parameters['pausedWorkspaceIds'] = $pausedWorkspaceIds;
 
-            // Never preselect a workspace the connector could not use — the user would
+            // Never preselect a workspace the connector could not use. The user would
             // approve a token that answers 402 on every call.
-            $currentTeamId = $user?->currentTeam?->getKey();
+            $currentWorkspaceId = $user?->currentWorkspace?->getKey();
 
-            $parameters['selectedTeamId'] = is_string($currentTeamId) && ! in_array($currentTeamId, $pausedTeamIds, true)
-                ? $currentTeamId
-                : $teams->first(fn (Team $team): bool => ! in_array((string) $team->getKey(), $pausedTeamIds, true))?->getKey();
+            $parameters['selectedWorkspaceId'] = is_string($currentWorkspaceId) && ! in_array($currentWorkspaceId, $pausedWorkspaceIds, true)
+                ? $currentWorkspaceId
+                : $workspaces->first(fn (Workspace $workspace): bool => ! in_array((string) $workspace->getKey(), $pausedWorkspaceIds, true))?->getKey();
 
             return response()->view('mcp.authorize', $parameters);
         });
@@ -241,7 +311,7 @@ final class AppServiceProvider extends ServiceProvider
         });
 
         // HasSEO creates a row per post but never removes it. A soft delete should
-        // keep it — the post can come back — but a force delete from the panel
+        // keep it, because the post can come back, but a force delete from the panel
         // would otherwise leave the seo row behind for good.
         Post::forceDeleted(fn (Post $post) => $post->seo()->delete());
     }
@@ -253,8 +323,9 @@ final class AppServiceProvider extends ServiceProvider
      */
     private function configureActivityLog(): void
     {
-        ActivityLogger::beforeLogging(function (ActivityModel $activity): void {
-            if (blank($activity->getAttribute('batch_uuid'))) {
+        // The facade resolves authentication before hostname-specific sessions are configured.
+        PendingActivityLog::beforeLogging(function (ActivityContract $activity): void {
+            if ($activity instanceof ActivityModel && blank($activity->getAttribute('batch_uuid'))) {
                 $activity->setAttribute('batch_uuid', $this->app->make(RequestActivityBatch::class)->id());
             }
         });
@@ -353,11 +424,11 @@ final class AppServiceProvider extends ServiceProvider
             /** @var User|null $user */
             $user = $request->user();
             $tokenId = $this->rateLimitTokenId($user?->currentAccessToken());
-            $teamId = $user?->currentTeam?->getKey();
+            $workspaceId = $user?->currentWorkspace?->getKey();
             $key = $tokenId ?: $request->ip();
 
             $limits = [
-                Limit::perMinute(600)->by('team:'.($teamId ?? $request->ip())),
+                Limit::perMinute(600)->by('workspace:'.($workspaceId ?? $request->ip())),
             ];
 
             if ($request->isMethod('GET')) {
@@ -376,21 +447,34 @@ final class AppServiceProvider extends ServiceProvider
             fn (Request $request) => Limit::perMinute(20)->by($request->ip()),
         );
 
+        // Transcription reserves no credit, so the limiters are the only ceiling on
+        // provider spend. The per-minute and per-day buckets on the route are keyed
+        // per user and stay that way; this one is the ACCOUNT ceiling that was
+        // missing, because billing and credits are per workspace and an N-seat workspace
+        // otherwise multiplied the daily allowance by N with nothing to notice.
+        RateLimiter::for('transcribe-workspace-daily', function (Request $request): Limit {
+            /** @var User|null $user */
+            $user = $request->user();
+            $workspace = $user?->currentWorkspace;
+
+            return Limit::perMinutes(1440, 240)->by('transcribe-workspace:'.($workspace?->getKey() ?? $request->ip()));
+        });
+
         RateLimiter::for('chat-send', function (Request $request) {
             /** @var User|null $user */
             $user = $request->user();
-            $team = $user?->currentTeam;
+            $workspace = $user?->currentWorkspace;
 
-            if ($team === null) {
+            if ($workspace === null) {
                 return Limit::perMinute(Plan::default()->rateLimit())->by('chat-anon');
             }
 
-            return Limit::perMinute($team->plan->rateLimit())
-                ->by($team->getKey())
-                ->response(function (Request $request, array $headers) use ($team) {
+            return Limit::perMinute($workspace->plan->rateLimit())
+                ->by($workspace->getKey())
+                ->response(function (Request $request, array $headers) use ($workspace) {
                     ChatTelemetry::rateLimited(
-                        teamId: (string) $team->getKey(),
-                        plan: $team->plan->value,
+                        workspaceId: (string) $workspace->getKey(),
+                        plan: $workspace->plan->value,
                     );
 
                     $seconds = (int) ($headers['Retry-After'] ?? 0);
@@ -399,7 +483,7 @@ final class AppServiceProvider extends ServiceProvider
                         'error' => 'rate_limited',
                         'message' => "You're sending messages quickly. You can send again in {$seconds} seconds.",
                         'retry_after_seconds' => $seconds,
-                        'plan' => $team->plan->value,
+                        'plan' => $workspace->plan->value,
                     ], 429, $headers);
                 });
         });
@@ -415,13 +499,13 @@ final class AppServiceProvider extends ServiceProvider
             $user = new User;
             $user->forceFill(['id' => 'scribe-user-id', 'name' => 'Scribe User', 'email' => 'scribe@example.com']);
 
-            $team = new Team;
-            $team->forceFill(['id' => 'scribe-team-id', 'name' => 'Scribe Team', 'user_id' => $user->id, 'personal_team' => true]);
-            $team->setRelation('owner', $user);
-            $team->setRelation('users', collect());
+            $workspace = new Workspace;
+            $workspace->forceFill(['id' => 'scribe-workspace-id', 'name' => 'Scribe Workspace', 'user_id' => $user->id, 'personal_workspace' => true]);
+            $workspace->setRelation('owner', $user);
+            $workspace->setRelation('users', $user->newCollection());
 
-            $user->forceFill(['current_team_id' => $team->id]);
-            $user->setRelation('currentTeam', $team);
+            $user->forceFill(['current_workspace_id' => $workspace->id]);
+            $user->setRelation('currentWorkspace', $workspace);
 
             return $user;
         };
@@ -449,17 +533,14 @@ final class AppServiceProvider extends ServiceProvider
         Model::preventLazyLoading(! $this->app->isProduction());
 
         Relation::enforceMorphMap([
-            'team' => Team::class,
+            'workspace' => Workspace::class,
             'user' => User::class,
-            'people' => People::class,
-            'company' => Company::class,
-            'opportunity' => Opportunity::class,
-            'task' => Task::class,
-            'note' => Note::class,
+            ...CrmEntity::morphMap(),
             'system_administrator' => SystemAdministrator::class,
             'custom_field' => CustomField::class,
             'blog_post' => Post::class,
             'blog_category' => Category::class,
+            'workspace_invitation' => WorkspaceInvitation::class,
         ]);
 
         // Use custom models for custom-fields package
@@ -467,6 +548,57 @@ final class AppServiceProvider extends ServiceProvider
         CustomFields::useSectionModel(CustomFieldSection::class);
         CustomFields::useOptionModel(CustomFieldOption::class);
         CustomFields::useValueModel(CustomFieldValue::class);
+
+        // Replaces the package's definitions so custom-field dates read the same as the
+        // native columns beside them: `date-time` swaps the table column, which otherwise
+        // renders stored UTC to every viewer (App\Filament\CustomFields\DateTimeColumn),
+        // and both swap the infolist entry, which otherwise hardcodes `Y-m-d H:i:s` on
+        // record pages (App\Filament\CustomFields\DateTimeEntry).
+        //
+        // `date` gets the entry only. A bare date has no time of day, so converting one
+        // would move it a day for every viewer west of UTC.
+        CustomFieldsType::register([
+            'date-time' => DateTimeFieldType::class,
+            'date' => DateFieldType::class,
+            'rich-editor' => RichEditorFieldType::class,
+        ]);
+
+        $this->configureCustomFieldSchemaInvalidation();
+    }
+
+    /**
+     * The AI list tools memoise which custom fields are filterable, per tenant and
+     * entity, for a minute. Hooking the model rather than the actions keeps the
+     * Filament management page, which writes definitions directly, from leaving
+     * the assistant insisting a field the user just added does not exist.
+     */
+    private function configureCustomFieldSchemaInvalidation(): void
+    {
+        $invalidate = static function (CustomField $field): void {
+            $tenantId = $field->getAttribute('tenant_id');
+            $entityType = $field->getAttribute('entity_type');
+
+            if ((is_string($tenantId) || is_int($tenantId)) && is_string($entityType)) {
+                McpSchemaCache::forget($tenantId, $entityType);
+            }
+        };
+
+        CustomField::saved($invalidate);
+        CustomField::deleted($invalidate);
+
+        // An option carries its own tenant_id, so clearing that tenant's five entity
+        // schemas beats one SELECT per option row: workspace creation seeds sixteen of
+        // them inside the registration transaction.
+        $invalidateOption = static function (CustomFieldOption $option): void {
+            $tenantId = $option->getAttribute('tenant_id');
+
+            if (is_string($tenantId) || is_int($tenantId)) {
+                McpSchemaCache::forgetTenant($tenantId);
+            }
+        };
+
+        CustomFieldOption::saved($invalidateOption);
+        CustomFieldOption::deleted($invalidateOption);
     }
 
     /**
@@ -483,6 +615,50 @@ final class AppServiceProvider extends ServiceProvider
 
             return $action;
         });
+
+        /**
+         * Datetimes are stored in UTC; every panel renders and accepts them in the
+         * signed-in account's chosen zone. Read by both table/infolist output and
+         * DateTimePicker input, so one closure keeps display and entry symmetrical.
+         *
+         * TimezoneManager is a single global slot, so this must stay the only writer.
+         * A second FilamentTimezone::set() anywhere would silently replace it, and
+         * which one survived would depend on service provider boot order. It lives
+         * here rather than in a panel provider for the same reason: the resolution
+         * spans every panel.
+         *
+         * The account is read through the current panel's own guard and by attribute
+         * rather than by class, so App\Models\User and SystemAdministrator are both
+         * served without this layer naming the sysadmin package. Returning null falls
+         * back to config('app.timezone'), which covers an unset zone, a zone that is
+         * no longer a valid identifier, an account type that has no zone at all, and
+         * any request outside a panel.
+         */
+        FilamentTimezone::set(function (): ?string {
+            if (Filament::getCurrentPanel() === null) {
+                return null;
+            }
+
+            $timezone = Filament::auth()->user()?->getAttribute('timezone');
+
+            if (! is_string($timezone)) {
+                return null;
+            }
+
+            return in_array($timezone, timezone_identifiers_list(), true) ? $timezone : null;
+        });
+
+        // The browser loads the published copy: run `php artisan filament:assets` after editing it.
+        FilamentAsset::register([
+            Js::make('rich-editor-slash-menu', resource_path('js/filament/rich-content-plugins/slash-menu.js'))
+                ->loadedOnRequest(),
+            Js::make('payload-guard', resource_path('js/filament/payload-guard.js')),
+        ]);
+
+        FilamentAsset::registerScriptData(['payloadTooLarge' => __('filament/panel.payload_too_large')]);
+
+        // App assets are otherwise versioned with Filament's release, so an edit would keep its cached URL.
+        FilamentAsset::appVersion((string) filemtime(public_path('js/app/rich-editor-slash-menu.js')));
     }
 
     /**
@@ -499,6 +675,10 @@ final class AppServiceProvider extends ServiceProvider
                 'githubStars' => $starsCount,
                 'formattedGithubStars' => $formattedStarsCount,
             ]);
+        });
+
+        Facades\View::composer('home.partials.works-with', function (View $view): void {
+            $view->with('formattedDockerPulls', resolve(DockerHubService::class)->getFormattedPullCount());
         });
     }
 }

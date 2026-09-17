@@ -8,22 +8,21 @@ use App\Actions\CustomFields\EnsureTagOptionsExist;
 use App\Enums\CreationSource;
 use App\Models\CustomField;
 use App\Models\User;
-use Carbon\Carbon;
+use Carbon\CarbonImmutable;
 use Filament\Notifications\Notification;
 use Illuminate\Bus\Batchable;
-use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\Backoff;
 use Illuminate\Queue\Attributes\Timeout;
 use Illuminate\Queue\Attributes\Tries;
-use Illuminate\Queue\InteractsWithQueue;
-use Illuminate\Queue\SerializesModels;
+use Illuminate\Queue\Middleware\FailOnException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use LogicException;
 use Relaticle\CustomFields\CustomFields;
 use Relaticle\CustomFields\Enums\FieldDataType;
 use Relaticle\CustomFields\Filament\Integration\Support\Imports\ImportDataStorage;
@@ -41,11 +40,14 @@ use Relaticle\ImportWizard\Enums\ImportStatus;
 use Relaticle\ImportWizard\Enums\MatchBehavior;
 use Relaticle\ImportWizard\Enums\NumberFormat;
 use Relaticle\ImportWizard\Enums\RowMatchAction;
+use Relaticle\ImportWizard\Exceptions\MissingRequiredFieldException;
+use Relaticle\ImportWizard\Exceptions\UnparsableDateException;
 use Relaticle\ImportWizard\Importers\BaseImporter;
 use Relaticle\ImportWizard\Models\Import;
 use Relaticle\ImportWizard\Store\ImportRow;
 use Relaticle\ImportWizard\Store\ImportStore;
 use Relaticle\ImportWizard\Support\EntityLinkStorage\EntityLinkStorageInterface;
+use Spatie\Activitylog\Support\CauserResolver;
 
 #[Backoff([10, 30])]
 #[Timeout(300)]
@@ -53,10 +55,7 @@ use Relaticle\ImportWizard\Support\EntityLinkStorage\EntityLinkStorageInterface;
 final class ExecuteImportJob implements ShouldQueue
 {
     use Batchable;
-    use Dispatchable;
-    use InteractsWithQueue;
     use Queueable;
-    use SerializesModels;
 
     private const string CUSTOM_FIELD_PREFIX = 'custom_fields_';
 
@@ -81,18 +80,31 @@ final class ExecuteImportJob implements ShouldQueue
     /** @var array<string, array{field: CustomField, values: array<int, string>}> */
     private array $pendingTagOptions = [];
 
+    /**
+     * Zone the CSV's naive datetimes are interpreted in: the importer's own, so an
+     * imported value lands on the same instant as the same string typed into the form.
+     * Resolved once in handle() because the job runs on the queue with no session.
+     */
+    private string $importerTimezone = 'UTC';
+
     public function __construct(
         private readonly string $importId,
-        private readonly string $teamId,
+        private readonly string $workspaceId,
     ) {
         $this->onQueue('imports');
+    }
+
+    /** @return list<FailOnException> */
+    public function middleware(): array
+    {
+        return [new FailOnException([LogicException::class])];
     }
 
     public function handle(): void
     {
         $import = Import::query()->findOrFail($this->importId);
 
-        if ($import->team_id !== $this->teamId) {
+        if ($import->workspace_id !== $this->workspaceId) {
             return;
         }
 
@@ -103,6 +115,10 @@ final class ExecuteImportJob implements ShouldQueue
         }
 
         $store->ensureProcessedColumn();
+
+        throw_if($store->query()->where('processed', false)->whereNull('match_action')->exists(), LogicException::class, 'Import match resolution is incomplete.');
+
+        $this->importerTimezone = $import->user?->effectiveTimezone() ?? (string) config('app.timezone');
 
         $importer = $import->getImporter();
         $mappings = $import->columnMappings();
@@ -124,26 +140,28 @@ final class ExecuteImportJob implements ShouldQueue
             : null;
 
         $context = [
-            'team_id' => $this->teamId,
+            'workspace_id' => $this->workspaceId,
             'creator_id' => $import->user_id,
         ];
 
         try {
-            $store->query()
-                ->where('processed', false)
-                ->orderBy('row_number')
-                ->chunkById(500, function (Collection $rows) use ($importer, $fieldMappings, $allowedKeys, $customFieldDefs, $customFieldFormatMap, $matchField, $matchSourceColumn, $context, &$results, $store, $import): void {
-                    $existingRecords = $this->preloadExistingRecords($rows, $importer);
+            resolve(CauserResolver::class)->withCauser($import->user, function () use ($store, $importer, $fieldMappings, $allowedKeys, $customFieldDefs, $customFieldFormatMap, $matchField, $matchSourceColumn, $context, &$results, $import): void {
+                $store->query()
+                    ->where('processed', false)
+                    ->orderBy('row_number')
+                    ->chunkById(500, function (Collection $rows) use ($importer, $fieldMappings, $allowedKeys, $customFieldDefs, $customFieldFormatMap, $matchField, $matchSourceColumn, $context, &$results, $store, $import): void {
+                        $existingRecords = $this->preloadExistingRecords($rows, $importer);
 
-                    foreach ($rows as $row) {
-                        $this->processRow($row, $importer, $fieldMappings, $allowedKeys, $customFieldDefs, $customFieldFormatMap, $matchField, $matchSourceColumn, $context, $results, $existingRecords);
-                        $this->flushProcessedRows($store);
-                    }
-                    $this->flushCustomFieldValues();
-                    $this->flushTagOptions();
-                    $this->flushFailedRows($import);
-                    $this->persistResults($import, $results);
-                });
+                        foreach ($rows as $row) {
+                            $this->processRow($row, $importer, $fieldMappings, $allowedKeys, $customFieldDefs, $customFieldFormatMap, $matchField, $matchSourceColumn, $context, $results, $existingRecords);
+                            $this->flushProcessedRows($store);
+                        }
+                        $this->flushCustomFieldValues();
+                        $this->flushTagOptions();
+                        $this->flushFailedRows($import);
+                        $this->persistResults($import, $results);
+                    });
+            });
 
             $import->update([
                 'status' => ImportStatus::Completed,
@@ -243,6 +261,11 @@ final class ExecuteImportJob implements ShouldQueue
 
         try {
             $data = $this->buildDataFromRow($row, $fieldMappings);
+
+            if ($isCreate) {
+                $this->assertRequiredFieldsPresent($data, $importer);
+            }
+
             $existing = $isCreate
                 ? (null)
                 : $existingRecords[(string) $effectiveMatchedId] ?? $this->findExistingRecord($importer, $effectiveMatchedId);
@@ -262,7 +285,7 @@ final class ExecuteImportJob implements ShouldQueue
                 $prepared = array_intersect_key($prepared, $allowedKeys);
 
                 if (! $isCreate) {
-                    unset($prepared['team_id'], $prepared['creator_id'], $prepared['creation_source']);
+                    unset($prepared['workspace_id'], $prepared['creator_id'], $prepared['creation_source']);
                     $prepared = array_filter($prepared, filled(...));
                 }
 
@@ -283,8 +306,6 @@ final class ExecuteImportJob implements ShouldQueue
 
                 $this->storeEntityLinkRelationships($record, $pendingRelationships, $context);
 
-                $results[$isCreate ? 'created' : 'updated']++;
-
                 $storedCustomFieldData = ImportDataStorage::pull($record);
                 $batchableData = array_intersect_key($storedCustomFieldData, $customFieldDefs->all());
                 $remainingData = array_diff_key($storedCustomFieldData, $batchableData);
@@ -296,6 +317,11 @@ final class ExecuteImportJob implements ShouldQueue
                 }
 
                 $importer->afterSave($record, $context);
+
+                // Counted last. A rollback undoes the record but not a PHP counter, so
+                // incrementing before the custom-field pass could report a row as created
+                // that the database no longer holds.
+                $results[$isCreate ? 'created' : 'updated']++;
             });
 
             $this->markProcessed($row);
@@ -309,11 +335,10 @@ final class ExecuteImportJob implements ShouldQueue
     /** @return Collection<string, CustomField> */
     private function loadCustomFieldDefinitions(BaseImporter $importer): Collection
     {
-        /** @phpstan-ignore return.type (App\Models\CustomField extends vendor class at runtime via model swapping) */
         return CustomField::query()
             ->withoutGlobalScopes()
-            ->with(['options' => fn (HasMany $q) => $q->withoutGlobalScopes()])
-            ->where('tenant_id', $this->teamId)
+            ->with(['options' => fn (Relation $q): Relation => $q->withoutGlobalScopes()])
+            ->where('tenant_id', $this->workspaceId)
             ->where('entity_type', $importer->entityName())
             ->where('type', '!=', 'record')
             ->active()
@@ -370,7 +395,7 @@ final class ExecuteImportJob implements ShouldQueue
                 'entity_type' => $record->getMorphClass(),
                 'entity_id' => $record->getKey(),
                 'custom_field_id' => $cf->getKey(),
-                $tenantKey => $this->teamId,
+                $tenantKey => $this->workspaceId,
                 'string_value' => null,
                 'text_value' => null,
                 'integer_value' => null,
@@ -421,7 +446,7 @@ final class ExecuteImportJob implements ShouldQueue
                 ->where('entity_type', $entityType)
                 ->where('entity_id', $entityId)
                 ->where('custom_field_id', $cfId)
-                ->where($tenantKey, $this->teamId)
+                ->where($tenantKey, $this->workspaceId)
                 ->value('json_value');
 
             if ($dbRow !== null) {
@@ -469,9 +494,7 @@ final class ExecuteImportJob implements ShouldQueue
     {
         $code = $cf->code;
 
-        if (! isset($this->pendingTagOptions[$code])) {
-            $this->pendingTagOptions[$code] = ['field' => $cf, 'values' => []];
-        }
+        $this->pendingTagOptions[$code] ??= ['field' => $cf, 'values' => []];
 
         foreach ($values as $value) {
             if (is_string($value) && trim($value) !== '') {
@@ -534,7 +557,7 @@ final class ExecuteImportJob implements ShouldQueue
         $modelClass = $importer->modelClass();
 
         return $modelClass::query()
-            ->where('team_id', $this->teamId)
+            ->where('workspace_id', $this->workspaceId)
             ->whereIn((new $modelClass)->getKeyName(), $updateIds)
             ->get()
             ->keyBy(fn (Model $model): string => (string) $model->getKey())
@@ -573,7 +596,7 @@ final class ExecuteImportJob implements ShouldQueue
         $rows = collect($this->failedRows)->map(fn (array $row): array => [
             'id' => (string) Str::ulid(),
             'import_id' => $import->id,
-            'team_id' => $this->teamId,
+            'workspace_id' => $this->workspaceId,
             'data' => json_encode($row['data'] ?? ['row_number' => $row['row']]),
             'validation_error' => $row['error'],
             'created_at' => $now,
@@ -585,6 +608,35 @@ final class ExecuteImportJob implements ShouldQueue
         }
 
         $this->failedRows = [];
+    }
+
+    /**
+     * A required field that arrives blank used to be written straight through, producing
+     * records like a company whose name is the empty string: invisible in the list, absent
+     * from search, and counted as a successful import. The wizard flags these at the review
+     * step, but nothing re-checked them at write time, so continuing past the warning
+     * created them anyway.
+     *
+     * Only enforced on create. An update legitimately carries a partial payload. A blank
+     * cell there means "leave this column alone", not "erase the name".
+     *
+     * @param  array<string, mixed>  $data
+     *
+     * @throws MissingRequiredFieldException
+     */
+    private function assertRequiredFieldsPresent(array $data, BaseImporter $importer): void
+    {
+        foreach ($importer->allFields()->required() as $field) {
+            if (! array_key_exists($field->key, $data)) {
+                continue;
+            }
+
+            $value = $data[$field->key];
+
+            if (is_string($value) ? trim($value) === '' : blank($value)) {
+                throw new MissingRequiredFieldException($field->label);
+            }
+        }
     }
 
     /**
@@ -645,6 +697,8 @@ final class ExecuteImportJob implements ShouldQueue
 
     /**
      * Apply format-aware conversion for date/datetime and float custom field values.
+     *
+     * @throws UnparsableDateException when a date column holds something that is not a date
      */
     private function convertCustomFieldValue(mixed $value, CustomField $cf, ?ColumnData $columnData): mixed
     {
@@ -654,12 +708,25 @@ final class ExecuteImportJob implements ShouldQueue
 
         $dataType = $cf->typeData->dataType;
 
+        // A cell holding only whitespace means "no value", not a malformed date. It is
+        // cleared downstream, so it must not reach the parser and be failed as garbage.
+        if ($dataType->isDateOrDateTime() && trim($value) === '') {
+            return $value;
+        }
+
         if ($dataType === FieldDataType::DATE || $dataType === FieldDataType::DATE_TIME) {
             $format = $columnData instanceof ColumnData ? ($columnData->dateFormat ?? DateFormat::ISO) : DateFormat::ISO;
-            $parsed = $format->parse($value, $dataType->isTimestamp());
+            $parsed = $format->parse($value, $dataType->isTimestamp(), $this->importerTimezone);
 
-            if (! $parsed instanceof Carbon) {
-                return $value;
+            /**
+             * An unparseable date used to be returned as-is, which the SafeValueConverter
+             * then blanked to null: the row imported, the value vanished, and the summary
+             * still said "0 failed". Silently dropping data the user handed us is worse
+             * than refusing the row, so fail it and let the existing failed-row path
+             * surface the column and the offending value.
+             */
+            if (! $parsed instanceof CarbonImmutable) {
+                throw new UnparsableDateException($cf->name, $value, $format);
             }
 
             return $dataType === FieldDataType::DATE
@@ -735,7 +802,7 @@ final class ExecuteImportJob implements ShouldQueue
         $keys = collect($importer->allFields())
             ->reject(fn (ImportField $field): bool => $field->key === 'id')
             ->pluck('key')
-            ->merge(['team_id', 'creator_id', 'creation_source'])
+            ->merge(['workspace_id', 'creator_id', 'creation_source'])
             ->merge(
                 collect($importer->entityLinks())
                     ->pluck('foreignKey')
@@ -756,7 +823,7 @@ final class ExecuteImportJob implements ShouldQueue
         $modelClass = $importer->modelClass();
 
         return $modelClass::query()
-            ->where('team_id', $this->teamId)
+            ->where('workspace_id', $this->workspaceId)
             ->find($matchedId);
     }
 
@@ -924,7 +991,7 @@ final class ExecuteImportJob implements ShouldQueue
         $record = new $link->targetModelClass;
         $record->forceFill([
             'name' => $creationName,
-            'team_id' => $context['team_id'],
+            'workspace_id' => $context['workspace_id'],
             'creator_id' => $context['creator_id'],
             'creation_source' => CreationSource::IMPORT,
         ]);
@@ -969,7 +1036,7 @@ final class ExecuteImportJob implements ShouldQueue
 
         $cf = CustomField::query()
             ->withoutGlobalScopes()
-            ->where('tenant_id', $context['team_id'])
+            ->where('tenant_id', $context['workspace_id'])
             ->where('entity_type', $link->targetEntity)
             ->where('code', $fieldCode)
             ->first();
@@ -990,7 +1057,7 @@ final class ExecuteImportJob implements ShouldQueue
             'entity_type' => $record->getMorphClass(),
             'entity_id' => $record->getKey(),
             'custom_field_id' => $cf->getKey(),
-            $tenantKey => $context['team_id'],
+            $tenantKey => $context['workspace_id'],
             'string_value' => null,
             'text_value' => null,
             'integer_value' => null,
@@ -1015,7 +1082,7 @@ final class ExecuteImportJob implements ShouldQueue
         string $dedupKey,
     ): ?string {
         $record = $link->targetModelClass::query()
-            ->where('team_id', $context['team_id'])
+            ->where('workspace_id', $context['workspace_id'])
             ->where('name', $name)
             ->first();
 

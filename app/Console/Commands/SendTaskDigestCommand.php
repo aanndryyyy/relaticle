@@ -27,7 +27,7 @@ final class SendTaskDigestCommand extends Command
         $sent = 0;
 
         $this->recipientsAtLocalHour(8)
-            ->with(['ownedTeams', 'teams'])
+            ->with(['ownedWorkspaces', 'workspaces'])
             ->chunkById(500, function (Collection $users) use ($digestService, &$sent): void {
                 foreach ($users as $user) {
                     if ($this->sendForUser($user, $digestService)) {
@@ -44,7 +44,7 @@ final class SendTaskDigestCommand extends Command
     /**
      * Users whose local time is currently at the given hour, filtered in the
      * database (indexed on `timezone`) so the hourly run never loads the whole
-     * user table — only the ~1/24th of users currently in the 08:00 band.
+     * user table, only the ~1/24th of users currently in the 08:00 band.
      *
      * @return Builder<User>
      */
@@ -75,8 +75,7 @@ final class SendTaskDigestCommand extends Command
 
     private function sendForUser(User $user, DigestService $digestService): bool
     {
-        $timezone = $user->timezone ?? (string) config('app.timezone');
-        $localNow = Date::now($timezone);
+        $localNow = Date::now($user->effectiveTimezone());
 
         if ($localNow->hour !== 8) {
             return false;

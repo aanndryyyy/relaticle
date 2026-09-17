@@ -6,6 +6,7 @@ namespace App\Actions\CustomFields;
 
 use App\Models\CustomField;
 use App\Models\User;
+use App\Support\CustomFieldDefinitionValidator;
 use Relaticle\CustomFields\Services\TenantContextService;
 
 final readonly class UpdateCustomField
@@ -15,22 +16,19 @@ final readonly class UpdateCustomField
      */
     public function execute(User $user, CustomField $field, array $data): CustomField
     {
-        abort_unless($user->ownsTeam($user->currentTeam), 403, 'Only team owners can manage custom field definitions.');
+        abort_unless($user->ownsWorkspace($user->currentWorkspace), 403, 'Only workspace owners can manage custom field definitions.');
         abort_if($field->isSystemDefined(), 422, 'System-defined custom fields cannot be modified.');
 
-        $teamId = $user->currentTeam->getKey();
+        $workspaceId = $user->currentWorkspace->getKey();
         $previousTenantId = TenantContextService::getCurrentTenantId();
-        TenantContextService::setTenantId($teamId);
+        TenantContextService::setTenantId($workspaceId);
 
         try {
-            $attributes = array_filter([
-                'name' => isset($data['name']) && is_string($data['name']) && $data['name'] !== '' ? $data['name'] : null,
-                'active' => isset($data['active']) ? (bool) $data['active'] : null,
-            ], fn (mixed $v): bool => $v !== null);
+            // Re-validated here, not just at proposal time: a rename approved after
+            // someone else claimed the name must fail rather than write a duplicate.
+            $attributes = CustomFieldDefinitionValidator::forRename($user, $field, $data);
 
-            if ($attributes !== []) {
-                $field->update($attributes);
-            }
+            $field->update($attributes);
         } finally {
             TenantContextService::setTenantId($previousTenantId);
         }

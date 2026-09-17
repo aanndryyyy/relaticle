@@ -44,7 +44,7 @@ final readonly class FindEntityByFieldValue
      * @param  class-string<Model>  $modelClass
      * @param  array<int, string>  $nativeColumns  Model columns the caller may match on instead of a custom field code
      */
-    public function execute(string $modelClass, string $teamId, string $field, string $value, array $nativeColumns = []): ?Model
+    public function execute(string $modelClass, string $workspaceId, string $field, string $value, array $nativeColumns = []): ?Model
     {
         $value = trim($value);
 
@@ -53,7 +53,7 @@ final readonly class FindEntityByFieldValue
         }
 
         $model = new $modelClass;
-        $query = $modelClass::query()->where('team_id', $teamId);
+        $query = $modelClass::query()->where('workspace_id', $workspaceId);
 
         if (in_array($field, $nativeColumns, true)) {
             $comparison = $this->nativeColumnComparison($field);
@@ -64,7 +64,7 @@ final readonly class FindEntityByFieldValue
 
             $query->where($comparison, mb_strtolower($value));
         } else {
-            $entityIds = $this->entityIdsCarryingValue($model->getMorphClass(), $teamId, $field, $value);
+            $entityIds = $this->entityIdsCarryingValue($model->getMorphClass(), $workspaceId, $field, $value);
 
             if ($entityIds === []) {
                 return null;
@@ -112,11 +112,11 @@ final readonly class FindEntityByFieldValue
     /**
      * @return array<int, string>
      */
-    private function entityIdsCarryingValue(string $entityType, string $teamId, string $code, string $value): array
+    private function entityIdsCarryingValue(string $entityType, string $workspaceId, string $code, string $value): array
     {
         $customField = CustomField::query()
             ->withoutGlobalScopes()
-            ->where('tenant_id', $teamId)
+            ->where('tenant_id', $workspaceId)
             ->where('entity_type', $entityType)
             ->where('code', $code)
             ->active()
@@ -136,7 +136,7 @@ final readonly class FindEntityByFieldValue
         $column = $customField->getValueColumn();
 
         if ($column === 'json_value') {
-            return $this->entityIdsFromJsonArray($entityType, $teamId, (string) $customField->getKey(), $value);
+            return $this->entityIdsFromJsonArray($entityType, $workspaceId, (string) $customField->getKey(), $value);
         }
 
         $comparison = $this->caseInsensitiveComparison($column);
@@ -147,7 +147,7 @@ final readonly class FindEntityByFieldValue
 
         return CustomFieldValue::query()
             ->withoutGlobalScopes()
-            ->where($this->tenantKey(), $teamId)
+            ->where($this->tenantKey(), $workspaceId)
             ->where('entity_type', $entityType)
             ->where('custom_field_id', $customField->getKey())
             ->where($comparison, mb_strtolower($value))
@@ -165,7 +165,7 @@ final readonly class FindEntityByFieldValue
      *
      * @return array<int, string>
      */
-    private function entityIdsFromJsonArray(string $entityType, string $teamId, string $customFieldId, string $value): array
+    private function entityIdsFromJsonArray(string $entityType, string $workspaceId, string $customFieldId, string $value): array
     {
         $model = new CustomFieldValue;
         $connection = $model->getConnection();
@@ -208,7 +208,7 @@ final readonly class FindEntityByFieldValue
                   AND LOWER(jt.val) = ?",
         };
 
-        return collect($connection->select($sql, [$teamId, $customFieldId, $entityType, mb_strtolower($value)]))
+        return collect($connection->select($sql, [$workspaceId, $customFieldId, $entityType, mb_strtolower($value)]))
             ->pluck('entity_id')
             ->map(fn (mixed $id): string => (string) $id)
             ->all();

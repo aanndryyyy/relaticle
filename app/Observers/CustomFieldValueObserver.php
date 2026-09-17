@@ -6,7 +6,8 @@ namespace App\Observers;
 
 use App\Actions\CustomFields\EnsureTagOptionsExist;
 use App\Models\CustomFieldValue;
-use Illuminate\Support\Carbon;
+use App\Support\Media\UploadClaims;
+use Carbon\CarbonInterface;
 use Relaticle\CustomFields\Enums\FieldDataType;
 use Relaticle\CustomFields\Facades\CustomFieldsType;
 use Relaticle\CustomFields\FieldTypeSystem\BaseFieldType;
@@ -17,10 +18,20 @@ final readonly class CustomFieldValueObserver
 {
     public function __construct(
         private EnsureTagOptionsExist $ensureTagOptionsExist,
+        private UploadClaims $uploadClaims,
     ) {}
+
+    public function saving(CustomFieldValue $value): void
+    {
+        $this->uploadClaims->assertClaimable($value);
+    }
 
     public function saved(CustomFieldValue $value): void
     {
+        if ($value->wasRecentlyCreated || $value->wasChanged(['string_value', 'text_value'])) {
+            $this->uploadClaims->sync($value);
+        }
+
         // Only multi-value fields (tags-input et al.) store an array in json_value;
         // scalar-typed fields leave it blank. Short-circuit before loading the
         // customField relation so ordinary custom-field saves incur no extra query.
@@ -54,7 +65,7 @@ final readonly class CustomFieldValueObserver
         $old = $value->getOriginal($column);
 
         // A normalization-only rewrite (e.g. a link field stripping its URL scheme on
-        // save) is not a user edit — comparing the field-type-normalized old and new
+        // save) is not a user edit. Comparing the field-type-normalized old and new
         // values keeps the timeline from attributing a change the user never made.
         if ($this->normalize($value->customField, $old) === $this->normalize($value->customField, $value->getValue())) {
             return;
@@ -103,8 +114,8 @@ final readonly class CustomFieldValueObserver
             FieldDataType::SINGLE_CHOICE => $this->optionLabel($field, $value) ?? (string) $value,
             FieldDataType::MULTI_CHOICE => $this->multiOptionLabels($field, $value),
             FieldDataType::BOOLEAN => $value ? 'Yes' : 'No',
-            FieldDataType::DATE => $value instanceof Carbon ? $value->toDateString() : (string) $value,
-            FieldDataType::DATE_TIME => $value instanceof Carbon ? $value->toDateTimeString() : (string) $value,
+            FieldDataType::DATE => $value instanceof CarbonInterface ? $value->toDateString() : (string) $value,
+            FieldDataType::DATE_TIME => $value instanceof CarbonInterface ? $value->toDateTimeString() : (string) $value,
             default => (string) $value,
         };
 
@@ -135,7 +146,7 @@ final readonly class CustomFieldValueObserver
 
         $labels = $ids
             // Arbitrary-value fields (link, tags-input) store raw strings rather than
-            // option IDs, so no option matches — fall back to the value itself instead
+            // option IDs, so no option matches. Fall back to the value itself instead
             // of leaking escaped JSON.
             ->map(fn (mixed $id): string => $this->optionLabel($field, $id) ?? (string) $id)
             ->filter(fn (string $label): bool => $label !== '')
