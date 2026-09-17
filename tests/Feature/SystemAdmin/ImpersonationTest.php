@@ -81,7 +81,7 @@ it('restores the account the administrator was signed into', function (): void {
     $this->get(impersonationLink($this->customer));
 
     $this->delete(route('impersonation.stop'))
-        ->assertRedirect(url()->getSysadminUrl('users'));
+        ->assertRedirect(route('filament.sysadmin.resources.users.index'));
 
     $this->delete(route('impersonation.stop'));
 
@@ -276,7 +276,7 @@ it('ends the impersonation instead of signing the customer out', function (strin
     $this->get(impersonationLink($this->customer));
 
     $this->post(route($routeName, $parameters))
-        ->assertRedirect(url()->getSysadminUrl('users'));
+        ->assertRedirect(route('filament.sysadmin.resources.users.index'));
 
     expect($this->customer->refresh()->remember_token)->toBe('keep-me-signed-in')
         ->and(Auth::guard('web')->check())->toBeFalse()
@@ -296,7 +296,7 @@ it('ends the impersonation from the scheduled deletion interstitial instead of s
 
     livewire(ScheduledDeletionInterstitial::class)
         ->callAction('logout')
-        ->assertRedirect(url()->getSysadminUrl('users'));
+        ->assertRedirect(route('filament.sysadmin.resources.users.index'));
 
     expect($customer->refresh()->remember_token)->toBe('keep-me-signed-in')
         ->and(Auth::guard('web')->check())->toBeFalse();
@@ -307,7 +307,7 @@ it('leaves the sysadmin panels own sign out alone', function (): void {
 
     actingAs($this->administrator, 'sysadmin')
         ->post(route('filament.sysadmin.auth.logout'))
-        ->assertRedirect(url()->getSysadminUrl('login'));
+        ->assertRedirect(route('filament.sysadmin.auth.login'));
 
     expect(Auth::guard('sysadmin')->check())->toBeFalse();
 });

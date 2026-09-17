@@ -10,8 +10,6 @@ use Filament\Actions\Action;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
-use Relaticle\SystemAdmin\Policies\UserPolicy;
-use Relaticle\SystemAdmin\Policies\WorkspacePolicy;
 
 /**
  * Staff and customer sessions are isolated per host, so the link is a single-use
@@ -27,8 +25,7 @@ final class Impersonate
             ->label('Impersonate')
             ->icon('heroicon-o-user-circle')
             ->color('warning')
-            ->authorize(fn (User $record): bool => self::allowed()
-                && resolve(UserPolicy::class)->impersonate(self::administrator()))
+            ->authorize('impersonate')
             ->requiresConfirmation()
             ->modalIcon('heroicon-o-user-circle')
             ->modalHeading('Start impersonating')
@@ -43,8 +40,7 @@ final class Impersonate
             ->label('Impersonate owner')
             ->icon('heroicon-o-user-circle')
             ->color('warning')
-            ->authorize(fn (Workspace $record): bool => self::allowed()
-                && resolve(WorkspacePolicy::class)->impersonateOwner(self::administrator(), $record))
+            ->authorize('impersonateOwner')
             ->requiresConfirmation()
             ->modalIcon('heroicon-o-user-circle')
             ->modalHeading('Impersonate workspace owner')
@@ -77,11 +73,6 @@ final class Impersonate
         return config('app.app_panel_domain')
             ? url()->getAppUrl($path)
             : url()->getPublicUrl($path);
-    }
-
-    private static function allowed(): bool
-    {
-        return auth('sysadmin')->user() instanceof SystemAdministrator;
     }
 
     private static function administrator(): SystemAdministrator
