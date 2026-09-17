@@ -15,6 +15,9 @@ return new class extends Migration
 
     private const string MESSAGES = 'agent_conversation_messages';
 
+    // Released chat stored this prompt unmarked when a resume turn failed before its reply.
+    private const string LEGACY_RESUME_PROMPT = 'The proposals from your last turn have just been decided. Their outcome is in <resolved_actions>. Confirm what happened in one short sentence, naming each record as a link. If a step of the request is still outstanding and you can act on it now, do it in this turn. If nothing is left, say so and stop.';
+
     // The three payloads the retired approval writer produced. A bare `[approval]`
     // prefix is not enough: a person can type that, and this rewrite is one-way.
     private const array LEGACY_APPROVAL_PREFIXES = [
@@ -51,6 +54,12 @@ return new class extends Migration
 
         $this->legacyContinuations()
             ->where('origin', 'typed')
+            ->update(['origin' => 'resume']);
+
+        DB::table(self::MESSAGES)
+            ->where('role', 'user')
+            ->where('origin', 'typed')
+            ->where('content', self::LEGACY_RESUME_PROMPT)
             ->update(['origin' => 'resume']);
 
         DB::table(self::MESSAGES)->where('origin', 'greeting')->update(['content' => self::GREETING_OPENER]);

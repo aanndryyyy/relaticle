@@ -130,6 +130,24 @@ test('migrates every payload the retired approval writer produced', function (st
     'rejected prose' => "[approval]\nThe user REJECTED the proposal to delete Acme.\nDo not silently retry it.",
 ]);
 
+test('migrates a resume prompt a failed turn stored without the continuation mark', function (): void {
+    $user = User::factory()->withPersonalWorkspace()->create();
+    $conversationId = legacyConversation($user);
+    $prompt = 'The proposals from your last turn have just been decided. Their outcome is in <resolved_actions>. Confirm what happened in one short sentence, naming each record as a link. If a step of the request is still outstanding and you can act on it now, do it in this turn. If nothing is left, say so and stop.';
+
+    $resume = legacyMessage($conversationId, $user, 'user', $prompt, '[]', 0);
+    $typed = legacyMessage($conversationId, $user, 'user', 'The proposals from your last turn have just been decided.', '[]', 1);
+
+    runMigrateSyntheticChatMessagesMigration();
+
+    $rows = DB::table('agent_conversation_messages')->where('conversation_id', $conversationId)->get()->keyBy('id');
+
+    expect($rows[$resume]->origin)->toBe('resume')
+        ->and($rows[$resume]->content)->toBe('The user decided the proposals above.')
+        ->and($rows[$typed]->origin)->toBe('typed')
+        ->and($rows[$typed]->content)->toBe('The proposals from your last turn have just been decided.');
+});
+
 test('never rewrites a message a person typed that merely starts with the approval token', function (string $content): void {
     $user = User::factory()->withPersonalWorkspace()->create();
     $conversationId = legacyConversation($user);
