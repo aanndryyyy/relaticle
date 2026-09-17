@@ -18,6 +18,8 @@ final readonly class MailboxHistoryImportService
 {
     private const string AWAITING_RETRY_SUCCESS_NOTICE_PREFIX = 'email-integration:history-import-awaiting-retry-success-notice:';
 
+    private const string FAILURE_GENERATION_PREFIX = 'email-integration:history-import-failure-generation:';
+
     public function markAwaitingRetrySuccessNotice(string $batchId): void
     {
         Cache::put(self::AWAITING_RETRY_SUCCESS_NOTICE_PREFIX.$batchId, true, now()->addWeek());
@@ -31,6 +33,24 @@ final readonly class MailboxHistoryImportService
     public function hasAwaitingRetrySuccessNotice(string $batchId): bool
     {
         return Cache::has(self::AWAITING_RETRY_SUCCESS_NOTICE_PREFIX.$batchId);
+    }
+
+    public function failureGeneration(string $batchId): int
+    {
+        return (int) Cache::get(self::FAILURE_GENERATION_PREFIX.$batchId, 0);
+    }
+
+    public function recordFailureGeneration(string $batchId): int
+    {
+        $key = self::FAILURE_GENERATION_PREFIX.$batchId;
+
+        if (! Cache::has($key)) {
+            Cache::put($key, 1, now()->addMonth());
+
+            return 1;
+        }
+
+        return (int) Cache::increment($key);
     }
 
     public function lockKey(ConnectedAccount $account): string
@@ -140,13 +160,7 @@ final readonly class MailboxHistoryImportService
                 return $account->sync_cursor !== null ? 100 : 0;
             }
 
-            $percent = $this->batchProgressPercent($batch);
-
-            if ($account->sync_cursor !== null && ! $this->batchIsComplete($batch)) {
-                return 100;
-            }
-
-            return $percent;
+            return $this->batchProgressPercent($batch);
         }
 
         if ($account->sync_cursor !== null) {
@@ -190,12 +204,19 @@ final readonly class MailboxHistoryImportService
     }
 
     /**
+     * Provider listing is done once every store job has left the queue. Failures to
+     * persist a message in Relaticle do not roll this back; they surface as import issue.
+     *
      * @return int<0, 100>
      */
     public function batchProgressPercent(Batch $batch): int
     {
         if ($batch->totalJobs <= 0) {
             return 0;
+        }
+
+        if ($batch->pendingJobs === 0) {
+            return 100;
         }
 
         $percent = (int) round(($this->batchProcessedJobCount($batch) / $batch->totalJobs) * 100);

@@ -6,9 +6,9 @@ use App\Models\User;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
-use Relaticle\EmailIntegration\Actions\RetryMailboxSyncAction;
 use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
 use Relaticle\EmailIntegration\Enums\EmailProvider;
 use Relaticle\EmailIntegration\Filament\Concerns\HasConnectedAccountActions;
@@ -24,8 +24,9 @@ use Relaticle\EmailIntegration\Jobs\RelinkMailboxHistoryJob;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\EmailSignature;
 use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
+use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 
-mutates(EmailAccountsPage::class, ConnectedAccount::class, HasConnectedAccountActions::class, RetryMailboxSyncAction::class);
+mutates(EmailAccountsPage::class, ConnectedAccount::class, HasConnectedAccountActions::class);
 
 beforeEach(function (): void {
     $this->user = User::factory()->withWorkspace()->create();
@@ -291,18 +292,28 @@ it('warns when a connected mailbox cannot send', function (): void {
         ->assertSee(__('filament/pages/email-accounts.in_sync'));
 });
 
-it('shows the reason and a retry when mail could not be stored', function (): void {
+it('does not show the syncing badge during background incremental email sync', function (): void {
+    $this->account->update([
+        'sync_cursor' => 'done',
+        'last_synced_at' => now(),
+    ]);
+
+    MailboxSyncTracker::markEmailStarted($this->account);
+
+    livewire(EmailAccountsPage::class)
+        ->assertDontSee(__('filament/pages/email-accounts.importing'));
+});
+
+it('shows a sync issue badge when incremental sync could not store mail', function (): void {
     $this->account->update([
         'sync_cursor' => 'mail-cursor',
         'last_error' => '3 email(s) could not be stored during sync.',
     ]);
 
     livewire(EmailAccountsPage::class)
-        ->assertSee(__('filament/pages/email-accounts.sync_error.heading'))
-        ->assertSee('3 email(s) could not be stored during sync.')
         ->assertSee(__('filament/pages/email-accounts.sync_error.badge'))
-        ->assertDontSee(__('filament/pages/email-accounts.in_sync'))
-        ->assertActionVisible(TestAction::make('retrySync')->arguments(['account_id' => $this->account->id]));
+        ->assertDontSee(__('filament/pages/email-accounts.sync_error.heading'))
+        ->assertDontSee(__('filament/pages/email-accounts.in_sync'));
 });
 
 it('shows a warning badge and retry link after history import failures', function (): void {
@@ -325,59 +336,43 @@ it('shows a warning badge and retry link after history import failures', functio
         ->assertSee(__('filament/pages/email-accounts.history_import_failure.badge'))
         ->assertSee(__('filament/pages/email-accounts.actions.retry_failed_import.label'))
         ->assertActionVisible(TestAction::make('retryFailedImport')->arguments(['account_id' => $this->account->id]))
+        ->assertDontSee(__('filament/pages/email-accounts.sync_error.heading'))
         ->assertSee(__('filament/pages/email-accounts.in_sync'));
 });
 
-it('shows no sync failure notice when the mailbox has no recorded error', function (): void {
+it('shows syncing progress after the user retries a failed history import', function (): void {
+    $batch = resolve(MailboxHistoryImportService::class)->startBatch($this->account);
+
+    $this->account->update([
+        'sync_cursor' => 'history-done',
+        'history_import_batch_id' => $batch->id,
+    ]);
+
+    DB::table('job_batches')->where('id', $batch->id)->update([
+        'total_jobs' => 5,
+        'pending_jobs' => 0,
+        'failed_jobs' => 1,
+        'failed_job_ids' => json_encode(['failed-1']),
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    Artisan::shouldReceive('call')->with('queue:retry', ['id' => 'failed-1'])->once()->andReturn(0);
+
+    livewire(EmailAccountsPage::class)
+        ->callAction('retryFailedImport', arguments: ['account_id' => $this->account->id])
+        ->assertNotified()
+        ->assertSee(__('filament/pages/email-accounts.history_import_failure.badge'))
+        ->assertActionVisible(TestAction::make('retryFailedImport')->arguments(['account_id' => $this->account->id]));
+
+    expect($this->account->fresh()->last_error)->toBeNull();
+});
+
+it('shows in sync when the mailbox has no recorded error', function (): void {
     $this->account->update(['sync_cursor' => 'mail-cursor']);
 
     livewire(EmailAccountsPage::class)
         ->assertDontSee(__('filament/pages/email-accounts.sync_error.heading'))
-        ->assertSee(__('filament/pages/email-accounts.in_sync'))
-        ->assertActionHidden(TestAction::make('retrySync')->arguments(['account_id' => $this->account->id]));
-});
-
-it('clears the error and re-runs the sync from retry', function (): void {
-    Bus::fake();
-
-    $this->account->update(
-        ConnectedAccount::factory()->error()->make()->only(['status', 'last_error']) + ['sync_cursor' => 'mail-cursor'],
-    );
-
-    livewire(EmailAccountsPage::class)
-        ->callAction('retrySync', arguments: ['account_id' => $this->account->id])
-        ->assertNotified();
-
-    expect($this->account->fresh()->last_error)->toBeNull()
-        ->and($this->account->fresh()->status)->toBe(EmailAccountStatus::ACTIVE);
-
-    Bus::assertDispatched(IncrementalEmailSyncJob::class, fn (IncrementalEmailSyncJob $job): bool => $job->connectedAccount->is($this->account));
-    Bus::assertNotDispatched(InitialEmailSyncJob::class);
-});
-
-it('restarts the import from retry when the first import never finished', function (): void {
-    Bus::fake();
-
-    $this->account->update(['sync_cursor' => null, 'last_error' => 'Initial import paused.']);
-
-    livewire(EmailAccountsPage::class)
-        ->callAction('retrySync', arguments: ['account_id' => $this->account->id]);
-
-    Bus::assertDispatched(InitialEmailSyncJob::class, fn (InitialEmailSyncJob $job): bool => $job->connectedAccount->is($this->account));
-    Bus::assertNotDispatched(IncrementalEmailSyncJob::class);
-});
-
-it('does not retry another user\'s account', function (): void {
-    $otherUser = User::factory()->create(['current_workspace_id' => $this->workspace->id]);
-    $otherAccount = ConnectedAccount::withoutEvents(fn () => ConnectedAccount::factory()->error()->create([
-        'workspace_id' => $this->workspace->id,
-        'user_id' => $otherUser->id,
-    ]));
-
-    livewire(EmailAccountsPage::class)
-        ->assertActionHidden(TestAction::make('retrySync')->arguments(['account_id' => $otherAccount->id]));
-
-    expect($otherAccount->fresh()->last_error)->not->toBeNull();
+        ->assertSee(__('filament/pages/email-accounts.in_sync'));
 });
 
 it('renders Connect Gmail and hides Connect Outlook for now', function (): void {

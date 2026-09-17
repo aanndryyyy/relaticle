@@ -89,7 +89,7 @@ final class MailboxImportStatus extends Component
                 continue;
             }
 
-            if (! $account->showsSyncProgress() && ! in_array($id, $this->seenImportingIds, true)) {
+            if (! $this->isMailboxImporting($account) && ! in_array($id, $this->seenImportingIds, true)) {
                 continue;
             }
 
@@ -126,19 +126,7 @@ final class MailboxImportStatus extends Component
 
     private function isMailboxImporting(ConnectedAccount $account): bool
     {
-        if ($account->isImportingHistory()) {
-            return true;
-        }
-
-        if ($account->showsMailboxHistoryImportProgressOnAccountsPage()) {
-            return true;
-        }
-
-        if (! $account->showsSyncProgress()) {
-            return false;
-        }
-
-        return ! in_array((string) $account->getKey(), $this->seenImportingIds, true);
+        return $account->showsHomeMailboxImportProgress();
     }
 
     /**

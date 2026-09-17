@@ -52,6 +52,8 @@ final readonly class RetryMailboxHistoryImportFailuresAction
                 return false;
             }
 
+            $account->update(['last_error' => null]);
+
             $this->mailboxHistoryImport->markAwaitingRetrySuccessNotice($batchId);
 
             return true;

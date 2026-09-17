@@ -4,19 +4,21 @@ declare(strict_types=1);
 
 namespace Relaticle\EmailIntegration\Actions;
 
-use Illuminate\Support\Str;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 
 final readonly class RecordMailboxHistoryImportStoreFailureAction
 {
-    public function execute(ConnectedAccount $account, string $historyImportBatchId, string $message): void
+    public function __construct(
+        private MailboxHistoryImportService $mailboxHistoryImport,
+    ) {}
+
+    public function execute(ConnectedAccount $account, string $historyImportBatchId): void
     {
         if ($account->history_import_batch_id !== $historyImportBatchId) {
             return;
         }
 
-        $account->update([
-            'last_error' => Str::limit(trim($message), 2000),
-        ]);
+        $this->mailboxHistoryImport->recordFailureGeneration($historyImportBatchId);
     }
 }

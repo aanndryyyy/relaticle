@@ -269,13 +269,26 @@ final class ConnectedAccount extends Model
     }
 
     /**
-     * A store failure keeps the mailbox ACTIVE so scheduled syncs still retry it, so the
-     * recorded reason, not the status, is what tells the user something was dropped.
+     * Mailbox-level sync problems (auth, API, incremental sync). History import store
+     * failures are import issue on the batch, not a sync error on the account.
      */
     public function hasSyncError(): bool
     {
-        return filled($this->last_error)
-            && ! $this->showsMailboxHistoryImportFailureSummary();
+        if (! filled($this->last_error) || $this->showsMailboxHistoryImportFailureSummary()) {
+            return false;
+        }
+
+        if (filled($this->history_import_batch_id)) {
+            $summary = $this->mailboxHistoryImportSummary();
+
+            if ($summary instanceof MailboxHistoryImportSummary
+                && $summary->finished
+                && $summary->failedJobs > 0) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -308,6 +321,17 @@ final class ConnectedAccount extends Model
     {
         return $this->isEmailHistoryImportRunning()
             && ! $this->showsMailboxHistoryImportFailureSummary();
+    }
+
+    public function isMailboxHistoryImportRetryQueued(): bool
+    {
+        $batchId = $this->history_import_batch_id;
+
+        if (blank($batchId)) {
+            return false;
+        }
+
+        return resolve(MailboxHistoryImportService::class)->hasAwaitingRetrySuccessNotice((string) $batchId);
     }
 
     public function showsMailboxHistoryImportFailureSummary(): bool
@@ -373,8 +397,29 @@ final class ConnectedAccount extends Model
     {
         return $this->isImportingHistory()
             || $this->showsMailboxHistoryImportProgressOnAccountsPage()
-            || $this->showsCalendarSyncProgress()
-            || ($this->isEmailSyncing() && ! $this->isEmailHistoryImportRunning());
+            || $this->showsCalendarSyncProgress();
+    }
+
+    public function showsHomeMailboxImportProgress(): bool
+    {
+        if ($this->isImportingHistory()) {
+            return true;
+        }
+
+        return $this->showsMailboxHistoryImportProgressOnAccountsPage();
+    }
+
+    public function mailboxHistoryImportFailureDismissToken(): ?string
+    {
+        $batchId = $this->history_import_batch_id;
+
+        if (blank($batchId) || ! $this->showsMailboxHistoryImportFailureSummary()) {
+            return null;
+        }
+
+        $generation = resolve(MailboxHistoryImportService::class)->failureGeneration((string) $batchId);
+
+        return (string) $batchId.':'.$generation;
     }
 
     public function isIncrementalSyncing(): bool
@@ -432,6 +477,7 @@ final class ConnectedAccount extends Model
 
             if ($import->isRunning($this)
                 || $this->showsMailboxHistoryImportFailureSummary()
+                || $this->isMailboxHistoryImportRetryQueued()
                 || $this->sync_cursor === null) {
                 return $import->processedJobCount($this);
             }
@@ -446,12 +492,12 @@ final class ConnectedAccount extends Model
 
     public function syncMeetingsProcessedCount(): int
     {
-        if ($this->isCalendarSyncing()) {
-            return MailboxSyncTracker::calendarProcessedCount($this);
-        }
-
         if ($this->isImportingCalendarHistory()) {
             return $this->initial_calendar_sync_imported;
+        }
+
+        if ($this->isCalendarSyncing()) {
+            return MailboxSyncTracker::calendarProcessedCount($this);
         }
 
         return $this->initial_calendar_sync_imported;
@@ -464,6 +510,7 @@ final class ConnectedAccount extends Model
 
             if ($import->isRunning($this)
                 || $this->showsMailboxHistoryImportFailureSummary()
+                || $this->isMailboxHistoryImportRetryQueued()
                 || $this->sync_cursor === null) {
                 return $import->progressPercent($this);
             }

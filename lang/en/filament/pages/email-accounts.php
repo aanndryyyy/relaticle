@@ -112,7 +112,7 @@ return [
     'history_import_failure' => [
         'badge' => 'Import issue',
         'dismiss' => 'Dismiss',
-        'max_attempts' => 'This message could not be stored after several tries. Use Retry on Email Accounts. If it keeps failing, wait a few minutes and try again.',
+        'max_attempts' => 'This message could not be stored after several tries. Use Retry above. If it keeps failing, wait a few minutes and try again.',
     ],
     'sync_status' => [
         'title_syncing' => 'Syncing',

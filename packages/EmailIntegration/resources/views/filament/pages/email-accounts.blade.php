@@ -76,9 +76,6 @@
                         </div>
                     </div>
 
-                    <x-email-integration::sync-error-notice :account="$account">
-                        {{ ($this->retrySyncAction())(['account_id' => $account->getKey()]) }}
-                    </x-email-integration::sync-error-notice>
                 </div>
             @endforeach
 

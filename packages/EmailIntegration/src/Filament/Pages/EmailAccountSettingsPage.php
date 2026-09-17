@@ -145,6 +145,14 @@ final class EmailAccountSettingsPage extends Page implements HasSchemas
         return $this->account()->isImportingHistory();
     }
 
+    public function shouldPollAccountStatus(): bool
+    {
+        $account = $this->account();
+
+        return $account->showsSyncProgress()
+            || $account->showsMailboxHistoryImportFailureSummary();
+    }
+
     protected function afterAccountChanged(): void
     {
         $this->account = null;

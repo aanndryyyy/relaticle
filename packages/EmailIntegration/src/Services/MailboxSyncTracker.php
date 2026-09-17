@@ -16,7 +16,11 @@ final readonly class MailboxSyncTracker
     public static function markCalendarStarted(ConnectedAccount $account): void
     {
         Cache::put(self::calendarKey($account), true, now()->addMinutes(self::TTL_MINUTES));
-        Cache::put(self::calendarProcessedKey($account), 0, now()->addMinutes(self::TTL_MINUTES));
+
+        if (! Cache::has(self::calendarProcessedKey($account))) {
+            Cache::put(self::calendarProcessedKey($account), 0, now()->addMinutes(self::TTL_MINUTES));
+        }
+
         Cache::forget(self::calendarTotalKey($account));
     }
 

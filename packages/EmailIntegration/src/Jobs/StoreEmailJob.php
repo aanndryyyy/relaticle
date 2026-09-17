@@ -11,7 +11,6 @@ use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
 use Illuminate\Queue\Attributes\MaxExceptions;
-use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Facades\Config;
 use Relaticle\EmailIntegration\Actions\RecordMailboxHistoryImportStoreFailureAction;
@@ -127,12 +126,14 @@ final class StoreEmailJob implements ShouldBeUnique, ShouldQueue
             throw $exception;
         }
 
-        // Provider drafts are unsent. Gmail drafts carry DRAFT and not SENT, so
-        // fetchMessage() classifies them as inbound. Skip them here rather than
-        // in a provider service so it covers Gmail and Microsoft, and both the
-        // initial backfill and incremental syncs. Otherwise they store as SYNCED
-        // with the account's sharing default, and teammates can read them
-        // through linked CRM records.
+        /**
+         * Provider drafts are unsent. Gmail drafts carry DRAFT and not SENT, so
+         * fetchMessage() classifies them as inbound. Skip them here rather than
+         * in a provider service so it covers Gmail and Microsoft, and both the
+         * initial backfill and incremental syncs. Otherwise they store as SYNCED
+         * with the account's sharing default, and teammates can read them
+         * through linked CRM records.
+         **/
         if ($fetched->folder === EmailFolder::Drafts) {
             MailboxSyncTracker::clearMessageRetry($this->connectedAccount, $this->messageId);
 
@@ -170,14 +171,9 @@ final class StoreEmailJob implements ShouldBeUnique, ShouldQueue
         $historyBatchId = $this->connectedAccount->history_import_batch_id;
 
         if (is_string($batchId) && is_string($historyBatchId) && $batchId === $historyBatchId) {
-            $message = $exception instanceof MaxAttemptsExceededException
-                ? __('filament/pages/email-accounts.history_import_failure.max_attempts')
-                : $exception->getMessage();
-
             resolve(RecordMailboxHistoryImportStoreFailureAction::class)->execute(
                 $this->connectedAccount,
                 $historyBatchId,
-                $message,
             );
         }
     }

@@ -7,9 +7,7 @@
 
     $summary = $account->mailboxHistoryImportSummary();
     $visible = $account->showsMailboxHistoryImportFailureSummary() && $summary instanceof MailboxHistoryImportSummary;
-    $dismissToken = $visible
-        ? $account->history_import_batch_id.':'.($summary->failedJobs > 0 ? $summary->failedJobs : 'retry')
-        : '';
+    $dismissToken = $account->mailboxHistoryImportFailureDismissToken() ?? '';
 @endphp
 
 @if ($visible)

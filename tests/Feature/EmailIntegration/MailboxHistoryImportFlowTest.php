@@ -105,7 +105,8 @@ it('does not cancel the import batch when a store job fails', function (): void 
     $job->failed(new RuntimeException('Provider timeout'));
 
     expect($account->fresh()?->status)->toBe(EmailAccountStatus::ACTIVE)
-        ->and($account->fresh()?->last_error)->toBe('Provider timeout');
+        ->and($account->fresh()?->last_error)->toBeNull()
+        ->and(resolve(MailboxHistoryImportService::class)->failureGeneration($batchId))->toBe(1);
 });
 
 it('does not record last_error when a store job fails outside the history import batch', function (): void {
@@ -390,7 +391,7 @@ it('uses batch progress percent while store jobs still run', function (): void {
 
     expect($account->fresh()?->isEmailHistoryImportRunning())->toBeTrue()
         ->and($account->fresh()?->isImportingHistory())->toBeFalse()
-        ->and($account->fresh()?->syncDisplayPercent())->toBe(100);
+        ->and($account->fresh()?->syncDisplayPercent())->toBe(99);
 });
 
 it('does not keep the activation checklist in syncing after the mailbox cursor is written', function (): void {
@@ -434,7 +435,7 @@ it('does not show a false 99 percent while listing before any store jobs exist',
     expect(resolve(MailboxHistoryImportService::class)->progressPercent($account))->toBe(0);
 });
 
-it('bases import percent on jobs finished not on success versus failure', function (): void {
+it('bases import percent on jobs finished while any store work is still pending', function (): void {
     $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
         'sync_cursor' => 'history-done',
     ]));
@@ -453,7 +454,7 @@ it('bases import percent on jobs finished not on success versus failure', functi
         ->and($service->progressPercent($account->fresh()))->toBe(80);
 });
 
-it('reaches one hundred percent when no store jobs are still pending', function (): void {
+it('reaches one hundred percent when every store job finished even if some failed permanently', function (): void {
     $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
         'sync_cursor' => 'history-done',
     ]));
@@ -467,6 +468,42 @@ it('reaches one hundred percent when no store jobs are still pending', function 
     ]);
 
     expect(resolve(MailboxHistoryImportService::class)->progressPercent($account->fresh()))->toBe(100);
+});
+
+it('does not treat history import store failures as a mailbox sync error', function (): void {
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'sync_cursor' => 'history-done',
+        'last_error' => 'This message could not be stored after several tries.',
+    ]));
+    $batchId = attachHistoryImportBatch($account);
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 5,
+        'pending_jobs' => 0,
+        'failed_jobs' => 1,
+        'failed_job_ids' => json_encode(['failed-1']),
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    expect($account->fresh()?->showsMailboxHistoryImportFailureSummary())->toBeTrue()
+        ->and($account->fresh()?->showsHomeMailboxImportProgress())->toBeFalse()
+        ->and($account->fresh()?->hasSyncError())->toBeFalse();
+});
+
+it('uses store batch progress while jobs are still pending after listing finishes', function (): void {
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'sync_cursor' => 'history-done',
+    ]));
+    $batchId = attachHistoryImportBatch($account);
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 100,
+        'pending_jobs' => 25,
+        'failed_jobs' => 0,
+        'finished_at' => null,
+    ]);
+
+    expect(resolve(MailboxHistoryImportService::class)->progressPercent($account->fresh()))->toBe(75);
 });
 
 it('retries only failed jobs from the history import batch', function (): void {
@@ -498,6 +535,38 @@ it('retries only failed jobs from the history import batch', function (): void {
     Artisan::shouldHaveReceived('call')
         ->with('queue:retry', ['id' => 'failed-uuid-1'])
         ->once();
+});
+
+it('bumps the import issue dismiss token when a store failure is recorded again', function (): void {
+    Cache::flush();
+
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'sync_cursor' => 'history-done',
+        'history_import_batch_id' => 'batch-dismiss-token',
+    ]));
+
+    DB::table('job_batches')->insert([
+        'id' => 'batch-dismiss-token',
+        'name' => 'Mailbox history import',
+        'total_jobs' => 1,
+        'pending_jobs' => 0,
+        'failed_jobs' => 1,
+        'failed_job_ids' => json_encode(['failed-uuid']),
+        'options' => serialize([]),
+        'cancelled_at' => null,
+        'created_at' => now()->getTimestamp(),
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    $action = resolve(RecordMailboxHistoryImportStoreFailureAction::class);
+
+    $action->execute($account, 'batch-dismiss-token');
+
+    expect($account->fresh()->mailboxHistoryImportFailureDismissToken())->toBe('batch-dismiss-token:1');
+
+    $action->execute($account->fresh(), 'batch-dismiss-token');
+
+    expect($account->fresh()->mailboxHistoryImportFailureDismissToken())->toBe('batch-dismiss-token:2');
 });
 
 it('surfaces the failure summary after the import batch finishes with failed jobs', function (): void {
@@ -534,8 +603,7 @@ it('keeps the failure summary visible after retry is queued while store jobs rer
     resolve(MailboxHistoryImportService::class)->markAwaitingRetrySuccessNotice($batchId);
 
     expect($account->fresh()?->showsMailboxHistoryImportFailureSummary())->toBeTrue()
-        ->and($account->fresh()?->showsMailboxHistoryImportProgressOnAccountsPage())->toBeFalse()
-        ->and($account->fresh()?->showsSyncProgress())->toBeTrue()
+        ->and($account->fresh()?->isMailboxHistoryImportRetryQueued())->toBeTrue()
         ->and($account->fresh()?->showsSyncProgressOnAccountsPage())->toBeFalse();
 });
 

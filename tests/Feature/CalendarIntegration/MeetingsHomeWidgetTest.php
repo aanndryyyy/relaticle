@@ -9,6 +9,7 @@ use App\Models\User;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\DB;
 use Laravel\Pennant\Feature;
 use Relaticle\EmailIntegration\Enums\AttendeeResponseStatus;
 use Relaticle\EmailIntegration\Filament\Concerns\HasConnectMailboxActions;
@@ -22,6 +23,7 @@ use Relaticle\EmailIntegration\Models\MeetingAttendee;
 use Relaticle\EmailIntegration\Models\Scopes\VisibleMeetingScope;
 use Relaticle\EmailIntegration\Services\ListMeetingsForDay;
 use Relaticle\EmailIntegration\Services\MailboxDisplayNameDirectory;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 use Relaticle\EmailIntegration\Services\MeetingAttendeePresenter;
 use Relaticle\EmailIntegration\Services\MeetingTemporalState;
@@ -100,6 +102,48 @@ it('hides date navigation while mailbox sync is in progress', function (): void 
         ->assertDontSee(__('filament/pages/dashboard.meetings.more_actions'))
         ->assertDontSee(__('filament/pages/dashboard.meetings.go_to_today'))
         ->assertDontSee(__('filament/pages/dashboard.meetings.calendar_settings'));
+});
+
+it('shows calendar meetings count from initial import during active calendar sync tracker', function (): void {
+    MailboxSyncTracker::markCalendarStarted($this->account);
+
+    $this->account->update([
+        'capabilities' => ['email' => true, 'calendar' => true],
+        'sync_cursor' => 'history-done',
+        'calendar_sync_cursor' => null,
+        'initial_calendar_sync_imported' => 42,
+        'initial_sync_imported' => 100,
+        'initial_sync_estimated' => 100,
+    ]);
+
+    livewire(MeetingsHomeWidget::class)
+        ->assertSee('data-testid="meetings-mailbox-sync"', escape: false)
+        ->assertSee(trans_choice('filament/pages/dashboard.meetings.syncing.meetings_processed', 42, ['count' => 42]));
+});
+
+it('shows calendar meetings processed while email store jobs run after listing finishes', function (): void {
+    $batch = resolve(MailboxHistoryImportService::class)->startBatch($this->account);
+
+    $this->account->update([
+        'capabilities' => ['email' => true, 'calendar' => true],
+        'sync_cursor' => 'history-done',
+        'calendar_sync_cursor' => null,
+        'history_import_batch_id' => $batch->id,
+        'initial_calendar_sync_imported' => 12,
+        'initial_sync_imported' => 57,
+    ]);
+
+    DB::table('job_batches')->where('id', $batch->id)->update([
+        'total_jobs' => 100,
+        'pending_jobs' => 25,
+        'failed_jobs' => 0,
+        'finished_at' => null,
+    ]);
+
+    livewire(MeetingsHomeWidget::class)
+        ->assertSee('data-testid="meetings-mailbox-sync"', escape: false)
+        ->assertSee(trans_choice('filament/pages/dashboard.meetings.syncing.meetings_processed', 12, ['count' => 12]))
+        ->assertSee(trans_choice('filament/pages/dashboard.meetings.syncing.emails_processed', 75, ['count' => 75]));
 });
 
 it('shows mailbox sync progress during email-only history import', function (): void {
