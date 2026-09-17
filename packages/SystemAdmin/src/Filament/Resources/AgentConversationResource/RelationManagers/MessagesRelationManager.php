@@ -9,6 +9,7 @@ use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
+use Relaticle\Chat\Enums\MessageOrigin;
 use Relaticle\Chat\Models\AgentConversationMessage;
 use Relaticle\SystemAdmin\Filament\Resources\AgentConversationMessageResource;
 use Relaticle\SystemAdmin\Filament\Resources\UserResource;
@@ -39,7 +40,9 @@ final class MessagesRelationManager extends RelationManager
                 TextColumn::make('role')
                     ->badge(),
                 TextColumn::make('origin')
-                    ->badge(),
+                    ->badge()
+                    ->state(fn (AgentConversationMessage $record): ?MessageOrigin => $record->userOrigin())
+                    ->placeholder('—'),
                 TextColumn::make('content')
                     ->limit(80)
                     ->placeholder('—')

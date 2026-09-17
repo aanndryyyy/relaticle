@@ -106,3 +106,17 @@ it('labels a synthetic user row by its origin in the list and on the view page',
     livewire(ViewAgentConversationMessage::class, ['record' => $greeting->getKey()])
         ->assertSee(MessageOrigin::Greeting->getLabel());
 });
+
+it('shows an origin only on user rows', function (): void {
+    $user = seedAdminMessage('user');
+    $assistant = seedAdminMessage('assistant');
+    $tool = seedAdminMessage('tool');
+
+    livewire(ListAgentConversationMessages::class)
+        ->assertTableColumnStateSet('origin', MessageOrigin::Typed, $user)
+        ->assertTableColumnStateSet('origin', null, $assistant)
+        ->assertTableColumnStateSet('origin', null, $tool);
+
+    livewire(ViewAgentConversationMessage::class, ['record' => $assistant->getKey()])
+        ->assertDontSee(MessageOrigin::Typed->getLabel());
+});

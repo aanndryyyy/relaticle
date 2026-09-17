@@ -58,6 +58,11 @@ final class AgentConversationMessage extends Model
         return $this->belongsTo(AgentConversation::class, 'conversation_id');
     }
 
+    public function userOrigin(): ?MessageOrigin
+    {
+        return $this->role === 'user' ? $this->origin : null;
+    }
+
     /** @param Builder<self> $query */
     #[Scope]
     protected function typed(Builder $query): void
