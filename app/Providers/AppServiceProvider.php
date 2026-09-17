@@ -35,6 +35,7 @@ use App\Models\Workspace;
 use App\Models\WorkspaceInvitation;
 use App\Onboarding\ActivationSteps;
 use App\Services\Billing\HostedWorkspaceAccess;
+use App\Services\DiscordService;
 use App\Services\DockerHubService;
 use App\Services\GitHubService;
 use App\Services\WorkspaceActivationFacts;
@@ -262,7 +263,7 @@ final class AppServiceProvider extends ServiceProvider
         $this->configurePolicies();
         $this->configureModels();
         $this->configureFilament();
-        $this->configureGitHubStars();
+        $this->configureCommunityCounts();
         $this->configureLivewire();
         $this->configureRateLimiting();
         $this->configureScribe();
@@ -661,12 +662,9 @@ final class AppServiceProvider extends ServiceProvider
         FilamentAsset::appVersion((string) filemtime(public_path('js/app/rich-editor-slash-menu.js')));
     }
 
-    /**
-     * Configure GitHub stars count.
-     */
-    private function configureGitHubStars(): void
+    private function configureCommunityCounts(): void
     {
-        Facades\View::composer(['components.layout.header', 'home.partials.hero'], function (View $view): void {
+        Facades\View::composer(['components.layout.community-links', 'home.partials.hero'], function (View $view): void {
             $gitHubService = resolve(GitHubService::class);
             $starsCount = $gitHubService->getStarsCount();
             $formattedStarsCount = $gitHubService->getFormattedStarsCount();
@@ -675,6 +673,10 @@ final class AppServiceProvider extends ServiceProvider
                 'githubStars' => $starsCount,
                 'formattedGithubStars' => $formattedStarsCount,
             ]);
+        });
+
+        Facades\View::composer('components.layout.community-links', function (View $view): void {
+            $view->with('formattedDiscordMembers', resolve(DiscordService::class)->getFormattedMemberCount());
         });
 
         Facades\View::composer('home.partials.works-with', function (View $view): void {
