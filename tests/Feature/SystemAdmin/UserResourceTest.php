@@ -25,9 +25,10 @@ use Relaticle\SystemAdmin\Filament\Resources\UserResource\Pages\ViewUser;
 use Relaticle\SystemAdmin\Filament\Resources\UserResource\RelationManagers\OwnedWorkspacesRelationManager;
 use Relaticle\SystemAdmin\Filament\Resources\UserResource\RelationManagers\SocialAccountsRelationManager;
 use Relaticle\SystemAdmin\Filament\Resources\UserResource\RelationManagers\WorkspacesRelationManager;
+use Relaticle\SystemAdmin\Filament\Support\Impersonate;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
 
-mutates(UpdateCustomerRecord::class, EditCustomerRecord::class, UserResource::class);
+mutates(UpdateCustomerRecord::class, EditCustomerRecord::class, UserResource::class, Impersonate::class);
 
 beforeEach(function (): void {
     $this->actingAs(SystemAdministrator::factory()->create(), 'sysadmin');

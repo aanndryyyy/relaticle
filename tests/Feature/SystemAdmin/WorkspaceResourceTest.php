@@ -23,10 +23,11 @@ use Relaticle\SystemAdmin\Filament\Resources\WorkspaceResource\Pages\ViewWorkspa
 use Relaticle\SystemAdmin\Filament\Resources\WorkspaceResource\RelationManagers\ActivityRelationManager;
 use Relaticle\SystemAdmin\Filament\Resources\WorkspaceResource\RelationManagers\CompaniesRelationManager;
 use Relaticle\SystemAdmin\Filament\Resources\WorkspaceResource\RelationManagers\MembersRelationManager;
+use Relaticle\SystemAdmin\Filament\Support\Impersonate;
 use Relaticle\SystemAdmin\Filament\Support\PivotSafeTableQuery;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
 
-mutates(UpdateCustomerRecord::class, EditCustomerRecord::class, BillingStatus::class, WorkspaceResource::class, MembersRelationManager::class, CompaniesRelationManager::class, ActivityRelationManager::class, PivotSafeTableQuery::class);
+mutates(UpdateCustomerRecord::class, EditCustomerRecord::class, BillingStatus::class, WorkspaceResource::class, MembersRelationManager::class, CompaniesRelationManager::class, ActivityRelationManager::class, PivotSafeTableQuery::class, Impersonate::class);
 
 beforeEach(function (): void {
     $this->actingAs(SystemAdministrator::factory()->create(), 'sysadmin');
