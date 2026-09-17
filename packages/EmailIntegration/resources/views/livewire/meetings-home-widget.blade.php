@@ -70,6 +70,24 @@
         @endif
     </div>
 
+    @foreach ($this->importIssueAccounts as $importIssueAccount)
+        <x-email-integration::history-import-failure-status
+            :account="$importIssueAccount"
+            class="mb-3"
+            data-testid="meetings-import-issue"
+            wire:key="meetings-import-issue-{{ $importIssueAccount->getKey() }}"
+        >
+            <span class="min-w-0 truncate text-xs text-warning-700 dark:text-warning-400/90">
+                {{ $importIssueAccount->email_address }}
+            </span>
+
+            {{-- Dismissal is scoped to the current failure generation, so a later store failure reopens this. --}}
+            <span x-on:click="dismiss()">
+                {{ ($this->retryFailedImportAction())(['account_id' => $importIssueAccount->getKey()]) }}
+            </span>
+        </x-email-integration::history-import-failure-status>
+    @endforeach
+
     @if ($mailboxSyncing)
         @include('email-integration::livewire.partials.mailbox-sync-status')
     @elseif (! $mailboxConnected)

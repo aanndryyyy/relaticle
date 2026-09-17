@@ -8,6 +8,7 @@ use App\Models\People;
 use App\Models\User;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Laravel\Pennant\Feature;
@@ -102,6 +103,117 @@ it('hides date navigation while mailbox sync is in progress', function (): void 
         ->assertDontSee(__('filament/pages/dashboard.meetings.more_actions'))
         ->assertDontSee(__('filament/pages/dashboard.meetings.go_to_today'))
         ->assertDontSee(__('filament/pages/dashboard.meetings.calendar_settings'));
+});
+
+it('shows an import issue callout with retry on home when store jobs failed', function (): void {
+    $batchId = attachHistoryImportBatch($this->account);
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 10,
+        'pending_jobs' => 0,
+        'failed_jobs' => 2,
+        'failed_job_ids' => json_encode(['failed-1', 'failed-2']),
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    livewire(MeetingsHomeWidget::class)
+        ->assertSee('data-testid="meetings-import-issue"', escape: false)
+        ->assertSee(__('filament/pages/email-accounts.history_import_failure.badge'))
+        ->assertSee($this->account->email_address)
+        ->assertActionVisible(TestAction::make('retryFailedImport')->arguments(['account_id' => $this->account->id]));
+});
+
+it('names each failing mailbox on home when more than one import failed', function (): void {
+    $second = ConnectedAccount::withoutEvents(
+        fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+            'workspace_id' => $this->workspace->id,
+            'user_id' => $this->user->id,
+            'email_address' => 'alex@example.com',
+            'sync_cursor' => 'done',
+            'calendar_sync_cursor' => 'done',
+        ])
+    );
+
+    foreach ([$this->account, $second] as $account) {
+        $batchId = attachHistoryImportBatch($account);
+
+        DB::table('job_batches')->where('id', $batchId)->update([
+            'total_jobs' => 10,
+            'pending_jobs' => 0,
+            'failed_jobs' => 1,
+            'failed_job_ids' => json_encode(['failed-'.$account->getKey()]),
+            'finished_at' => now()->getTimestamp(),
+        ]);
+    }
+
+    livewire(MeetingsHomeWidget::class)
+        ->assertSee($this->account->email_address)
+        ->assertSee($second->email_address)
+        ->assertActionVisible(TestAction::make('retryFailedImport')->arguments(['account_id' => $this->account->id]))
+        ->assertActionVisible(TestAction::make('retryFailedImport')->arguments(['account_id' => $second->id]));
+});
+
+it('does not show an import issue callout on home when no store job failed', function (): void {
+    $batchId = attachHistoryImportBatch($this->account);
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 10,
+        'pending_jobs' => 0,
+        'failed_jobs' => 0,
+        'failed_job_ids' => json_encode([]),
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    livewire(MeetingsHomeWidget::class)
+        ->assertDontSee('data-testid="meetings-import-issue"', escape: false)
+        ->assertDontSee(__('filament/pages/email-accounts.history_import_failure.badge'));
+});
+
+it('retries the failed import from the home callout', function (): void {
+    $batchId = attachHistoryImportBatch($this->account);
+
+    $this->account->update(['last_error' => 'This message could not be stored after several tries.']);
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 5,
+        'pending_jobs' => 0,
+        'failed_jobs' => 1,
+        'failed_job_ids' => json_encode(['failed-1']),
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    Artisan::shouldReceive('call')->with('queue:retry', ['id' => 'failed-1'])->once()->andReturn(0);
+
+    livewire(MeetingsHomeWidget::class)
+        ->callAction('retryFailedImport', arguments: ['account_id' => $this->account->id])
+        ->assertNotified();
+
+    expect($this->account->fresh()->last_error)->toBeNull();
+});
+
+it('does not retry an import issue for another user mailbox from home', function (): void {
+    $otherUser = User::factory()->withWorkspace()->create();
+    $otherAccount = ConnectedAccount::withoutEvents(
+        fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+            'workspace_id' => $otherUser->currentWorkspace->getKey(),
+            'user_id' => $otherUser->getKey(),
+            'sync_cursor' => 'done',
+        ])
+    );
+
+    $batchId = attachHistoryImportBatch($otherAccount);
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 5,
+        'pending_jobs' => 0,
+        'failed_jobs' => 1,
+        'failed_job_ids' => json_encode(['failed-1']),
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    livewire(MeetingsHomeWidget::class)
+        ->assertDontSee('data-testid="meetings-import-issue"', escape: false)
+        ->assertActionHidden(TestAction::make('retryFailedImport')->arguments(['account_id' => $otherAccount->id]));
 });
 
 it('shows calendar meetings count from initial import during active calendar sync tracker', function (): void {

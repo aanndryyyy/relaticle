@@ -22,6 +22,7 @@ use Illuminate\Support\Facades\Date;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
 use Relaticle\EmailIntegration\Enums\AttendeeResponseStatus;
+use Relaticle\EmailIntegration\Filament\Concerns\HasConnectedAccountActions;
 use Relaticle\EmailIntegration\Filament\Concerns\HasConnectMailboxActions;
 use Relaticle\EmailIntegration\Filament\Infolists\MeetingDetailInfolist;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
@@ -34,12 +35,14 @@ use Relaticle\EmailIntegration\Services\MeetingTemporalState;
 
 /**
  * @property-read Collection<int, Meeting> $meetings
+ * @property-read Collection<int, ConnectedAccount> $importIssueAccounts
  * @property-read list<array{id: string, email: string, emailsImported: int, meetingsImported: int, percent: int, hasCalendar: bool, isInitialImport: bool}> $mailboxSyncRows
  * @property-read list<array{id: string, title: string, all_day: bool, response_status: AttendeeResponseStatus, time: array{start: string, end: string|null, range: string, datetime: string}, happening_now: bool, is_past: bool}> $meetingCards
  * @property-read Action $connectGmailAction
  */
 final class MeetingsHomeWidget extends Component implements HasActions, HasSchemas
 {
+    use HasConnectedAccountActions;
     use HasConnectMailboxActions;
     use InteractsWithActions;
     use InteractsWithSchemas;
@@ -204,7 +207,23 @@ final class MeetingsHomeWidget extends Component implements HasActions, HasSchem
 
     public function refreshMailboxSync(): void
     {
-        unset($this->mailboxSyncRows, $this->meetings, $this->meetingCards);
+        unset($this->mailboxSyncRows, $this->importIssueAccounts, $this->meetings, $this->meetingCards);
+    }
+
+    /**
+     * @return Collection<int, ConnectedAccount>
+     */
+    #[Computed]
+    public function importIssueAccounts(): Collection
+    {
+        return $this->ownedAccounts()
+            ->filter(fn (ConnectedAccount $account): bool => $account->showsMailboxHistoryImportFailureSummary())
+            ->values();
+    }
+
+    protected function afterAccountChanged(): void
+    {
+        $this->refreshMailboxSync();
     }
 
     /**
