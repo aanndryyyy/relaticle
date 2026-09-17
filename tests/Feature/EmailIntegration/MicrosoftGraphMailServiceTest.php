@@ -17,9 +17,11 @@ use Relaticle\EmailIntegration\Models\Email;
 use Relaticle\EmailIntegration\Services\Contracts\MailServiceFactoryInterface;
 use Relaticle\EmailIntegration\Services\Factories\MicrosoftGraphServiceFactory;
 use Relaticle\EmailIntegration\Services\MicrosoftGraphMailService;
+use Relaticle\EmailIntegration\Support\EmailAddressHeaderParser;
 
 mutates(MicrosoftGraphMailService::class);
 mutates(MicrosoftGraphServiceFactory::class);
+mutates(EmailAddressHeaderParser::class);
 
 beforeEach(function (): void {
     config()->set('services.azure.client_id', 'azure-client-id');
@@ -262,6 +264,25 @@ it('throws MailHistoryExpired for a legacy all-folder /me/messages/delta cursor'
 
     expect(fn (): MailDeltaResult => $service->fetchDelta('https://graph.microsoft.com/v1.0/me/messages/delta?$deltatoken=TKN'))
         ->toThrow(MailHistoryExpired::class);
+});
+
+it('drops a Graph display name that is only the email address', function (): void {
+    Http::fake([
+        ...graphWellKnownFolderFakes(),
+        'https://graph.microsoft.com/v1.0/me/messages/NAME1*' => Http::response(graphMessagePayload([
+            'id' => 'NAME1',
+            'from' => ['emailAddress' => ['address' => 'support@escrow.com', 'name' => 'support@escrow.com']],
+            'toRecipients' => [['emailAddress' => ['address' => 'owner@example.com', 'name' => 'Owner']]],
+        ])),
+    ]);
+
+    $email = resolve(MicrosoftGraphServiceFactory::class)->make(makeAzureAccount())->fetchMessage('NAME1');
+
+    $from = collect($email->participants)->firstWhere('role', 'from');
+
+    expect($from)->not->toBeNull()
+        ->and($from['email_address'])->toBe('support@escrow.com')
+        ->and($from['name'])->toBeNull();
 });
 
 it('maps a Graph drafts-folder message as an inbound draft', function (): void {
