@@ -47,7 +47,7 @@ against rows already in the database.
 
 ## Deciding a proposal starts the next turn; it is not the user typing
 `TurnContinuationService::resume()` runs from the dock (`ProposalCard::settleAfterResolution`)
-and queues `ProcessChatMessage(isContinuation: true)`. Without it the user had to type
+and queues `ProcessChatMessage(origin: MessageOrigin::Resume)`. Without it the user had to type
 "next" after every card just to hear what happened or to get the rest of a chained
 request. Four invariants keep it bounded, and all four are load-bearing:
 - It fires only from a human decision, never from a turn ending, so the loop cannot
@@ -62,12 +62,16 @@ request. Four invariants keep it bounded, and all four are load-bearing:
   stand in for this.
 - It costs a credit like any other turn. Out of credits means no resume, not a queued
   one, the user can still type.
-The turn runs on a synthetic user message (the provider needs a final user turn). It is
-stamped `meta->kind = "continuation"` by `SupersededAwareConversationStore` and excluded
-in `TranscriptScope`, so the model sees it and the transcript does not. Compare that
-exclusion with `coalesce(...)`, not a bare `meta->>'kind'`: on every other row the
-comparison is NULL, the enclosing AND is NULL, and `NOT NULL` drops the row, which hid
-half the transcript the first time it was written.
+The turn runs on a synthetic user message (the provider needs a final user turn). Who
+authored a message is its `origin` column, owned by `MessageOrigin`: the saved row holds
+only the enum's short `opener()`, and the instructions for the turn travel in a `<turn>`
+block of `dynamicInstructions()`, so they are never stored or replayed. The job hands the
+origin to the store through `Context::scope()`, and `SupersededAwareConversationStore`
+writes it in the same insert as the row. "Typed by the user" has one owner,
+`TypedMessages` (the `typed()` scope delegates to it). A new reader that filters user
+rows any other way is the bug this design removed: `sentBy()` once skipped the filter and
+tagged users `has-ai-usage` who had only seen the greeting. The setup greeting
+(`StartSetupGreeting`) uses the same mechanism with `MessageOrigin::Greeting`.
 Prompt and UI follow from this: the assistant must never ask the user to say "continue"
 or "next", and a decided proposal card collapses to one line (pending stays fully
 expanded, you may not approve what you were not shown).
