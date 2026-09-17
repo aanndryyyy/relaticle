@@ -18,6 +18,7 @@ use Illuminate\Support\Str;
 use Laravel\Pennant\Feature;
 use Relaticle\Chat\Actions\ListConversationMessages;
 use Relaticle\Chat\Agents\CrmAssistant;
+use Relaticle\Chat\Enums\MessageOrigin;
 use Relaticle\Chat\Enums\PendingActionStatus;
 use Relaticle\Chat\Events\ChatStreamRetrying;
 use Relaticle\Chat\Jobs\ProcessChatMessage;
@@ -127,11 +128,11 @@ it('leaves the thread empty when the opening turn dies, so the next open greets 
     new ProcessChatMessage(
         user: $user,
         workspace: $workspace,
-        message: StartSetupGreeting::PROMPT,
+        message: '',
         conversationId: $conversationId,
         resolved: ['provider' => 'ollama', 'model' => 'qwen3:8b', 'id' => 'ollama', 'source' => 'auto'],
         turnId: (string) Str::ulid(),
-        isContinuation: true,
+        origin: MessageOrigin::Greeting,
     )->failed(new RuntimeException('boom'));
 
     expect(DB::table('agent_conversation_messages')->where('conversation_id', $conversationId)->count())->toBe(0)
@@ -142,6 +143,50 @@ it('leaves the thread empty when the opening turn dies, so the next open greets 
     expect(resolve(StartSetupGreeting::class)->execute($user->fresh(), $conversationId))->toBeTrue();
 
     Queue::assertPushed(ProcessChatMessage::class);
+});
+
+it('records a dead resumed turn as its opener, never as words the user typed', function (): void {
+    $user = User::factory()->withPersonalWorkspace()->create();
+    $workspace = $user->currentWorkspace;
+
+    AiCreditBalance::query()->where('workspace_id', $workspace->getKey())
+        ->update(['credits_remaining' => 100, 'credits_used' => 0]);
+
+    $conversationId = (string) Str::uuid7();
+    DB::table('agent_conversations')->insert([
+        'id' => $conversationId,
+        'participant_type' => 'user',
+        'participant_id' => (string) $user->getKey(),
+        'workspace_id' => $workspace->getKey(),
+        'title' => 'dead resume',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $job = new ProcessChatMessage(
+        user: $user,
+        workspace: $workspace,
+        message: '',
+        conversationId: $conversationId,
+        resolved: ['provider' => 'ollama', 'model' => 'qwen3:8b', 'id' => 'ollama', 'source' => 'auto'],
+        turnId: (string) Str::ulid(),
+        origin: MessageOrigin::Resume,
+        resumesTurnId: (string) Str::ulid(),
+    );
+
+    $job->failed(new RuntimeException('boom'));
+    $job->failed(new RuntimeException('boom'));
+
+    $userRows = DB::table('agent_conversation_messages')
+        ->where('conversation_id', $conversationId)
+        ->where('role', 'user')
+        ->get();
+
+    expect($userRows)->toHaveCount(1)
+        ->and($userRows->first()->origin)->toBe(MessageOrigin::Resume->value)
+        ->and($userRows->first()->content)->toBe(MessageOrigin::Resume->opener())
+        ->and(array_column(resolve(ListConversationMessages::class)->execute($user, $conversationId), 'role'))
+        ->toBe(['assistant']);
 });
 
 it('does not duplicate a completed turn or add an error note when a post-stream step fails', function (): void {

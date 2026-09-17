@@ -7,6 +7,7 @@ namespace Relaticle\Chat\Services;
 use App\Models\User;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
+use Relaticle\Chat\Enums\MessageOrigin;
 use Relaticle\Chat\Enums\PendingActionStatus;
 use Relaticle\Chat\Jobs\ProcessChatMessage;
 use Relaticle\Chat\Models\PendingAction;
@@ -34,15 +35,6 @@ use Relaticle\Chat\Support\TurnPresence;
  */
 final readonly class TurnContinuationService
 {
-    /**
-     * The synthetic prompt the resumed turn runs on. It is stored as a user
-     * message (that is the only shape the provider accepts as the final turn)
-     * but stamped as a continuation so the transcript never renders it as
-     * something the user typed. What actually happened travels, as always, in
-     * the <resolved_actions> block rather than in this text.
-     */
-    public const string PROMPT = 'The proposals from your last turn have just been decided. Their outcome is in <resolved_actions>. Confirm what happened in one short sentence, naming each record as a link. If a step of the request is still outstanding and you can act on it now, do it in this turn. If nothing is left, say so and stop.';
-
     private const int DEDUPE_TTL_SECONDS = 3600;
 
     public function __construct(
@@ -98,11 +90,11 @@ final readonly class TurnContinuationService
         dispatch(new ProcessChatMessage(
             user: $user,
             workspace: $workspace,
-            message: self::PROMPT,
+            message: '',
             conversationId: $conversationId,
             resolved: $this->models->resolve($user, $model),
             turnId: $turnId,
-            isContinuation: true,
+            origin: MessageOrigin::Resume,
             resumesTurnId: $resolvedTurnId,
         ));
 

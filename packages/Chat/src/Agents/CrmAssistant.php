@@ -24,6 +24,7 @@ use Laravel\Ai\Contracts\HasTools;
 use Laravel\Ai\Contracts\Tool;
 use Laravel\Ai\Enums\Lab;
 use Laravel\Ai\Promptable;
+use Relaticle\Chat\Enums\MessageOrigin;
 use Relaticle\Chat\Support\PromptText;
 use Relaticle\Chat\Tools\Activity\ListActivityTool;
 use Relaticle\Chat\Tools\AggregateCrmTool;
@@ -184,6 +185,15 @@ final class CrmAssistant implements Agent, Conversational, HasProviderOptions, H
      */
     public bool $setupMode = false;
 
+    public MessageOrigin $origin = MessageOrigin::Typed;
+
+    public function withTurnOrigin(MessageOrigin $origin): self
+    {
+        $this->origin = $origin;
+
+        return $this;
+    }
+
     public function withTurnId(?string $turnId): self
     {
         $this->turnId = $turnId === '' ? null : $turnId;
@@ -272,7 +282,7 @@ You can read and search all CRM data (companies, people, opportunities, tasks, n
 You can propose creating, updating, or deleting CRM records. Every write needs the user's approval.
 
 ## Context blocks
-The system prompt carries internal blocks: <context>, <resolved_actions>, <superseded_proposals>, <onboarding>, and the Current user and Current Date sections. They are yours to reason with, not part of the conversation: never mention these blocks, their names, or "resolved actions" to the user. Say "the note you just approved", not "from the resolved actions".
+The system prompt carries internal blocks: <context>, <resolved_actions>, <superseded_proposals>, <onboarding>, <turn>, and the Current user and Current Date sections. They are yours to reason with, not part of the conversation: never mention these blocks, their names, or "resolved actions" to the user. Say "the note you just approved", not "from the resolved actions".
 
 ## Rules
 1. Writes: when the user asks to create, update, or delete records, call the write tool. It returns a proposal the user must approve or reject; nothing happens until they do. Acknowledge it in ONE short sentence (e.g. "Review the proposal below."). NEVER repeat the proposed records or their field values in prose, no tables, no bullet lists, no per-record summaries: the proposal card under your reply already shows every field.
@@ -375,7 +385,7 @@ PROMPT;
      */
     public function dynamicInstructions(): string
     {
-        return $this->dateBlock().$this->currentUserBlock().$this->workspaceStateBlock().$this->onboardingBlock().$this->mentionsBlock().$this->pageContextBlock().$this->contextLedgerBlock().$this->supersededBlock().$this->resolvedBlock();
+        return $this->dateBlock().$this->currentUserBlock().$this->workspaceStateBlock().$this->onboardingBlock().$this->mentionsBlock().$this->pageContextBlock().$this->contextLedgerBlock().$this->supersededBlock().$this->resolvedBlock().$this->turnBlock();
     }
 
     /**
@@ -432,6 +442,17 @@ PROMPT;
         return "\n\n<workspace_state>\n"
             ."This workspace contains {$count} seeded sample records (creation source \"system\") {$qualifier}.\n"
             .'</workspace_state>';
+    }
+
+    private function turnBlock(): string
+    {
+        $directive = $this->origin->directive();
+
+        if ($directive === null) {
+            return '';
+        }
+
+        return "\n\n<turn>\n{$directive}\n</turn>";
     }
 
     private function onboardingBlock(): string

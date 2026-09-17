@@ -18,9 +18,9 @@ use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\TimeoutExceededException;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Laravel\Ai\Contracts\ConversationStore;
 use Laravel\Ai\Exceptions\ProviderConnectionException;
 use Laravel\Ai\Exceptions\ProviderOverloadedException;
 use Laravel\Ai\Exceptions\RateLimitedException;
@@ -34,6 +34,7 @@ use Laravel\Ai\Streaming\Events\ToolCall;
 use Laravel\Pennant\Feature;
 use Relaticle\Chat\Agents\CrmAssistant;
 use Relaticle\Chat\Enums\AiCreditType;
+use Relaticle\Chat\Enums\MessageOrigin;
 use Relaticle\Chat\Enums\PendingActionStatus;
 use Relaticle\Chat\Events\ChatStreamFailed;
 use Relaticle\Chat\Events\ChatStreamRetrying;
@@ -46,7 +47,6 @@ use Relaticle\Chat\Services\CreditService;
 use Relaticle\Chat\Services\PendingActionService;
 use Relaticle\Chat\Services\TipTapDocumentParser;
 use Relaticle\Chat\Services\TurnContinuationService;
-use Relaticle\Chat\Storage\SupersededAwareConversationStore;
 use Relaticle\Chat\Support\AssistantText;
 use Relaticle\Chat\Support\ChatTelemetry;
 use Relaticle\Chat\Support\ConversationTitleGate;
@@ -87,7 +87,7 @@ final class ProcessChatMessage implements ShouldQueue
         public readonly ?array $pageContext = null,
         public readonly string $turnId = '',
         public readonly int $failoverDepth = 0,
-        public readonly bool $isContinuation = false,
+        public readonly MessageOrigin $origin = MessageOrigin::Typed,
         public readonly ?string $resumesTurnId = null,
         public readonly ?array $attachment = null,
     ) {
@@ -167,7 +167,7 @@ final class ProcessChatMessage implements ShouldQueue
         // between two steps streaming in. WithoutOverlapping only delays this
         // job until the stream ends, so the check has to run again here, where
         // the later steps already exist: continuing now would supersede them.
-        if ($this->isContinuation && resolve(TurnContinuationService::class)->hasPendingProposals($this->conversationId)) {
+        if (! $this->origin->isTyped() && resolve(TurnContinuationService::class)->hasPendingProposals($this->conversationId)) {
             ChatTelemetry::breadcrumb('continuation.aborted', ['reason' => 'pending_proposals']);
 
             // Hand the resume back, or deciding the step that blocked it would
@@ -210,6 +210,7 @@ final class ProcessChatMessage implements ShouldQueue
             $agent->withUserTimezone($this->user->timezone);
             $agent->withWorkspace($this->workspace);
             $agent->withSetupMode($this->isSetupConversation());
+            $agent->withTurnOrigin($this->origin);
             $agent->withCurrentUser([
                 'name' => $this->user->name,
                 'id' => (string) $this->user->getKey(),
@@ -256,18 +257,17 @@ final class ProcessChatMessage implements ShouldQueue
             return;
         }
 
-        // The prompt a resumed turn runs on is ours, not the user's, so the row
-        // it lands in is marked and the transcript leaves it out. Resolved
-        // through the contract because that is what ChatServiceProvider binds
-        // the single shared store instance to; the concrete class would build a
-        // second one and this flag would land on the wrong object.
-        if ($this->isContinuation) {
-            resolve(ConversationStore::class)->nextUserMessageIsContinuation = true;
-        }
+        Context::scope(
+            fn () => $this->streamTurn($agent, $broadcaster, $creditService, $startedAt),
+            hidden: [MessageOrigin::CONTEXT_KEY => $this->origin->value],
+        );
+    }
 
+    private function streamTurn(CrmAssistant $agent, StreamEventBroadcaster $broadcaster, CreditService $creditService, float $startedAt): void
+    {
         try {
             $response = $agent->stream(
-                prompt: $this->message,
+                prompt: $this->origin->opener() ?? $this->message,
                 provider: $this->resolved['provider'],
                 model: $this->resolved['model'],
             );
@@ -426,7 +426,7 @@ final class ProcessChatMessage implements ShouldQueue
                         pageContext: $this->pageContext,
                         turnId: $this->turnId,
                         failoverDepth: $this->failoverDepth + 1,
-                        isContinuation: $this->isContinuation,
+                        origin: $this->origin,
                         resumesTurnId: $this->resumesTurnId,
                         attachment: $this->attachment,
                     ));
@@ -460,15 +460,6 @@ final class ProcessChatMessage implements ShouldQueue
             throw $e;
         } finally {
             $this->releaseAuth();
-
-            // storeUserMessage() consumes this on the happy path, but it only
-            // runs if the stream reaches its then() callback. A turn that dies
-            // first (provider error, release, cancel, failover re-dispatch)
-            // would otherwise leave the flag set on the container singleton,
-            // which queue workers do not rebuild between jobs: the next job on
-            // this worker, any user and any tenant, would have its own question
-            // stored as ours and filtered out of its transcript for good.
-            resolve(ConversationStore::class)->nextUserMessageIsContinuation = false;
         }
     }
 
@@ -568,7 +559,7 @@ final class ProcessChatMessage implements ShouldQueue
     // persisted here satisfies StartSetupGreeting's empty-thread guard forever.
     private function opensTheThread(): bool
     {
-        return $this->isContinuation && $this->resumesTurnId === null;
+        return $this->origin === MessageOrigin::Greeting;
     }
 
     private function failureMessage(?Throwable $exception): string
@@ -617,19 +608,9 @@ final class ProcessChatMessage implements ShouldQueue
      * behavior for that one edge case, never a duplicate or a false error
      * note, and are accepted rather than solved with more machinery.
      */
-    /**
-     * A turn whose prompt we wrote (a resume, the setup greeting) must carry
-     * the continuation mark here too, or a dead turn leaves that prompt in the
-     * transcript as words the user never typed.
-     *
-     * @return array<string, mixed>
-     */
+    /** @return array<string, mixed> */
     private function failedTurnUserMeta(): array
     {
-        if ($this->isContinuation) {
-            return ['kind' => SupersededAwareConversationStore::CONTINUATION_KIND];
-        }
-
         return $this->attachment === null ? [] : ['attachment' => $this->attachment];
     }
 
@@ -637,6 +618,7 @@ final class ProcessChatMessage implements ShouldQueue
     {
         $now = now();
         $table = DB::table('agent_conversation_messages');
+        $content = $this->origin->opener() ?? $this->message;
 
         $lastTwo = $table->clone()
             ->where('conversation_id', $this->conversationId)->latest()
@@ -651,7 +633,7 @@ final class ProcessChatMessage implements ShouldQueue
             && $last->role === 'assistant'
             && $prev !== null
             && $prev->role === 'user'
-            && $prev->content === $this->message;
+            && $prev->content === $content;
 
         if ($turnAlreadyComplete) {
             return;
@@ -659,7 +641,7 @@ final class ProcessChatMessage implements ShouldQueue
 
         $storePersistedUser = $last !== null
             && $last->role === 'user'
-            && $last->content === $this->message;
+            && $last->content === $content;
 
         if (! $storePersistedUser) {
             $table->insert([
@@ -669,13 +651,14 @@ final class ProcessChatMessage implements ShouldQueue
                 'participant_id' => (string) $this->user->getKey(),
                 'agent' => CrmAssistant::class,
                 'role' => 'user',
-                'content' => $this->message,
+                'content' => $content,
                 'attachments' => '[]',
                 'tool_calls' => '[]',
                 'tool_results' => '[]',
                 'usage' => '[]',
                 'meta' => json_encode($this->failedTurnUserMeta(), JSON_THROW_ON_ERROR),
                 'document' => json_encode($this->document, JSON_THROW_ON_ERROR),
+                'origin' => $this->origin->value,
                 'created_at' => $now,
                 'updated_at' => $now,
             ]);
@@ -991,7 +974,7 @@ final class ProcessChatMessage implements ShouldQueue
         dispatch(new SuggestNextSteps(
             conversationId: $this->conversationId,
             messageId: $messageId,
-            message: $this->isContinuation ? '' : $this->message,
+            message: $this->origin->isTyped() ? $this->message : '',
             reply: $reply,
             provider: $this->resolved['provider'],
             toolNames: array_values(array_unique(
