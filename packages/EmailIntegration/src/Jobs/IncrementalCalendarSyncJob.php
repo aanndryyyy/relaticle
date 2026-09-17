@@ -10,6 +10,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
 use Illuminate\Support\Facades\Bus;
+use Relaticle\EmailIntegration\Actions\CompleteMailboxHistoryImportAction;
 use Relaticle\EmailIntegration\Actions\ReconcileCalendarMeetingsAction;
 use Relaticle\EmailIntegration\Data\CalendarEventData;
 use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
@@ -18,6 +19,7 @@ use Relaticle\EmailIntegration\Exceptions\ReconcileCalendarMeetingsFailed;
 use Relaticle\EmailIntegration\Jobs\Concerns\DetectsAuthErrors;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Services\Contracts\CalendarServiceFactoryInterface;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 use Throwable;
 
@@ -43,6 +45,9 @@ final class IncrementalCalendarSyncJob implements ShouldBeUnique, ShouldQueue
         $account = $this->connectedAccount;
 
         if (! $account->hasCalendar() || $account->status !== EmailAccountStatus::ACTIVE) {
+            MailboxSyncTracker::markCalendarFinished($account);
+            resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
+
             return;
         }
 
@@ -138,6 +143,8 @@ final class IncrementalCalendarSyncJob implements ShouldBeUnique, ShouldQueue
 
         MailboxSyncTracker::markCalendarFinished($account);
 
+        resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
+
         dispatch(new EnsureCalendarPushChannelJob($account));
     }
 
@@ -154,6 +161,14 @@ final class IncrementalCalendarSyncJob implements ShouldBeUnique, ShouldQueue
         ]);
 
         MailboxSyncTracker::markCalendarFinished($account);
+
+        $batchId = $account->history_import_batch_id;
+
+        if (is_string($batchId) && $batchId !== '') {
+            resolve(MailboxHistoryImportService::class)->recordCalendarFailures((string) $account->getKey(), $failedJobs);
+        }
+
+        resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
     }
 
     public function failed(Throwable $exception): void
@@ -164,6 +179,8 @@ final class IncrementalCalendarSyncJob implements ShouldBeUnique, ShouldQueue
             'status' => $this->isAuthError($exception) ? EmailAccountStatus::REAUTH_REQUIRED : EmailAccountStatus::ERROR,
             'last_error' => $exception->getMessage(),
         ]);
+
+        resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($this->connectedAccount);
     }
 
     public function uniqueId(): string

@@ -9,11 +9,13 @@ use Illuminate\Bus\Batch;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Config;
+use Relaticle\EmailIntegration\Actions\CompleteMailboxHistoryImportAction;
 use Relaticle\EmailIntegration\Data\CalendarEventData;
 use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Email;
 use Relaticle\EmailIntegration\Models\Meeting;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 
 final class InitialSyncPageStoreBatch
@@ -228,6 +230,13 @@ final class InitialSyncPageStoreBatch
 
         if ($syncKind === 'calendar') {
             MailboxSyncTracker::markCalendarFinished($account);
+
+            $batchId = $account->history_import_batch_id;
+
+            if (is_string($batchId) && $batchId !== '') {
+                resolve(MailboxHistoryImportService::class)->recordCalendarFailures((string) $account->getKey(), $missingCount);
+                resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
+            }
         }
 
         if ($syncKind === 'email') {

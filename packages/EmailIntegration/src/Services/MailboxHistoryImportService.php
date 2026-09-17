@@ -21,6 +21,8 @@ final readonly class MailboxHistoryImportService
 
     private const string FAILURE_GENERATION_PREFIX = 'email-integration:history-import-failure-generation:';
 
+    private const string CALENDAR_FAILURES_PREFIX = 'email-integration:history-import-calendar-failures:';
+
     public function markAwaitingRetrySuccessNotice(string $batchId): void
     {
         Cache::put(self::AWAITING_RETRY_SUCCESS_NOTICE_PREFIX.$batchId, true, now()->addWeek());
@@ -52,6 +54,16 @@ final readonly class MailboxHistoryImportService
         }
 
         return (int) Cache::increment($key);
+    }
+
+    public function recordCalendarFailures(string $accountId, int $count): void
+    {
+        Cache::put(self::CALENDAR_FAILURES_PREFIX.$accountId, max(0, $count), now()->addWeek());
+    }
+
+    public function calendarFailureCount(string $accountId): int
+    {
+        return max(0, (int) Cache::get(self::CALENDAR_FAILURES_PREFIX.$accountId, 0));
     }
 
     public function lockKey(ConnectedAccount $account): string

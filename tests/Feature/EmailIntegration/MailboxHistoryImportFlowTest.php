@@ -697,7 +697,7 @@ it('notifies after retry when every failed import job eventually succeeds', func
     Queue::assertPushed(SendQueuedNotifications::class);
 });
 
-it('does not notify when the import batch finishes with failed jobs', function (): void {
+it('notifies with issues when the import batch finishes with failed jobs', function (): void {
     Queue::fake();
     $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
         'sync_cursor' => 'history-done',
@@ -714,12 +714,15 @@ it('does not notify when the import batch finishes with failed jobs', function (
     expect($account->fresh()->status)->toBe(EmailAccountStatus::ACTIVE)
         ->and($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeTrue();
 
-    foreach ($batch->options['finally'] as $callback) {
-        $callback($batch->fresh());
-    }
+    $notification = $account->user->notifications()->sole();
 
-    expect($account->user->notifications()->count())->toBe(0);
-    Queue::assertNotPushed(SendQueuedNotifications::class);
+    expect($notification->data['title'])->toBe(__('filament/notifications/mailbox-import-complete.title_with_issues'))
+        ->and($notification->data['status'])->toBe('warning')
+        ->and($notification->data['viewData']['kind'])->toBe('partial')
+        ->and($notification->data['body'])->toContain("1 message couldn't be imported")
+        ->and(collect($notification->data['actions'] ?? [])->pluck('name')->all())->toContain('reviewAndRetry');
+
+    Queue::assertPushed(SendQueuedNotifications::class);
 
     resolve(MailboxHistoryImportService::class)->markAwaitingRetrySuccessNotice($batchId);
 
@@ -727,7 +730,8 @@ it('does not notify when the import batch finishes with failed jobs', function (
         $callback($batch->fresh());
     }
 
-    expect($account->user->notifications()->count())->toBe(0);
+    expect($account->user->notifications()->count())->toBe(1)
+        ->and($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeTrue();
 });
 
 it('retries a mailbox import from the accounts page callout', function (): void {
@@ -813,9 +817,12 @@ it('recovers the failed email through the accounts page callout using the real q
 
     expect($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeTrue()
         ->and(DB::table('failed_jobs')->count())->toBe(1)
-        ->and($account->emails()->count())->toBe(0);
+        ->and($account->emails()->count())->toBe(0)
+        ->and($user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->count())->toBe(1)
+        ->and($user->notifications()->sole()->data['title'])->toBe(__('filament/notifications/mailbox-import-complete.title_with_issues'));
 
     Livewire::test(EmailAccountsPage::class)
+        ->assertSee(__('filament/pages/email-accounts.history_import_failure.badge'))
         ->callAction(TestAction::make('retryFailedImport')->arguments(['account_id' => $account->getKey()]))
         ->assertNotified(__('filament/pages/email-accounts.notifications.retry_failed_import_queued.title'));
 
@@ -823,7 +830,7 @@ it('recovers the failed email through the accounts page callout using the real q
     expect($import->hasAwaitingRetrySuccessNotice($batchId))->toBeTrue();
     expect(resolve(RetryMailboxHistoryImportFailuresAction::class)->execute($user, $account->fresh(), $batchId))->toBeFalse();
     expect($import->hasAwaitingRetrySuccessNotice($batchId))->toBeTrue();
-    expect($user->notifications()->count())->toBe(0);
+    expect($user->notifications()->count())->toBe(1);
 
     Artisan::call('queue:work', ['connection' => 'database', '--queue' => 'emails-sync', '--once' => true]);
 
@@ -832,10 +839,15 @@ it('recovers the failed email through the accounts page callout using the real q
     expect(Bus::findBatch($batchId)->failedJobIds)->toBe([]);
     expect($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeFalse();
     expect($import->hasAwaitingRetrySuccessNotice($batchId))->toBeFalse();
-    expect($user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->count())->toBe(1);
-    expect($user->notifications()->sole()->data['title'])->toBe(__('filament/notifications/mailbox-import-complete.retry_success.title'));
+    expect($user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->count())->toBe(2);
+    $importNotifications = $user->notifications()
+        ->where('type', MailboxHistoryImportCompletedNotification::class)
+        ->get();
+    expect($importNotifications->pluck('data.title')->all())
+        ->toContain(__('filament/notifications/mailbox-import-complete.title_with_issues'))
+        ->toContain(__('filament/notifications/mailbox-import-complete.retry_success.title'));
     expect(resolve(RetryMailboxHistoryImportFailuresAction::class)->execute($user, $account->fresh(), $batchId))->toBeFalse();
-    expect($user->notifications()->count())->toBe(1);
+    expect($user->notifications()->count())->toBe(2);
 
     Livewire::test(EmailAccountsPage::class)
         ->assertDontSee(__('filament/pages/email-accounts.history_import_failure.badge'))
@@ -843,7 +855,7 @@ it('recovers the failed email through the accounts page callout using the real q
         ->assertActionHidden(TestAction::make('retryFailedImport')->arguments(['account_id' => $account->getKey()]));
 });
 
-it('notifies once after a store job fails twice then succeeds through the real queue', function (): void {
+it('does not send a retry-success notice until every failed import job succeeds', function (): void {
     config()->set('queue.default', 'database');
     $user = User::factory()->withWorkspace()->create();
     $this->actingAs($user);
@@ -872,7 +884,11 @@ it('notifies once after a store job fails twice then succeeds through the real q
     Bus::findBatch($batchId)->add([$job]);
     Artisan::call('queue:work', ['connection' => 'database', '--queue' => 'emails-sync', '--once' => true]);
 
+    expect($user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->count())->toBe(1)
+        ->and($user->notifications()->sole()->data['title'])->toBe(__('filament/notifications/mailbox-import-complete.title_with_issues'));
+
     Livewire::test(EmailAccountsPage::class)
+        ->assertSee(__('filament/pages/email-accounts.history_import_failure.badge'))
         ->callAction(TestAction::make('retryFailedImport')->arguments(['account_id' => $account->getKey()]))
         ->assertNotified(__('filament/pages/email-accounts.notifications.retry_failed_import_queued.title'));
 
@@ -880,9 +896,10 @@ it('notifies once after a store job fails twice then succeeds through the real q
 
     expect($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeTrue()
         ->and($account->emails()->count())->toBe(0)
-        ->and($user->notifications()->count())->toBe(0);
+        ->and($user->notifications()->count())->toBe(1);
 
     Livewire::test(EmailAccountsPage::class)
+        ->assertSee(__('filament/pages/email-accounts.history_import_failure.badge'))
         ->callAction(TestAction::make('retryFailedImport')->arguments(['account_id' => $account->getKey()]))
         ->assertNotified(__('filament/pages/email-accounts.notifications.retry_failed_import_queued.title'));
 
@@ -890,7 +907,9 @@ it('notifies once after a store job fails twice then succeeds through the real q
 
     expect($account->emails()->sole()->provider_message_id)->toBe('retry-twice-message');
     expect($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeFalse();
-    expect($user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->count())->toBe(1);
+    expect($user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->count())->toBe(2);
+    expect($user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->get()->pluck('data.title')->all())
+        ->toContain(__('filament/notifications/mailbox-import-complete.retry_success.title'));
 });
 
 it('does not treat a missing failed job record as retried', function (): void {

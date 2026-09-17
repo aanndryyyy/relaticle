@@ -58,8 +58,9 @@ final readonly class StartMailboxHistoryImportAction
                 return;
             }
 
+            MailboxSyncTracker::markCalendarStarted($account);
+
             if ($account->calendar_sync_cursor !== null) {
-                MailboxSyncTracker::markCalendarStarted($account);
                 dispatch(new IncrementalCalendarSyncJob($account, reconcileAfter: true))->afterCommit();
 
                 return;

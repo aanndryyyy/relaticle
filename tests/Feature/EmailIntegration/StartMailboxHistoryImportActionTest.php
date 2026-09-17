@@ -39,6 +39,7 @@ it('also queues initial calendar sync when the account has calendar', function (
     resolve(StartMailboxHistoryImportAction::class)->execute($account);
 
     Bus::assertDispatched(InitialCalendarSyncJob::class, fn (InitialCalendarSyncJob $job): bool => $job->connectedAccount->is($account));
+    expect(MailboxSyncTracker::isCalendarSyncing($account))->toBeTrue();
 });
 
 it('queues an email backfill when a mailbox cursor already exists', function (): void {

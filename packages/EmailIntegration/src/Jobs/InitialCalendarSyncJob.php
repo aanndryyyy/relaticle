@@ -8,6 +8,7 @@ use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
+use Relaticle\EmailIntegration\Actions\CompleteMailboxHistoryImportAction;
 use Relaticle\EmailIntegration\Actions\ReconcileCalendarMeetingsAction;
 use Relaticle\EmailIntegration\Data\CalendarEventData;
 use Relaticle\EmailIntegration\Enums\CalendarEventStatus;
@@ -45,6 +46,7 @@ final class InitialCalendarSyncJob implements ShouldBeUnique, ShouldQueue
 
         if (! $account->hasCalendar() || $account->status !== EmailAccountStatus::ACTIVE) {
             MailboxSyncTracker::markCalendarFinished($account);
+            resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
 
             return;
         }
@@ -93,6 +95,8 @@ final class InitialCalendarSyncJob implements ShouldBeUnique, ShouldQueue
             'status' => $this->isAuthError($exception) ? EmailAccountStatus::REAUTH_REQUIRED : EmailAccountStatus::ERROR,
             'last_error' => $exception->getMessage(),
         ]);
+
+        resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($this->connectedAccount);
     }
 
     public function uniqueId(): string
@@ -142,6 +146,8 @@ final class InitialCalendarSyncJob implements ShouldBeUnique, ShouldQueue
         }
 
         MailboxSyncTracker::markCalendarFinished($account);
+
+        resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
 
         dispatch(new EnsureCalendarPushChannelJob($account));
     }
