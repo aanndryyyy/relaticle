@@ -8,8 +8,6 @@ use App\Enums\CustomFieldType;
 use App\Models\CustomField;
 use App\Models\Workspace;
 use Relaticle\Chat\Support\PromptText;
-use Relaticle\CustomFields\Enums\FieldDataType;
-use Relaticle\CustomFields\Facades\CustomFieldsType;
 use Relaticle\CustomFields\Models\CustomFieldOption;
 use Relaticle\CustomFields\Models\Scopes\CustomFieldsActivableScope;
 
@@ -67,74 +65,37 @@ final readonly class CustomFieldsSchemaDescriber
 
     private function describeInactiveField(CustomField $field): string
     {
-        $typeData = CustomFieldsType::getFieldType($field->type);
-
-        return "{$field->code} (".$this->humanType($typeData?->dataType, $field->type).')';
+        return "{$field->code} ({$field->type})";
     }
 
     private function describeField(CustomField $field): string
     {
-        $typeData = CustomFieldsType::getFieldType($field->type);
-        $dataType = $typeData?->dataType;
+        $type = CustomFieldType::tryFrom($field->type);
+        $parts = [$field->type];
 
-        $base = "{$field->code} (".$this->humanType($dataType, $field->type);
+        if ($type === null) {
+            return "{$field->code} (".implode(', ', $parts).')';
+        }
 
-        if ($dataType?->isChoiceField() && $field->options->isNotEmpty()) {
+        if ($type->isChoice() && $field->options->isNotEmpty()) {
             // Option names are tenant-authored free text and land inside the tool
             // definition, which is the one prompt region NOT wrapped in the untrusted-data
             // framing the system prompt applies. Newlines and quotes would let a label
             // forge extra schema lines, so they go through the same sanitizer every
             // label in the system prompt already uses.
-            $labels = $field->options
-                ->map(fn (CustomFieldOption $opt): string => '"'.PromptText::sanitize($opt->name, 120).'"')
+            $parts[] = 'one of: '.$field->options
+                ->map(fn (CustomFieldOption $option): string => '"'.PromptText::sanitize($option->name, 120).'"')
                 ->implode(', ');
-            $base .= ", one of: {$labels}";
         }
 
-        $hint = $this->formatHint($dataType, $field->type);
-        if ($hint !== null) {
-            $base .= ", {$hint}";
+        $parts[] = $type->inputFormat();
+
+        $example = $type->example();
+
+        if (! $type->isChoice() && $example !== null) {
+            $parts[] = 'e.g. '.json_encode($example, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         }
 
-        return $base.')';
-    }
-
-    private function humanType(?FieldDataType $dataType, string $rawType): string
-    {
-        return match ($dataType) {
-            FieldDataType::STRING => 'string',
-            FieldDataType::TEXT => 'rich-text',
-            FieldDataType::NUMERIC => 'integer',
-            FieldDataType::FLOAT => 'number',
-            FieldDataType::DATE => 'date',
-            FieldDataType::DATE_TIME => 'date-time',
-            FieldDataType::BOOLEAN => 'boolean',
-            FieldDataType::SINGLE_CHOICE => 'single-choice',
-            FieldDataType::MULTI_CHOICE => $rawType === CustomFieldType::RECORD->value ? 'record' : 'multi-choice',
-            FieldDataType::FILE => 'file (read-only via chat)',
-            null => $rawType,
-        };
-    }
-
-    private function formatHint(?FieldDataType $dataType, string $rawType): ?string
-    {
-        return match ($dataType) {
-            FieldDataType::DATE => 'YYYY-MM-DD',
-            FieldDataType::DATE_TIME => 'ISO 8601, e.g. "2026-05-20T14:00:00Z"',
-            FieldDataType::TEXT => match ($rawType) {
-                'rich-editor' => 'markdown, or HTML when the value starts with <; stored as HTML',
-                default => null,
-            },
-            FieldDataType::MULTI_CHOICE => $rawType === CustomFieldType::RECORD->value
-                ? 'array of record IDs of the lookup entity; records must belong to this workspace'
-                : 'array of option labels or IDs',
-            default => match ($rawType) {
-                'email' => 'array of email strings',
-                'phone' => 'array of phone strings',
-                'link' => 'array of URL strings',
-                'currency' => 'numeric amount',
-                default => null,
-            },
-        };
+        return "{$field->code} (".implode(', ', $parts).')';
     }
 }

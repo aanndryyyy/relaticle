@@ -15,18 +15,23 @@ use App\Http\Middleware\SubdomainRootResponse;
 use App\Http\Middleware\ThrottleBeforeAuthentication;
 use App\Http\Middleware\ValidateSignature;
 use Filament\Facades\Filament;
+use Filament\Http\Middleware\SetUpPanel;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
+use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Middleware\SubstituteBindings;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 use Laravel\Cashier\Http\Middleware\VerifyWebhookSignature;
 use Livewire\Exceptions\PayloadTooLargeException;
 use Livewire\Mechanisms\HandleComponents\CorruptComponentPayloadException;
+use Relaticle\SystemAdmin\Http\Middleware\EnsureAuthenticationContext;
+use Relaticle\SystemAdmin\Http\Middleware\IsolateAuthenticationSession;
 use Sentry\Laravel\Integration;
 use Spatie\Health\Commands\DispatchQueueCheckJobsCommand;
 use Spatie\Health\Commands\RunHealthChecksCommand;
@@ -86,11 +91,17 @@ return Application::configure(basePath: dirname(__DIR__))
         // api/mcp root banners are exactly the crawlable secondary-host URLs.
         $middleware->prepend(DenyIndexingOnSecondaryHosts::class);
 
-        $middleware->web(append: [
-            RedirectToPrimaryHost::class,
-            EnsureAuthenticationComplete::class,
-            StopImpersonationOnLogout::class,
-        ]);
+        // Controller constructors can resolve sessions before route middleware runs.
+        $middleware->append(IsolateAuthenticationSession::class);
+
+        $middleware->web(
+            append: [
+                'auth.context',
+                RedirectToPrimaryHost::class,
+                EnsureAuthenticationComplete::class,
+                StopImpersonationOnLogout::class,
+            ],
+        );
 
         // Only enforced on multi-host deployments (any *_DOMAIN configured);
         // the framework already skips TrustHosts in local and test runs.
@@ -142,7 +153,23 @@ return Application::configure(basePath: dirname(__DIR__))
             prepend: ThrottleBeforeAuthentication::class,
         );
 
+        $middleware->prependToPriorityList(
+            before: EncryptCookies::class,
+            prepend: SetUpPanel::class,
+        );
+
+        $middleware->appendToPriorityList(
+            after: StartSession::class,
+            append: EnsureAuthenticationContext::class,
+        );
+
+        $middleware->prependToPriorityList(
+            before: SetUpPanel::class,
+            prepend: RedirectToPrimaryHost::class,
+        );
+
         $middleware->alias([
+            'auth.context' => EnsureAuthenticationContext::class,
             'signed' => ValidateSignature::class,
             'no-referrer' => NoReferrer::class,
             // Fortify and Passkeys both reference this alias by name in their own
@@ -193,11 +220,13 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withSchedule(function (Schedule $schedule): void {
         $schedule->command('app:generate-sitemap')->daily();
         $schedule->command('import:cleanup')->hourly();
+        $schedule->command('app:purge-pending-uploads')->hourly()->withoutOverlapping()->onOneServer();
         $schedule->command('queue:prune-batches --hours=24')->daily();
         $schedule->command('invitations:cleanup')->daily();
         $schedule->command('activitylog:clean --force')->daily();
         $schedule->command('chat:expire-pending-actions')->everyFiveMinutes();
         $schedule->command('chat:release-orphaned-reservations')->everyTenMinutes()->withoutOverlapping()->onOneServer();
+        $schedule->command('chat:purge-unsent-attachments')->hourly()->withoutOverlapping()->onOneServer();
         $schedule->command('chat:reset-credits')->hourly()->withoutOverlapping()->onOneServer();
         $schedule->command('billing:process-trials')->dailyAt('00:15')->withoutOverlapping()->onOneServer();
         $schedule->command('disposable:update')->weekly()->withoutOverlapping()->onOneServer();

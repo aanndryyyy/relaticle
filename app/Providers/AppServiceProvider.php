@@ -13,6 +13,7 @@ use App\Filament\CustomFields\DateTimeFieldType;
 use App\Filament\CustomFields\RichEditorFieldType;
 use App\Http\Responses\LoginResponse;
 use App\Listeners\Billing\SyncPlanOnStripeSubscriptionChange;
+use App\Listeners\CreateSetupConversationListener;
 use App\Listeners\Email\NewSubscriberListener;
 use App\Listeners\Email\RecordLoginTimestampListener;
 use App\Listeners\Email\WorkspaceCreatedTagListener;
@@ -44,6 +45,8 @@ use App\Support\CustomFields\CustomFieldInput;
 use App\Support\CustomFields\RecordNameResolver;
 use App\Support\Impersonation\Impersonator;
 use App\Support\Markdown\TableAwareLeagueDriver;
+use App\Support\Media\MediaLookup;
+use App\Support\Passport\ClientRepository;
 use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
 use Filament\Auth\Notifications\NoticeOfEmailChangeRequest;
@@ -77,6 +80,7 @@ use Knuckles\Scribe\Scribe;
 use Laravel\Cashier\Cashier;
 use Laravel\Cashier\Events\WebhookHandled;
 use Laravel\Jetstream\Events\TeamMemberAdded;
+use Laravel\Passport\ClientRepository as BaseClientRepository;
 use Laravel\Passport\Events\AccessTokenCreated;
 use Laravel\Passport\Passport;
 use Laravel\Sanctum\Sanctum;
@@ -93,7 +97,8 @@ use Relaticle\Ink\Models\Post;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
 use SocialiteProviders\Manager\SocialiteWasCalled;
 use SocialiteProviders\Microsoft\MicrosoftExtendSocialite;
-use Spatie\Activitylog\Facades\Activity as ActivityLogger;
+use Spatie\Activitylog\Contracts\Activity as ActivityContract;
+use Spatie\Activitylog\Support\PendingActivityLog;
 use Spatie\LaravelMarkdown\MarkdownRenderer;
 use Spatie\Onboard\OnboardingSteps;
 
@@ -137,6 +142,7 @@ final class AppServiceProvider extends ServiceProvider
         $this->app->scoped(WorkspaceActivationFacts::class);
 
         $this->app->scoped(RecordNameResolver::class);
+        $this->app->scoped(MediaLookup::class);
 
         // spatie/laravel-onboard binds OnboardingSteps as a SINGLETON, which
         // makes every workspace share one OnboardingStep instance. Its complete()
@@ -163,6 +169,10 @@ final class AppServiceProvider extends ServiceProvider
                 config('markdown-response.driver_options.league.options', []),
             ),
         );
+
+        // Passport self-binds this singleton, and every OAuth endpoint resolves the
+        // client it was handed through it.
+        $this->app->singleton(BaseClientRepository::class, ClientRepository::class);
 
         // The shared MarkdownRenderer always loads HeadingPermalinkExtension, which
         // stamps a docs-site anchor onto every heading regardless of add_anchors_to_headings.
@@ -199,6 +209,7 @@ final class AppServiceProvider extends ServiceProvider
         Event::listen(TeamMemberAdded::class, WorkspaceMemberAddedListener::class);
         Event::listen(WorkspaceCreated::class, WorkspaceCreatedTagListener::class);
         Event::listen(WorkspaceCreated::class, SeedWorkspaceCreditBalanceListener::class);
+        Event::listen(WorkspaceCreated::class, CreateSetupConversationListener::class);
         Event::listen(SocialiteWasCalled::class, MicrosoftExtendSocialite::class);
 
         Event::listen(WebhookHandled::class, SyncPlanOnStripeSubscriptionChange::class);
@@ -302,7 +313,12 @@ final class AppServiceProvider extends ServiceProvider
      */
     private function configureActivityLog(): void
     {
-        ActivityLogger::beforeLogging(function (ActivityModel $activity): void {
+        // The facade resolves authentication before hostname-specific sessions are configured.
+        PendingActivityLog::beforeLogging(function (ActivityContract $activity): void {
+            if (! $activity instanceof ActivityModel) {
+                return;
+            }
+
             if (blank($activity->getAttribute('batch_uuid'))) {
                 $activity->setAttribute('batch_uuid', $this->app->make(RequestActivityBatch::class)->id());
             }
@@ -476,7 +492,7 @@ final class AppServiceProvider extends ServiceProvider
             $workspace = new Workspace;
             $workspace->forceFill(['id' => 'scribe-workspace-id', 'name' => 'Scribe Workspace', 'user_id' => $user->id, 'personal_workspace' => true]);
             $workspace->setRelation('owner', $user);
-            $workspace->setRelation('users', collect());
+            $workspace->setRelation('users', $user->newCollection());
 
             $user->forceFill(['current_workspace_id' => $workspace->id]);
             $user->setRelation('currentWorkspace', $workspace);

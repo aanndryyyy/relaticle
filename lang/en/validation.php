@@ -35,6 +35,7 @@ return [
         'foreign_records' => ':field: records :ids do not belong to this workspace.',
         'unsupported_lookup' => ':field: lookup type ":type" cannot be written by API, MCP, or chat.',
         'record_ids' => ':field: pass an array of record IDs.',
+        'upload' => 'This file is unavailable for :field. Upload a new file or keep the file already attached to this field.',
     ],
     'date' => 'The :attribute field must be a valid date.',
     'date_equals' => 'The :attribute field must be a date equal to :date.',

@@ -42,7 +42,10 @@ use App\Support\SupportForms;
 use Asmit\ResizedColumn\ResizedColumnPlugin;
 use Exception;
 use Filament\Actions\Action;
+use Filament\Actions\Contracts\HasActions;
+use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
+use Filament\Actions\EditAction;
 use Filament\Enums\DatabaseNotificationsPosition;
 use Filament\Enums\GlobalSearchPosition;
 use Filament\Events\TenantSet;
@@ -53,6 +56,7 @@ use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
 use Filament\Navigation\NavigationGroup;
+use Filament\Notifications\Notification;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Schemas\Components\Section;
@@ -78,10 +82,14 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Js;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 use Laravel\Jetstream\Features;
 use Laravel\Pennant\Feature;
+use Livewire\Livewire;
 use Relaticle\CustomFields\CustomFieldsPlugin;
+use Relaticle\CustomFields\Models\Contracts\HasCustomFields;
+use Throwable;
 
 final class AppPanelProvider extends PanelProvider
 {
@@ -113,7 +121,27 @@ final class AppPanelProvider extends PanelProvider
             SwitchWorkspace::class,
         );
 
-        Action::configureUsing(fn (Action $action): Action => $action->size(Size::Small)->iconPosition('before'));
+        Action::configureUsing(fn (Action $action): Action => $action
+            ->size(Size::Small)
+            ->iconPosition('before')
+            ->databaseTransaction(fn (): bool => $this->isCurrentPanel()
+                && ($action instanceof CreateAction || $action instanceof EditAction || $action->getName() === 'edit')
+                && is_a($action->getModel() ?? '', HasCustomFields::class, true)));
+
+        Livewire::listen('exception', function (object $component, Throwable $exception): void {
+            if (! $this->isCurrentPanel() || ! $component instanceof HasActions || ! $exception instanceof ValidationException) {
+                return;
+            }
+
+            foreach ($exception->errors() as $attribute => $messages) {
+                if (str_starts_with($attribute, 'custom_fields.')) {
+                    Notification::make()->title($messages[0])->danger()->send();
+
+                    break;
+                }
+            }
+        });
+
         DeleteAction::configureUsing(fn (DeleteAction $action): DeleteAction => $action->label(__('filament/panel.actions.delete_record')));
         Section::configureUsing(fn (Section $section): Section => $section->compact());
 
@@ -299,6 +327,7 @@ final class AppPanelProvider extends PanelProvider
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
                 StartSession::class,
+                'auth.context',
                 AuthenticateSession::class,
                 ShareErrorsFromSession::class,
                 PreventRequestForgery::class,

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Enums\CreationSource;
 use App\Events\WorkspaceCreated;
+use App\Models\ActivityLog\Activity;
 use App\Models\Company;
 use App\Models\CustomField;
 use App\Models\CustomFieldValue;
@@ -574,6 +575,54 @@ it('auto-created records have correct workspace and creation source', function (
         ->and($autoCreatedCompany->creation_source)->toBe(CreationSource::IMPORT)
         ->and((string) $autoCreatedCompany->workspace_id)->toBe((string) $this->workspace->id)
         ->and((string) $autoCreatedCompany->creator_id)->toBe((string) $this->user->id);
+});
+
+it('credits the importing user as the activity causer on created records', function (): void {
+    Event::except(fn (string $event): bool => str_starts_with($event, 'eloquent.'));
+
+    ImportExecutionFixture::readyStore($this, ['Name'], [
+        ImportExecutionFixture::row(2, ['Name' => 'Acme Corp'], ['match_action' => RowMatchAction::Create->value]),
+    ], [
+        ColumnData::toField(source: 'Name', target: 'name'),
+    ], ImportEntityType::Company);
+
+    auth()->forgetGuards();
+
+    ImportExecutionFixture::run($this);
+
+    $company = Company::where('workspace_id', $this->workspace->id)->where('name', 'Acme Corp')->sole();
+    $activity = Activity::query()->where('subject_id', $company->getKey())->sole();
+
+    expect($activity->causer_id)->toBe($this->user->getKey())
+        ->and($activity->causer_type)->toBe('user');
+});
+
+it('credits the importing user as the activity causer on updated records', function (): void {
+    Event::except(fn (string $event): bool => str_starts_with($event, 'eloquent.'));
+
+    $company = Company::factory()->for($this->workspace)->create(['name' => 'Acme Corp']);
+
+    ImportExecutionFixture::readyStore($this, ['Name'], [
+        ImportExecutionFixture::row(2, ['Name' => 'Acme Corporation'], [
+            'match_action' => RowMatchAction::Update->value,
+            'matched_id' => (string) $company->getKey(),
+        ]),
+    ], [
+        ColumnData::toField(source: 'Name', target: 'name'),
+    ], ImportEntityType::Company);
+
+    auth()->forgetGuards();
+
+    ImportExecutionFixture::run($this);
+
+    $activity = Activity::query()
+        ->where('subject_id', $company->getKey())
+        ->where('event', 'updated')
+        ->sole();
+
+    expect($company->fresh()->name)->toBe('Acme Corporation')
+        ->and($activity->causer_id)->toBe($this->user->getKey())
+        ->and($activity->causer_type)->toBe('user');
 });
 
 it('skips Update row when matched record no longer exists', function (): void {

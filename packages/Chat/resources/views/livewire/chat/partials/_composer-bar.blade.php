@@ -1,12 +1,12 @@
 {{-- Shared input bar for every composer surface (full-page chat, side panel,
      dashboard). Renders the rounded container, the TipTap mount, and the
-     trailing controls row (char counter, model picker, reserved mic slot,
-     send/stop). The caller owns the surrounding `x-data="chatEditor(...)"`
-     wrapper (and its `x-on:*` listeners + `data-chat-context`): this
-     partial only needs `text`, `isStreaming`, `rateLimit`/`submitting` etc.
-     to already be reachable up the Alpine scope chain, exactly as the editor
-     mount below relies on `x-ref="editor"` resolving to that same wrapper's
-     scope.
+     controls row (attachment on the lead side, char counter, model picker,
+     mic and send/stop on the trailing side). The caller owns the surrounding
+     `x-data="chatEditor(...)"` wrapper (and its `x-on:*` listeners +
+     `data-chat-context`): this partial only needs `text`, `isStreaming`,
+     `rateLimit`/`submitting` etc. to already be reachable up the Alpine scope
+     chain, exactly as the editor mount below relies on `x-ref="editor"`
+     resolving to that same wrapper's scope.
 
      $showStopButton (bool, default true): dashboard has no streaming
      concept: it navigates to the conversation page instead, so it passes
@@ -33,19 +33,75 @@
     <div x-ref="editor" class="relative" wire:ignore></div>
 
     <div class="flex items-center gap-2 px-3 pb-2">
-        <span
-            x-show="text.length > 4000"
-            x-cloak
-            x-text="`${text.length.toLocaleString()} / 5,000`"
-            :class="{
-                'text-gray-500 dark:text-gray-400': text.length <= 4900,
-                'text-amber-600 dark:text-amber-400': text.length > 4900 && text.length <= 5000,
-                'text-red-600 dark:text-red-400': text.length > 5000,
-            }"
-            class="text-[length:var(--text-micro)]"
-            aria-live="polite"
-        ></span>
+        <div class="flex items-center gap-1.5">
+            @php $attachTexts = [
+                'wrongType' => __('Attach a CSV or TXT file.'),
+                'tooLarge' => __('Files up to 10 MB.'),
+                'failed' => __('Could not upload that file. Try again.'),
+            ]; @endphp
+            <div
+                x-data="chatAttachment({
+                    uploadUrl: @js(route('chat.attachments.store')),
+                    deleteUrlTemplate: @js(route('chat.attachments.destroy', ['attachment' => '__ID__'])),
+                    context: @js($context ?? 'conversation'),
+                    maxBytes: @js(\Relaticle\Chat\Actions\StoreChatAttachment::MAX_KILOBYTES * 1024),
+                    texts: @js($attachTexts),
+                })"
+                data-chat-attachment
+                class="contents"
+            >
+                <input type="file" x-ref="fileInput" accept=".csv,.txt,text/csv,text/plain" class="sr-only" tabindex="-1" aria-hidden="true" x-on:change="onFileChosen($event)" data-chat-attachment-input>
+
+                <button
+                    type="button"
+                    x-on:click="pick()"
+                    :disabled="uploading"
+                    :aria-busy="uploading"
+                    aria-label="{{ __('Attach a CSV or TXT file') }}"
+                    title="{{ __('Attach a CSV or TXT file') }}"
+                    class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-gray-500 transition hover:bg-gray-100 hover:text-gray-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 disabled:cursor-progress dark:text-gray-400 dark:hover:bg-gray-700 dark:hover:text-white"
+                >
+                    <x-heroicon-o-paper-clip x-show="!uploading" class="h-4 w-4" aria-hidden="true" />
+                    <x-heroicon-o-arrow-path x-show="uploading" x-cloak class="h-4 w-4 motion-safe:animate-spin" aria-hidden="true" />
+                </button>
+
+                <div
+                    x-show="attachment"
+                    x-cloak
+                    data-chat-attachment-chip
+                    class="absolute bottom-full start-0 mb-2 inline-flex max-w-full items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-700 ring-1 ring-inset ring-gray-900/10 dark:bg-white/10 dark:text-gray-200 dark:ring-white/10"
+                >
+                    <x-heroicon-m-paper-clip class="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span class="truncate" x-text="attachment?.name"></span>
+                    <span class="shrink-0 text-gray-500 dark:text-gray-400" x-text="attachment ? (attachment.row_count === 1 ? @js(__(':count row', ['count' => 1])) : @js(__(':count rows')).replace(':count', attachment.row_count)) : ''"></span>
+                    <button type="button" x-on:click="remove()" class="-me-1 shrink-0 rounded p-0.5 transition hover:bg-gray-900/10 dark:hover:bg-white/20" aria-label="{{ __('Remove attachment') }}">
+                        <x-heroicon-m-x-mark class="h-3 w-3" aria-hidden="true" />
+                    </button>
+                </div>
+
+                <div x-show="attachError" x-cloak role="alert" class="absolute bottom-full end-0 mb-2 flex items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                    <span x-text="attachError"></span>
+                    <button type="button" x-on:click="attachError = null" class="-me-1 shrink-0 rounded p-0.5 transition hover:bg-red-600/10 dark:hover:bg-red-400/20" aria-label="{{ __('Dismiss') }}">
+                        <x-heroicon-m-x-mark class="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <div class="ms-auto flex items-center gap-1.5">
+            <span
+                x-show="text.length > 4000"
+                x-cloak
+                x-text="`${text.length.toLocaleString()} / 5,000`"
+                :class="{
+                    'text-gray-500 dark:text-gray-400': text.length <= 4900,
+                    'text-amber-600 dark:text-amber-400': text.length > 4900 && text.length <= 5000,
+                    'text-red-600 dark:text-red-400': text.length > 5000,
+                }"
+                class="text-[length:var(--text-micro)]"
+                aria-live="polite"
+            ></span>
+
             @include('chat::livewire.chat.partials._model-picker')
 
             {{-- Push-to-talk dictation. Hidden entirely, not disabled, when the
@@ -94,7 +150,7 @@
 
                     {{-- Floated above the bar so a failure never reflows the
                          composer. Absolute against the rounded container's
-                         `relative`, opposite the model picker's own dropdown. --}}
+                         `relative`, opposite the attachment error's own edge. --}}
                     <div
                         x-show="voiceError"
                         x-cloak

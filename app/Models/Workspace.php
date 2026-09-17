@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\BillingStatus;
+use App\Enums\MediaCollection;
 use App\Enums\OnboardingReferralSource;
 use App\Enums\OnboardingUseCase;
 use App\Enums\Plan;
@@ -15,6 +16,7 @@ use App\Events\WorkspaceUpdated;
 use App\Models\ActivityLog\Activity;
 use App\Models\ActivityLog\Scopes\WorkspaceScope;
 use App\Services\AvatarService;
+use App\Support\Media\UploadAllowlist;
 use App\Support\ReservedSlugAwareGenerateSlugAction;
 use Carbon\CarbonImmutable;
 use Database\Factories\WorkspaceFactory;
@@ -51,7 +53,8 @@ use Spatie\Sluggable\SlugOptions;
  * @property ?string $invite_link_token
  * @property ?CarbonImmutable $invite_link_token_expires_at
  * @property ?OnboardingUseCase $onboarding_use_case
- * @property ?array<string, string> $onboarding_context
+ * @property ?string $onboarding_other_use_case
+ * @property ?list<string> $onboarding_context
  * @property ?OnboardingReferralSource $onboarding_referral_source
  * @property CarbonImmutable|null $scheduled_deletion_at
  * @property ?string $stripe_id
@@ -69,6 +72,7 @@ use Spatie\Sluggable\SlugOptions;
     'slug',
     'personal_workspace',
     'onboarding_use_case',
+    'onboarding_other_use_case',
     'onboarding_context',
     'onboarding_referral_source',
     'invite_link_default_role',
@@ -88,7 +92,7 @@ final class Workspace extends Model implements HasAvatar, HasMedia, Onboardable
     use HasUlids;
     use InteractsWithMedia;
 
-    public const string LOGO_MEDIA_COLLECTION = 'logo';
+    public const string LOGO_MEDIA_COLLECTION = MediaCollection::Logo->value;
 
     // SVG is excluded on purpose: it carries script, and a workspace logo is the
     // one image members upload to the public disk on our own origin.
@@ -133,7 +137,7 @@ final class Workspace extends Model implements HasAvatar, HasMedia, Onboardable
         'discord', 'llms.txt',
 
         // API & developer
-        'api', 'graphql', 'mcp', 'webhooks', 'developer', 'developers', 'connect', 'user', 'users',
+        'api', 'graphql', 'mcp', 'media', 'webhooks', 'developer', 'developers', 'connect', 'user', 'users',
 
         // Marketing & public
         'home', 'welcome', 'features', 'demo', 'enterprise', 'pro',
@@ -274,18 +278,41 @@ final class Workspace extends Model implements HasAvatar, HasMedia, Onboardable
     public function getSlugOptions(): SlugOptions
     {
         return SlugOptions::create()
-            ->generateSlugsFrom(function (): string {
-                $slug = Str::slug($this->name);
-
-                if ($slug === '') {
-                    return Str::lower(Str::random(8));
-                }
-
-                return $slug;
-            })
+            ->generateSlugsFrom(fn (): string => $this->slugSourceFor($this->name))
             ->saveSlugsTo('slug')
+            // "acme-corp" then "acme-corp-2" reads as the second Acme Corp, and it is
+            // the convention the 2026_02_11 backfill already wrote into every row.
+            ->startSlugSuffixFrom(2)
             ->preventOverwrite()
             ->doNotGenerateSlugsOnUpdate();
+    }
+
+    /**
+     * The handle a workspace of this name would be saved with. Runs the save's
+     * own pass, so what the signup form previews is what it stores.
+     */
+    public static function availableSlugFor(?string $name): string
+    {
+        if (blank($name)) {
+            return '';
+        }
+
+        $workspace = new self(['name' => $name]);
+        $workspace->generateSlug();
+
+        return (string) $workspace->slug;
+    }
+
+    /**
+     * Names that transliterate to nothing (CJK, Hebrew, Thai, emoji) would
+     * otherwise leave the handle blank and fail a "required" rule on a field
+     * the user never touched.
+     */
+    private function slugSourceFor(?string $name): string
+    {
+        $slug = Str::slug((string) $name);
+
+        return $slug === '' ? Str::lower(Str::random(8)) : $slug;
     }
 
     protected function generateSlugAction(): ReservedSlugAwareGenerateSlugAction
@@ -371,7 +398,11 @@ final class Workspace extends Model implements HasAvatar, HasMedia, Onboardable
     {
         $this->addMediaCollection(self::LOGO_MEDIA_COLLECTION)
             ->acceptsMimeTypes(self::LOGO_MIME_TYPES)
-            ->singleFile();
+            ->singleFile()
+            ->useDisk('public');
+
+        $this->addMediaCollection(MediaCollection::PendingUploads->value)
+            ->acceptsMimeTypes(UploadAllowlist::mimeTypes());
     }
 
     /**
@@ -493,6 +524,14 @@ final class Workspace extends Model implements HasAvatar, HasMedia, Onboardable
     public function conversations(): HasMany
     {
         return $this->hasMany(AgentConversation::class);
+    }
+
+    /**
+     * @return HasOne<AgentConversation, $this>
+     */
+    public function setupConversation(): HasOne
+    {
+        return $this->hasOne(AgentConversation::class)->where('purpose', AgentConversation::PURPOSE_SETUP);
     }
 
     /**

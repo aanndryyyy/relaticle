@@ -15,13 +15,19 @@ use Illuminate\Support\Facades\Auth;
 use Laravel\Ai\Tools\Request;
 use Relaticle\Chat\Tools\Company\GetCompanyTool;
 use Relaticle\Chat\Tools\Company\ListCompaniesTool;
+use Relaticle\Chat\Tools\Note\GetNoteTool;
 use Relaticle\Chat\Tools\Opportunity\ListOpportunitiesTool;
 use Relaticle\Chat\Tools\People\ListPeopleTool;
+use Relaticle\Chat\Tools\Task\GetTaskTool;
+use Relaticle\Chat\Tools\Task\ListTasksTool;
 
 mutates(GetCompanyTool::class);
 mutates(ListCompaniesTool::class);
 mutates(ListPeopleTool::class);
 mutates(ListOpportunitiesTool::class);
+mutates(GetNoteTool::class);
+mutates(GetTaskTool::class);
+mutates(ListTasksTool::class);
 
 beforeEach(function (): void {
     $this->user = User::factory()->withPersonalWorkspace()->create();
@@ -316,4 +322,50 @@ it('lists opportunities with included notes', function (): void {
         ->and($row['included']['notes']['showing'])->toBe(2)
         ->and($row['included']['notes']['items'])->toHaveCount(2)
         ->and($row['included']['notes']['items'][0])->toHaveKeys(['id', 'name', 'url']);
+});
+
+it('returns the records a task is attached to when requested', function (): void {
+    $task = Task::factory()->for($this->workspace)->create(['title' => 'Send proposal']);
+    $task->companies()->attach(Company::factory()->for($this->workspace)->create(['name' => 'Acme']));
+    $task->people()->attach(People::factory()->for($this->workspace)->create(['name' => 'Dana Reed']));
+    $task->opportunities()->attach(Opportunity::factory()->for($this->workspace)->create(['name' => 'Acme renewal']));
+
+    $payload = json_decode(resolve(GetTaskTool::class)->handle(new Request([
+        'id' => (string) $task->getKey(),
+        'include' => ['companies', 'people', 'opportunities'],
+    ])), true);
+
+    expect(array_column(array_column($payload['included']['companies']['items'], 'attributes'), 'name'))->toContain('Acme')
+        ->and(array_column(array_column($payload['included']['people']['items'], 'attributes'), 'name'))->toContain('Dana Reed')
+        ->and(array_column(array_column($payload['included']['opportunities']['items'], 'attributes'), 'name'))->toContain('Acme renewal');
+});
+
+it('attaches related companies to each row of a task list', function (): void {
+    $task = Task::factory()->for($this->workspace)->create(['title' => 'Send proposal']);
+    $task->companies()->attach(Company::factory()->for($this->workspace)->create(['name' => 'Acme']));
+
+    $payload = json_decode(resolve(ListTasksTool::class)->handle(new Request([
+        'include' => ['companies'],
+    ])), true);
+
+    $row = collect($payload['data'])->firstWhere('id', (string) $task->getKey());
+
+    expect($row['included']['companies']['total'])->toBe(1)
+        ->and(array_column($row['included']['companies']['items'], 'name'))->toContain('Acme');
+});
+
+it('returns the records a note is attached to when requested', function (): void {
+    $note = Note::factory()->for($this->workspace)->create(['title' => 'Discovery call']);
+    $note->companies()->attach(Company::factory()->for($this->workspace)->create(['name' => 'Acme']));
+    $note->people()->attach(People::factory()->for($this->workspace)->create(['name' => 'Dana Reed']));
+    $note->opportunities()->attach(Opportunity::factory()->for($this->workspace)->create(['name' => 'Acme renewal']));
+
+    $payload = json_decode(resolve(GetNoteTool::class)->handle(new Request([
+        'id' => (string) $note->getKey(),
+        'include' => ['companies', 'people', 'opportunities'],
+    ])), true);
+
+    expect(array_column(array_column($payload['included']['companies']['items'], 'attributes'), 'name'))->toContain('Acme')
+        ->and(array_column(array_column($payload['included']['people']['items'], 'attributes'), 'name'))->toContain('Dana Reed')
+        ->and(array_column(array_column($payload['included']['opportunities']['items'], 'attributes'), 'name'))->toContain('Acme renewal');
 });

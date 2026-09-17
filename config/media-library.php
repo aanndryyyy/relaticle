@@ -1,7 +1,8 @@
 <?php
 
 declare(strict_types=1);
-use App\Support\SameOriginUrlGenerator;
+use App\Support\Media\MediaUrlGenerator;
+use App\Support\Media\UploadPathGenerator;
 use Spatie\ImageOptimizer\Optimizers\Avifenc;
 use Spatie\ImageOptimizer\Optimizers\Cwebp;
 use Spatie\ImageOptimizer\Optimizers\Gifsicle;
@@ -24,7 +25,6 @@ use Spatie\MediaLibrary\ResponsiveImages\TinyPlaceholderGenerator\Blurred;
 use Spatie\MediaLibrary\ResponsiveImages\WidthCalculator\FileSizeOptimizedWidthCalculator;
 use Spatie\MediaLibrary\Support\FileNamer\DefaultFileNamer;
 use Spatie\MediaLibrary\Support\FileRemover\DefaultFileRemover;
-use Spatie\MediaLibrary\Support\PathGenerator\DefaultPathGenerator;
 use Spatie\MediaLibraryPro\Models\TemporaryUpload;
 
 return [
@@ -33,7 +33,7 @@ return [
      * The disk on which to store added files and derived images by default. Choose
      * one or more of the disks you've configured in config/filesystems.php.
      */
-    'disk_name' => env('MEDIA_DISK', 'public'),
+    'disk_name' => env('MEDIA_DISK', 'local'),
 
     /*
      * The maximum file size of an item in bytes.
@@ -108,7 +108,7 @@ return [
     /*
      * The class that contains the strategy for determining a media file's path.
      */
-    'path_generator' => DefaultPathGenerator::class,
+    'path_generator' => UploadPathGenerator::class,
 
     /*
      * The class that contains the strategy for determining how to remove files.
@@ -128,7 +128,7 @@ return [
      * When urls to files get generated, this class will be called. Use the default
      * if your files are stored locally above the site root or on s3.
      */
-    'url_generator' => SameOriginUrlGenerator::class,
+    'url_generator' => MediaUrlGenerator::class,
 
     /*
      * Moves media on updating to keep path consistent. Enable it only with a custom

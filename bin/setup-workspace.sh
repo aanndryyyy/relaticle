@@ -39,6 +39,17 @@ site_points_here() {
     herd links 2>/dev/null | grep -F "| $1 " | grep -qF "| $PWD "
 }
 
+# A workspace deleted without archiving leaves its site symlink behind, and
+# `herd links` omits a link whose target is gone, so neither check above sees it.
+HERD_SITES="$(dirname "$(dirname "$(command -v herd)")")/config/valet/Sites"
+[[ -d "$HERD_SITES" ]] || HERD_SITES="$HOME/Library/Application Support/Herd/config/valet/Sites"
+for candidate in "${WORKSPACE_SITE_NAME:-$FOLDER}" "$FOLDER" "$(basename "$ROOT")-$FOLDER"; do
+    if [[ -L "$HERD_SITES/$candidate" && ! -e "$HERD_SITES/$candidate" ]]; then
+        echo "→ Removing stale site link '${candidate}'"
+        rm "$HERD_SITES/$candidate"
+    fi
+done
+
 SITE_NAME="${WORKSPACE_SITE_NAME:-$FOLDER}"
 if [[ "$SITE_NAME" == "$FOLDER" ]] && site_is_linked "$SITE_NAME" && ! site_points_here "$SITE_NAME"; then
     SITE_NAME="$(basename "$ROOT")-$FOLDER"

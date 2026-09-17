@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\CreationSource;
+use App\Enums\MediaCollection;
 use App\Models\Concerns\BelongsToWorkspaceCreator;
 use App\Models\Concerns\HasCreator;
 use App\Models\Concerns\HasWorkspace;
+use App\Support\Media\UploadAllowlist;
 use Carbon\CarbonImmutable;
 use Database\Factories\TaskFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -27,6 +29,8 @@ use Relaticle\CustomFields\Models\Contracts\HasCustomFields;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
 use Spatie\Activitylog\Support\LogOptions;
 use Spatie\EloquentSortable\SortableTrait;
+use Spatie\MediaLibrary\HasMedia;
+use Spatie\MediaLibrary\InteractsWithMedia;
 
 /**
  * @property int $id
@@ -39,7 +43,7 @@ use Spatie\EloquentSortable\SortableTrait;
     'title',
     'creation_source',
 ])]
-final class Task extends Model implements HasCustomFields, HasTimeline
+final class Task extends Model implements HasCustomFields, HasMedia, HasTimeline
 {
     use BelongsToWorkspaceCreator;
     use HasCreator;
@@ -49,6 +53,7 @@ final class Task extends Model implements HasCustomFields, HasTimeline
 
     use HasUlids;
     use HasWorkspace;
+    use InteractsWithMedia;
     use InteractsWithTimeline;
     use LogsActivity;
     use SoftDeletes;
@@ -133,6 +138,12 @@ final class Task extends Model implements HasCustomFields, HasTimeline
     protected function forOpportunity(Builder $query, string $opportunityId): void
     {
         $query->whereHas('opportunities', fn (Builder $q) => $q->where('opportunities.id', $opportunityId));
+    }
+
+    public function registerMediaCollections(): void
+    {
+        $this->addMediaCollection(MediaCollection::Attachments->value)
+            ->acceptsMimeTypes(UploadAllowlist::mimeTypes());
     }
 
     public function getActivitylogOptions(): LogOptions

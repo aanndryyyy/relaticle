@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use App\Actions\Onboarding\StartSetupGreeting;
 use App\Actions\Task\CreateTask;
 use App\Enums\Plan;
+use App\Features\SetupConversation;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Queue\MaxAttemptsExceededException;
@@ -13,6 +15,8 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
+use Laravel\Pennant\Feature;
+use Relaticle\Chat\Actions\ListConversationMessages;
 use Relaticle\Chat\Agents\CrmAssistant;
 use Relaticle\Chat\Enums\PendingActionStatus;
 use Relaticle\Chat\Events\ChatStreamRetrying;
@@ -107,6 +111,37 @@ it('makes a failed turn coherent: user message, failure note, superseded proposa
         ->toBe(PendingActionStatus::Superseded)
         ->and(AiCreditTransaction::query()->where('workspace_id', $workspace->getKey())->sum('credits_charged'))
         ->toBe(1);
+});
+
+it('leaves the thread empty when the opening turn dies, so the next open greets again', function (): void {
+    Feature::define(SetupConversation::class, true);
+
+    $user = User::factory()->withPersonalWorkspace()->create();
+    $workspace = $user->currentWorkspace;
+
+    AiCreditBalance::query()->where('workspace_id', $workspace->getKey())
+        ->update(['credits_remaining' => 100, 'credits_used' => 0]);
+
+    $conversationId = $workspace->setupConversation->id;
+
+    new ProcessChatMessage(
+        user: $user,
+        workspace: $workspace,
+        message: StartSetupGreeting::PROMPT,
+        conversationId: $conversationId,
+        resolved: ['provider' => 'ollama', 'model' => 'qwen3:8b', 'id' => 'ollama', 'source' => 'auto'],
+        turnId: (string) Str::ulid(),
+        isContinuation: true,
+    )->failed(new RuntimeException('boom'));
+
+    expect(DB::table('agent_conversation_messages')->where('conversation_id', $conversationId)->count())->toBe(0)
+        ->and(resolve(ListConversationMessages::class)->execute($user, $conversationId))->toBe([]);
+
+    Queue::fake();
+
+    expect(resolve(StartSetupGreeting::class)->execute($user->fresh(), $conversationId))->toBeTrue();
+
+    Queue::assertPushed(ProcessChatMessage::class);
 });
 
 it('does not duplicate a completed turn or add an error note when a post-stream step fails', function (): void {

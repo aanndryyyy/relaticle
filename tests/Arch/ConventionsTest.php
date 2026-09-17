@@ -40,6 +40,33 @@ it('keeps migrations forward-only (no down methods)', function (): void {
     );
 });
 
+it('queues only commands that exist from migrations', function (): void {
+    $declared = [];
+
+    foreach (glob(dirname(__DIR__, 2).'/app/Console/Commands/*.php') ?: [] as $file) {
+        if (preg_match('/#\[Signature\(\s*\'([a-z0-9:_-]+)/i', (string) file_get_contents($file), $match) === 1) {
+            $declared[] = $match[1];
+        }
+    }
+
+    $offenders = [];
+
+    foreach (migrationFiles() as $file) {
+        preg_match_all('/Artisan::queue\(\s*\'([^\']+)\'/', (string) file_get_contents($file), $matches);
+
+        foreach ($matches[1] as $name) {
+            if (! in_array($name, $declared, true)) {
+                $offenders[] = basename($file).': '.$name;
+            }
+        }
+    }
+
+    expect($offenders)->toBe(
+        [],
+        'A migration outlives the command it queues (.ai/guidelines/relaticle/core.md). Restore or rename: '.implode(', ', $offenders),
+    );
+});
+
 it('keeps migrations off the database clock (no useCurrent, CURRENT_TIMESTAMP, or raw now())', function (): void {
     $grandfathered = [
         '0001_01_01_000002_create_jobs_table.php',
@@ -271,5 +298,41 @@ it('keeps published copy and source free of em-dashes', function (): void {
         'Em-dashes are banned in copy, docs, and comments (.ai/guidelines/relaticle/writing.md). '.
         "Rewrite the sentence rather than swapping the character; the standalone {$dataGlyph} data glyph is allowed. ".
         'Offending lines: '.implode(', ', array_slice($offenders, 0, 40)),
+    );
+});
+
+it('keeps new file uploads on medialibrary', function (): void {
+    $root = dirname(__DIR__, 2);
+    $allowed = [
+        'app/Filament/CustomFields/RichEditorFieldType.php',
+        'app/Livewire/App/Profile/UpdateProfileInformation.php',
+    ];
+    $offenders = [];
+
+    foreach ([$root.'/app', $root.'/packages'] as $directory) {
+        $files = new RegexIterator(
+            new RecursiveIteratorIterator(new RecursiveDirectoryIterator($directory)),
+            '/\.php$/',
+        );
+
+        /** @var SplFileInfo $file */
+        foreach ($files as $file) {
+            $relative = str_replace($root.'/', '', $file->getPathname());
+
+            if (in_array($relative, $allowed, true)) {
+                continue;
+            }
+
+            $source = (string) file_get_contents($file->getPathname());
+
+            if (preg_match('/\bFileUpload::make\(|->fileAttachments\(|->fileAttachmentsDisk\(|->fileAttachmentsDirectory\(/', $source) === 1) {
+                $offenders[] = $relative;
+            }
+        }
+    }
+
+    expect($offenders)->toBe(
+        [],
+        'Durable uploads go through medialibrary (.ai/rules/file-uploads.md). Offending files: '.implode(', ', $offenders),
     );
 });

@@ -101,7 +101,7 @@ it('adds developer guide urls with lastmod from front matter', function (): void
     expect($xml)->toContain('<loc>'.route('documentation.index').'</loc>')
         ->and($xml)->toContain('<loc>'.route('aiNativeCrm').'</loc>')
         ->and($xml)->toMatch('#developers/self-hosting</loc>\s*<lastmod>2026-08-30#')
-        ->and($xml)->toMatch('#developers/mcp</loc>\s*<lastmod>2026-08-28#');
+        ->and($xml)->toMatch('#developers/mcp</loc>\s*<lastmod>2026-09-15#');
 });
 
 it('omits lastmod for a help page with no updated front matter', function (): void {

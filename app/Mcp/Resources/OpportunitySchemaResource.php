@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace App\Mcp\Resources;
 
 use App\Enums\CrmEntity;
-use App\Mcp\Resources\Concerns\ResolvesEntitySchema;
 use App\Mcp\Resources\Contracts\ProvidesEntitySchema;
+use App\Mcp\Schema\CustomFieldSchema;
 use App\Models\PersonalAccessToken;
 use App\Models\User;
 use Laravel\Mcp\Request;
@@ -21,9 +21,9 @@ use Laravel\Mcp\Server\Resource;
 #[MimeType('application/json')]
 final class OpportunitySchemaResource extends Resource implements ProvidesEntitySchema
 {
-    use ResolvesEntitySchema;
+    public function __construct(private readonly CustomFieldSchema $schema) {}
 
-    protected function entity(): CrmEntity
+    private function entity(): CrmEntity
     {
         return CrmEntity::Opportunity;
     }
@@ -60,8 +60,8 @@ final class OpportunitySchemaResource extends Resource implements ProvidesEntity
                 'company_id' => ['type' => 'string', 'required' => false],
                 'contact_id' => ['type' => 'string', 'required' => false, 'description' => 'Links to a person'],
             ],
-            'custom_fields' => $this->resolveCustomFields($user),
-            'filterable_fields' => $this->resolveFilterableFields($user),
+            'custom_fields' => $this->schema->fields($user, $this->entity()),
+            'filterable_fields' => $this->schema->filterableFields($user, $this->entity()),
             'relationships' => ['creator', 'company', 'contact', 'tasks', 'notes'],
             'aggregate_includes' => [
                 'tasksCount' => 'Count of related tasks',

@@ -137,7 +137,8 @@ test('plain text token is shown after creation', function () {
             'expiration' => '7',
             'permissions' => ['read'],
         ])
-        ->call('createToken');
+        ->call('createToken')
+        ->assertActionMounted('showToken');
 
     expect($component->get('plainTextToken'))->not->toBeNull();
 })->skip(fn () => ! Features::hasApiFeatures(), 'API support is not enabled.');

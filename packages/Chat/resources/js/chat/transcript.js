@@ -127,7 +127,7 @@ function snapshotMessages(messages) {
     }
 }
 
-export const transcriptModule = ({ messagesUrl, messageSearchUrlTemplate, messageSearchUnreachableText, messageSearchStalledText, todayLabel, yesterdayLabel, feedbackDeleteConfirmText, blockTitles, blockColumnLabels, blockFooterTemplate, blockShowAllTemplate, blockShowFewerText, blockOpenUrlTemplate, feedbackCategories = null, proposalTexts = {} }) => ({
+export const transcriptModule = ({ messagesUrl, messageSearchUrlTemplate, messageSearchUnreachableText, messageSearchStalledText, todayLabel, yesterdayLabel, feedbackDeleteConfirmText, blockTitles, blockColumnLabels, blockFooterTemplate, blockShowAllTemplate, blockShowFewerText, blockOpenUrlTemplate, attachmentRowText, attachmentRowsTemplate, feedbackCategories = null, proposalTexts = {} }) => ({
     messageSearchUrlTemplate,
     messageSearchUnreachableText,
     messageSearchStalledText,
@@ -754,7 +754,9 @@ export const transcriptModule = ({ messagesUrl, messageSearchUrlTemplate, messag
     },
 
     renderMessageContent(message) {
-        if (!message.document || (Array.isArray(message.document.content) && message.document.content.length === 0)) {
+        const emptyDocument = !message.document || (Array.isArray(message.document.content) && message.document.content.length === 0);
+
+        if (emptyDocument) {
             return this.escapeHtml(message.content ?? '');
         }
 
@@ -1243,16 +1245,45 @@ export const transcriptModule = ({ messagesUrl, messageSearchUrlTemplate, messag
         return this.messages.slice(0, index).some((m) => m.role === 'user');
     },
 
+    // A file sent on its own says everything the turn has to say, so the text
+    // bubble would paint as an empty pill beside the card. Measured on the
+    // rendered output: a stored turn carries an empty paragraph, not "".
+    showsTextBubble(message) {
+        return !message.attachment || htmlToText(this.renderMessageContent(message)) !== '';
+    },
+
+    attachmentRowLabel(count) {
+        return count === 1
+            ? attachmentRowText
+            : attachmentRowsTemplate.replace(':count', count.toLocaleString());
+    },
+
+    // A single-use attachment is consumed by the turn it was sent with, so
+    // regenerate/retry/edit have no file left to resend and would silently
+    // drop the CSV context the model saw the first time.
+    precedingPromptHasAttachment(index) {
+        const userIndex = this.messages.slice(0, index).findLastIndex((m) => m.role === 'user');
+        return userIndex !== -1 && !!this.messages[userIndex].attachment;
+    },
+
     canRegenerate(index) {
         const msg = this.messages[index];
         if (msg?.pending_actions?.some((a) => a.status === 'pending')) {
             return false;
         }
+        if (this.precedingPromptHasAttachment(index)) {
+            return false;
+        }
         return this.hasUserPrompt(index);
+    },
+
+    canRetryTurn(index) {
+        return !this.precedingPromptHasAttachment(index);
     },
 
     canEdit(index) {
         if (this.isStreaming) return false;
+        if (this.messages[index]?.attachment) return false;
 
         for (let i = index + 1; i < this.messages.length; i++) {
             const next = this.messages[i];

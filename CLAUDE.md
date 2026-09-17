@@ -35,10 +35,11 @@ anatomy mirrors a Laravel app: `src/`, `config/`, `routes/`, `resources/`,
 
 ## Actions (the write path)
 
-All write operations (create, update, delete) go through action classes in
-`app/Actions/<Domain>/`. Never inline business logic in controllers, MCP tools,
-Livewire components, or Filament resources. Actions are the single source of
-truth for business logic and side effects (notifications, syncs, etc.).
+Write operations (create, update, delete) that reach the domain from a transport
+surface go through action classes in `app/Actions/<Domain>/`. Never inline business
+logic in controllers, MCP tools, Livewire components, or Filament resources.
+Actions are the single source of truth for business logic and side effects
+(notifications, syncs, etc.).
 
 The canonical shape is `final readonly`, with a single `execute()` method and
 authorization plus tenant-ownership checks inside the action itself:
@@ -64,11 +65,33 @@ final readonly class CreateOpportunity
   plain `Model::create()`/`->update()` with no extra logic. Side effects
   (e.g., notifications) must still be triggered via `->after()` hooks calling the
   appropriate action
+- An action exists to keep business logic out of transport surfaces and to share one
+  write between callers. A console command is neither: it has no `$user`, so the
+  canonical `abort_unless` plus `assertOwned` shape does not apply. Give a command an
+  action when a second caller shares the write, otherwise the logic lives in `handle()`
 - When reviewing or refactoring code, extract inline business logic into action classes
 - Use `App\Data` (spatie/laravel-data) objects for structured payloads where they
   already exist; don't introduce new patterns
 - Name domain concepts plainly (`Plan`, not `AiPlan`). Context comes from the
-  namespace. Never store the same fact in two places; pick one source of truth
+  namespace
+
+## One fact, one owner
+
+A fact more than one surface publishes gets an owner class, and every surface reads it.
+The working examples: `CustomFieldFilterSchema` owns filter operators,
+`App\Mcp\Schema\CustomFieldSchema` plus `CustomFieldType::inputFormat()` own how a
+custom field is described to an agent, `CrmEntity::titleColumn()` owns the name column.
+Facts that are a pure function of an enum case (a label, a format, a capability) live on
+the enum, never in a private `match` inside a consumer.
+
+The measurement that produced this rule: of four cross-surface axes, the two with an
+owner class had zero drift and the two without had three, including a company owner the
+REST API silently dropped while MCP and chat both wrote it.
+
+`tests/Feature/CRM/SurfaceParityTest.php` is the gate for the surfaces that still carry
+a per-entity copy: API form request, MCP tool, chat tool, MCP schema resource. Adding a
+writable field or a relation include to one of them fails that test until the others
+follow.
 
 ## i18n enforcement
 
@@ -154,10 +177,34 @@ Treat every change like it's going through senior code review:
 - Handle errors and edge cases properly
 - Write code that won't embarrass you in 6 months
 
+A rule that cannot name the artifact failing when you break it is decoration. Every
+rule here names a class, a test, or a command, because the one abstract rule this file
+used to carry ("never store the same fact in two places") was in force for the three
+months two copies of the same field vocabulary drifted apart.
+
 ## Database
 
 - This project uses **PostgreSQL exclusively**. Do not add SQLite/MySQL compatibility layers, driver checks, or conditional SQL
 - Migrations must only have `up()` methods. Never write a `down()` method
+- A data backfill the query builder can express belongs in the migration, chunked with
+  `eachById`: no models, no file access, no app code. This is the only shape that reaches a
+  self-hosted install unaided. `2026_09_10_000000_convert_markdown_editor_custom_fields_to_rich_editor`
+  is the worked example, and Spatie ships the same shape in `laravel-activitylog` UPGRADING.md
+- A backfill that needs models, files, or another service is a command instead: it reports by
+  default, writes only on `--force`, and re-runs after a partial failure. A migration can do
+  none of that, because we never write `down()`
+- A self-hosted upgrade is `docker compose pull && up -d`: migrations run, nothing else, so no
+  command of ours ever runs there. Ship a change of storage shape behind a read-path shim that
+  keeps the old shape working (`RichContentAttachments::getFileAttachmentUrl()` still serves a
+  legacy bare-filename `data-id`), then queue the command from a migration, as
+  `2026_09_15_150837_queue_rich_editor_attachment_backfill` does:
+  `Artisan::queue($command, ['--force' => true])->onQueue('imports')->afterCommit()`. Pgsql
+  wraps every migration in a transaction, so without `afterCommit` a worker can start before the
+  DDL lands. `imports` is the long lane (300s, 2 tries, 256MB) where `default` allows 60s and one
+  try, and `QUEUE_CONNECTION=sync` runs the command inline, so it stays chunked and idempotent
+  either way. Never `Artisan::call()` in `up()`: the container entrypoint runs under `set -e`, so
+  a throw there crash-loops the app and takes Horizon down with it. `tests/Arch/ConventionsTest.php`
+  fails when a migration names a command that no longer exists
 - Every datetime column is `timestamp without time zone` holding **UTC**. Never write one from
   the database clock. That rules out `DB::raw('now()')`, `CURRENT_TIMESTAMP`, and `->useCurrent()` /
   `->useCurrentOnUpdate()` column defaults. Those resolve against the *session* timezone and
@@ -260,6 +307,7 @@ is the exception that admits the code could not.
 - `CustomFieldValidationService` intentionally uses explicit `where('tenant_id', ...)` with `withoutGlobalScopes()`. This is defensive and correct; don't change it to rely on ambient state
 - Every write path that is NOT a Filament panel request or behind `SetApiWorkspaceContext` (chat action approval, queued jobs, webhooks, commands) must set `TenantContextService::setTenantId()` before saving custom fields. Otherwise `saveCustomFields` iterates every tenant (gateway timeouts + cross-tenant writes). Wrap manual calls in try/finally restoring the previous tenant id (mirror `SetApiWorkspaceContext`)
 - Writing null/empty for a custom field is how a value is cleared. Never skip or filter out "empty" values on save; only keys absent from the payload are left untouched. Verify any persistence change in both directions (set a value AND clear it), through both the panel form and the chat/API path
+- Retire a field type through `config('custom-fields.field_type_configuration')->disabled()` and keep its `CustomFieldType` case. Stored rows still need a type name and a write format when a schema lists them, and `CustomFieldType::from()` throws without the case. `FILE_UPLOAD` is the precedent
 
 === .ai/relaticle/testing rules ===
 
@@ -591,6 +639,159 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 
 - If you have modified any PHP files, you must run `vendor/bin/pint --dirty --format agent` before finalizing changes to ensure your code matches the project's expected style.
 - Do not run `vendor/bin/pint --test --format agent`, simply run `vendor/bin/pint --format agent` to fix any formatting issues.
+
+=== spatie/laravel-activitylog/core rules ===
+
+# spatie/laravel-activitylog
+
+Activity logging package for Laravel. Logs model events and manual activities to a database table.
+
+## Key Concepts
+
+- **Activity**: An Eloquent model (`Spatie\Activitylog\Models\Activity`) storing log entries with subject, causer, event, attribute_changes, and properties.
+- **Subject**: The model being acted upon (polymorphic `subject_type`/`subject_id`).
+- **Causer**: The model that caused the action, typically the authenticated user (polymorphic `causer_type`/`causer_id`).
+- **LogOptions**: Fluent configuration object returned by `getActivitylogOptions()` on models using the `LogsActivity` trait.
+- **ActivityEvent**: Enum with cases `Created`, `Updated`, `Deleted`, `Restored`.
+- **`attribute_changes`** column: stores `{"attributes": {...}, "old": {...}}` for tracked model changes.
+- **`properties`** column: stores custom user data set via `withProperties()`.
+
+## Traits
+
+### `LogsActivity`
+
+Add to models to automatically log create/update/delete events. Optionally implement `getActivitylogOptions()` to configure which attributes to track (defaults to logging events without attribute changes).
+
+```php
+use Spatie\Activitylog\Models\Concerns\LogsActivity;
+use Spatie\Activitylog\Support\LogOptions;
+
+class Article extends Model
+{
+    use LogsActivity;
+
+    public function getActivitylogOptions(): LogOptions
+    {
+        return LogOptions::defaults()
+            ->logFillable()
+            ->logOnlyDirty()
+            ->dontLogEmptyChanges();
+    }
+}
+```
+
+### `CausesActivity`
+
+Add to user/causer models. Provides `activitiesAsCauser()` relationship.
+
+### `HasActivity`
+
+Combines `LogsActivity` and `CausesActivity`. Provides `activities()`, `activitiesAsSubject()`, and `activitiesAsCauser()`.
+
+## Manual Logging
+
+```php
+activity()
+    ->performedOn($article)
+    ->causedBy($user)
+    ->event(ActivityEvent::Updated)
+    ->withProperties(['key' => 'value'])
+    ->log('Article was updated');
+```
+
+## LogOptions Methods
+
+| Method | Description |
+|--------|-------------|
+| `logFillable()` | Log all fillable attributes |
+| `logAll()` | Log all attributes |
+| `logOnly(array)` | Log specific attributes |
+| `logExcept(array)` | Exclude attributes |
+| `logOnlyDirty()` | Only log changed attributes |
+| `dontLogEmptyChanges()` | Skip logging when no tracked attributes changed |
+| `dontLogIfAttributesChangedOnly(array)` | Ignore updates that only change these attributes |
+| `useLogName(string)` | Set custom log name |
+| `setDescriptionForEvent(Closure)` | Custom description per event |
+| `useAttributeRawValues(array)` | Store raw (uncast) values |
+
+## Querying Activities
+
+```php
+use Spatie\Activitylog\Models\Activity;
+use Spatie\Activitylog\Enums\ActivityEvent;
+
+Activity::forEvent(ActivityEvent::Created)->get();
+Activity::causedBy($user)->get();
+Activity::forSubject($article)->get();
+Activity::inLog('orders')->get();
+```
+
+## Setting the causer
+
+Override the causer for a block of code:
+
+```php
+use Spatie\Activitylog\Facades\Activity;
+
+Activity::defaultCauser($admin, function () {
+    // all activities here are caused by $admin
+});
+
+// or set globally for the rest of the request
+Activity::defaultCauser($admin);
+```
+
+## Disabling Logging
+
+```php
+activity()->withoutLogging(function () {
+    // no activities logged here
+});
+```
+
+## Accessing Changes and Properties
+
+```php
+$activity = Activity::latest()->first();
+
+// Tracked model changes (set automatically by LogsActivity)
+$activity->attribute_changes; // Collection: {"attributes": {...}, "old": {...}}
+
+// Custom user data (set via withProperties)
+$activity->properties; // Collection
+$activity->getProperty('key'); // single value
+```
+
+## Custom Activity Model
+
+Set `activity_model` in `config/activitylog.php` to a class that extends `Model` and implements `Spatie\Activitylog\Contracts\Activity`. Use a custom model for custom table names or database connections.
+
+## Customizing Actions
+
+The package uses action classes (`LogActivityAction`, `CleanActivityLogAction`) that can be extended and swapped via config:
+
+```php
+// config/activitylog.php
+'actions' => [
+    'log_activity' => \App\Actions\CustomLogActivityAction::class,
+    'clean_log' => \App\Actions\CustomCleanAction::class,
+],
+```
+
+Custom action classes must extend the originals. Override protected methods (`save()`, `beforeActivityLogged()`, `resolveDescription()`, etc.) to customize behavior.
+
+## Configuration
+
+Key config options in `config/activitylog.php`:
+- `enabled`: Master on/off switch (env: `ACTIVITYLOG_ENABLED`)
+- `clean_after_days`: Days to keep records for `activitylog:clean` command
+- `default_log_name`: Default log name (string)
+- `default_auth_driver`: Auth driver for causer resolution
+- `include_soft_deleted_subjects`: Include soft-deleted subjects
+- `activity_model`: Custom Activity model class
+- `default_except_attributes`: Globally excluded attributes
+- `actions.log_activity`: Action class for logging activities
+- `actions.clean_log`: Action class for cleaning old activities
 
 === spatie/laravel-medialibrary/core rules ===
 

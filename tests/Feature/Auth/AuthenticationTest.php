@@ -21,10 +21,6 @@ use App\Models\WorkspaceInvitation;
 use App\Notifications\Auth\VerifyEmail;
 use App\Support\Auth\AuthenticationSession;
 use App\Support\Auth\IdentityConfirmation;
-use CBOR\ByteStringObject;
-use CBOR\MapObject;
-use CBOR\NegativeIntegerObject;
-use CBOR\UnsignedIntegerObject;
 use Filament\Facades\Filament;
 use Illuminate\Auth\Events\Verified;
 use Illuminate\Http\Request;
@@ -35,12 +31,9 @@ use Illuminate\Support\Facades\RateLimiter;
 use Laravel\Passkeys\Events\PasskeyVerified;
 use Laravel\Passkeys\Passkey;
 use Laravel\Passkeys\Passkeys;
-use Laravel\Passkeys\Support\WebAuthn;
 use Laravel\Pennant\Feature;
 use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
-use Symfony\Component\Uid\Uuid;
-use Webauthn\CredentialRecord;
-use Webauthn\TrustPath\EmptyTrustPath;
+use Tests\Helpers\PasskeyAssertionFixture;
 
 mutates(CancelAuthentication::class, Login::class, PasswordSessionController::class, MfaChallengeController::class);
 mutates(AuthenticatePasskey::class, BeginAuthentication::class, PasskeySessionController::class);
@@ -48,7 +41,7 @@ mutates(ConfirmIdentity::class, PasskeyConfirmationController::class);
 
 function base64UrlEncodeForPasskeyTest(string $bytes): string
 {
-    return rtrim(strtr(base64_encode($bytes), '+/', '-_'), '=');
+    return PasskeyAssertionFixture::base64Url($bytes);
 }
 
 /**
@@ -56,64 +49,7 @@ function base64UrlEncodeForPasskeyTest(string $bytes): string
  */
 function buildRealPasskeyAssertion(string $rpId, string $origin, string $challenge, ?string $credentialId = null, bool $userVerified = true): array
 {
-    $credentialId ??= random_bytes(16);
-
-    $key = openssl_pkey_new([
-        'curve_name' => 'prime256v1',
-        'private_key_type' => OPENSSL_KEYTYPE_EC,
-    ]);
-    $details = openssl_pkey_get_details($key);
-    $x = str_pad((string) $details['ec']['x'], 32, "\0", STR_PAD_LEFT);
-    $y = str_pad((string) $details['ec']['y'], 32, "\0", STR_PAD_LEFT);
-
-    $coseKey = MapObject::create()
-        ->add(UnsignedIntegerObject::create(1), UnsignedIntegerObject::create(2))
-        ->add(UnsignedIntegerObject::create(3), NegativeIntegerObject::create(-7))
-        ->add(NegativeIntegerObject::create(-1), UnsignedIntegerObject::create(1))
-        ->add(NegativeIntegerObject::create(-2), ByteStringObject::create($x))
-        ->add(NegativeIntegerObject::create(-3), ByteStringObject::create($y));
-
-    $userHandle = random_bytes(16);
-
-    $credentialRecord = CredentialRecord::create(
-        $credentialId,
-        'public-key',
-        [],
-        'none',
-        EmptyTrustPath::create(),
-        Uuid::v4(),
-        (string) $coseKey,
-        $userHandle,
-        0,
-    );
-
-    $authenticatorData = hash('sha256', $rpId, true).($userVerified ? "\x05" : "\x01")."\x00\x00\x00\x00";
-
-    $clientDataJson = json_encode([
-        'type' => 'webauthn.get',
-        'challenge' => base64UrlEncodeForPasskeyTest($challenge),
-        'origin' => $origin,
-    ], JSON_THROW_ON_ERROR);
-
-    openssl_sign($authenticatorData.hash('sha256', $clientDataJson, true), $signature, $key, OPENSSL_ALGO_SHA256);
-
-    return [
-        'credentialId' => $credentialId,
-        'storedCredential' => json_decode(WebAuthn::toJson($credentialRecord), true, flags: JSON_THROW_ON_ERROR),
-        'payload' => [
-            'credential' => [
-                'id' => base64UrlEncodeForPasskeyTest($credentialId),
-                'rawId' => base64UrlEncodeForPasskeyTest($credentialId),
-                'type' => 'public-key',
-                'response' => [
-                    'clientDataJSON' => base64UrlEncodeForPasskeyTest($clientDataJson),
-                    'authenticatorData' => base64UrlEncodeForPasskeyTest($authenticatorData),
-                    'signature' => base64UrlEncodeForPasskeyTest($signature),
-                ],
-            ],
-            'remember' => true,
-        ],
-    ];
+    return PasskeyAssertionFixture::build($rpId, $origin, $challenge, $credentialId, $userVerified);
 }
 
 function storePasskeyAssertionFor(User $user, array $assertion): Passkey

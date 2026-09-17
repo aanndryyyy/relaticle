@@ -1089,3 +1089,36 @@ describe('cursor pagination', function (): void {
         expect($firstIds)->toHaveCount(2);
     });
 });
+
+it('sets the account owner on create', function (): void {
+    Sanctum::actingAs($this->user);
+    $member = User::factory()->create();
+    $this->workspace->users()->attach($member, ['role' => 'admin']);
+
+    $this->postJson('/api/v1/companies', ['name' => 'Acme Corp', 'account_owner_id' => $member->getKey()])
+        ->assertCreated()
+        ->assertValid()
+        ->assertJsonPath('data.attributes.account_owner_id', $member->getKey());
+});
+
+it('changes the account owner on update', function (): void {
+    Sanctum::actingAs($this->user);
+    $member = User::factory()->create();
+    $this->workspace->users()->attach($member, ['role' => 'admin']);
+    $company = Company::factory()->recycle([$this->user, $this->workspace])->create();
+
+    $this->patchJson("/api/v1/companies/{$company->getKey()}", ['account_owner_id' => $member->getKey()])
+        ->assertOk()
+        ->assertJsonPath('data.attributes.account_owner_id', $member->getKey());
+
+    expect($company->refresh()->account_owner_id)->toBe($member->getKey());
+});
+
+it('rejects an account owner outside the workspace', function (): void {
+    Sanctum::actingAs($this->user);
+    $outsider = User::factory()->create();
+
+    $this->postJson('/api/v1/companies', ['name' => 'Acme Corp', 'account_owner_id' => $outsider->getKey()])
+        ->assertUnprocessable()
+        ->assertInvalid('account_owner_id');
+});
