@@ -14,6 +14,8 @@ use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Relaticle\Chat\Enums\MessageOrigin;
+use Relaticle\Chat\Support\TypedMessages;
 
 /**
  * Read model over the laravel/ai message store. Backs the SystemAdmin
@@ -25,6 +27,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $participant_id
  * @property string|null $agent
  * @property string $role
+ * @property MessageOrigin $origin
  * @property string|null $content
  * @property CarbonImmutable|null $superseded_at
  * @property CarbonImmutable|null $created_at
@@ -44,6 +47,7 @@ final class AgentConversationMessage extends Model
     {
         return [
             'superseded_at' => 'datetime',
+            'origin' => MessageOrigin::class,
         ];
     }
 
@@ -57,11 +61,19 @@ final class AgentConversationMessage extends Model
 
     /** @param Builder<self> $query */
     #[Scope]
+    protected function typed(Builder $query): void
+    {
+        TypedMessages::apply($query->getQuery());
+    }
+
+    /** @param Builder<self> $query */
+    #[Scope]
     protected function sentBy(Builder $query, User $user): void
     {
         $query->where('participant_type', $user->getMorphClass())
-            ->where('participant_id', (string) $user->getKey())
-            ->where('role', 'user');
+            ->where('participant_id', (string) $user->getKey());
+
+        TypedMessages::apply($query->getQuery());
     }
 
     /**
