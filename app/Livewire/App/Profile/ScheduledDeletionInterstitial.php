@@ -64,7 +64,7 @@ final class ScheduledDeletionInterstitial extends BaseLivewireComponent
         if ($impersonator->active(request())) {
             $impersonator->stop(request());
 
-            return redirect()->route('filament.sysadmin.resources.users.index');
+            return to_route('filament.sysadmin.resources.users.index');
         }
 
         filament()->auth()->logout();

@@ -16,6 +16,6 @@ final readonly class StopImpersonationController
     {
         $this->impersonator->stop($request);
 
-        return redirect()->route('filament.sysadmin.resources.users.index');
+        return to_route('filament.sysadmin.resources.users.index');
     }
 }
