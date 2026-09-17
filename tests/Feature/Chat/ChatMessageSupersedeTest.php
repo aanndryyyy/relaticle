@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Laravel\Ai\Contracts\ConversationStore;
 use Relaticle\Chat\Actions\ListConversationMessages;
+use Relaticle\Chat\Enums\MessageOrigin;
 use Relaticle\Chat\Storage\SupersededAwareConversationStore;
 
 function seedSupersedeConversation(User $user): array
@@ -160,4 +161,37 @@ it('excludes superseded messages from the agent history', function (): void {
     expect($history)->toHaveCount(2)
         ->and($history->first()->content)->toBe('first question')
         ->and($history->last()->content)->toBe('first answer');
+});
+
+it('anchors a regenerate on the last typed message, never on a synthetic one', function (): void {
+    $user = User::factory()->withPersonalWorkspace()->create();
+    [$conversationId, $ids] = seedSupersedeConversation($user);
+
+    foreach ([['user', MessageOrigin::Resume->opener(), MessageOrigin::Resume], ['assistant', 'Created it.', MessageOrigin::Typed]] as [$role, $content, $origin]) {
+        DB::table('agent_conversation_messages')->insert([
+            'id' => (string) Str::uuid7(),
+            'conversation_id' => $conversationId,
+            'participant_type' => 'user',
+            'participant_id' => (string) $user->getKey(),
+            'agent' => 'test',
+            'role' => $role,
+            'origin' => $origin->value,
+            'content' => $content,
+            'attachments' => '[]',
+            'tool_calls' => '[]',
+            'tool_results' => '[]',
+            'usage' => '[]',
+            'meta' => '[]',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
+    $this->actingAs($user)
+        ->postJson("/chat/conversations/{$conversationId}/messages/supersede", [])
+        ->assertOk()
+        ->assertJson(['superseded' => 4]);
+
+    expect(DB::table('agent_conversation_messages')->where('id', $ids[2])->value('superseded_at'))->not->toBeNull()
+        ->and(DB::table('agent_conversation_messages')->where('id', $ids[1])->value('superseded_at'))->toBeNull();
 });

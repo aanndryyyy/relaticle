@@ -57,7 +57,7 @@ function seedTitlingConversation(string $title): string
 /**
  * @param  array<string, string>  $meta
  */
-function seedTitlingMessage(string $conversationId, string $role, string $content, array $meta = []): void
+function seedTitlingMessage(string $conversationId, string $role, string $content, array $meta = [], string $origin = 'typed'): void
 {
     DB::table('agent_conversation_messages')->insert([
         'id' => (string) Str::uuid7(),
@@ -72,6 +72,7 @@ function seedTitlingMessage(string $conversationId, string $role, string $conten
         'tool_results' => '[]',
         'usage' => '[]',
         'meta' => json_encode($meta, JSON_THROW_ON_ERROR),
+        'origin' => $origin,
         'created_at' => now(),
         'updated_at' => now(),
     ]);
@@ -397,8 +398,7 @@ it('does not let approval echoes and resumed turns burn the titling window', fun
     $conversationId = seedTitlingConversation('hey');
     seedTitlingMessage($conversationId, 'user', 'hey');
     seedTitlingMessage($conversationId, 'assistant', 'Hi! How can I help?');
-    seedTitlingMessage($conversationId, 'user', '[approval] approved');
-    seedTitlingMessage($conversationId, 'user', 'The proposals from your last turn have just been decided.', ['kind' => 'continuation']);
+    seedTitlingMessage($conversationId, 'user', 'The user decided the proposals above.', [], 'resume');
 
     $this->postJson(route('chat.send', ['conversation' => $conversationId]), [
         'document' => ChatDocument::fromText('Draft a renewal proposal for Globex'),
@@ -417,8 +417,7 @@ it('titles at turn end from what the user typed, not from the rows the system wr
     $conversationId = seedTitlingConversation('hey');
     seedTitlingMessage($conversationId, 'user', 'hey');
     seedTitlingMessage($conversationId, 'assistant', 'Hi! How can I help?');
-    seedTitlingMessage($conversationId, 'user', '[approval] approved');
-    seedTitlingMessage($conversationId, 'user', 'The proposals from your last turn have just been decided.', ['kind' => 'continuation']);
+    seedTitlingMessage($conversationId, 'user', 'The user decided the proposals above.', [], 'resume');
 
     (new ProcessChatMessage(
         user: $this->user,

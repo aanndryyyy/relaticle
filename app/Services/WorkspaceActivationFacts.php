@@ -7,7 +7,7 @@ namespace App\Services;
 use App\Enums\CreationSource;
 use App\Models\Workspace;
 use Illuminate\Support\Facades\DB;
-use Relaticle\Chat\Storage\SupersededAwareConversationStore;
+use Relaticle\Chat\Support\TypedMessages;
 
 /**
  * Request-scoped answers to "what has this workspace done so far".
@@ -76,11 +76,9 @@ final class WorkspaceActivationFacts
      */
     public function hasUserChatMessage(Workspace $workspace): bool
     {
-        return DB::table('agent_conversation_messages as m')
+        return TypedMessages::apply(DB::table('agent_conversation_messages as m'), 'm')
             ->join('agent_conversations as c', 'c.id', '=', 'm.conversation_id')
             ->where('c.workspace_id', $workspace->getKey())
-            ->where('m.role', 'user')
-            ->whereRaw("coalesce(m.meta->>'kind', '') <> ?", [SupersededAwareConversationStore::CONTINUATION_KIND])
             ->exists();
     }
 

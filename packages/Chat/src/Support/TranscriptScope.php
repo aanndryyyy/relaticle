@@ -6,7 +6,6 @@ namespace Relaticle\Chat\Support;
 
 use App\Models\User;
 use Illuminate\Database\Query\Builder;
-use Relaticle\Chat\Storage\SupersededAwareConversationStore;
 
 /**
  * The single definition of "messages this participant can see in this
@@ -29,34 +28,16 @@ final readonly class TranscriptScope
      */
     public static function apply(Builder $query, User $user, string $conversationId): Builder
     {
-        return $query
+        $scoped = $query
             ->join('agent_conversations as c', 'c.id', '=', 'm.conversation_id')
             ->where('m.conversation_id', $conversationId)
             ->where('m.participant_type', $user->getMorphClass())
             ->where('m.participant_id', $user->getKey())
             ->where('c.workspace_id', $user->current_workspace_id)
-            ->whereNull('m.superseded_at')
-            // Approval echoes are internal turn bookkeeping and are never
-            // rendered. Excluded in SQL rather than after the fetch so a LIMIT
-            // counts visible rows only: dropping one afterwards returned a
-            // short page, and the pager reads a short page as "no more
-            // history", stranding every older message behind it.
-            ->whereNot(function (Builder $inner): void {
-                $inner->where('m.role', 'user')->where('m.content', 'like', '[approval]%');
-            })
-            // Same reasoning for the prompt a resumed turn runs on: the model
-            // needs a final user turn, so one is stored, but the user never
-            // typed it (see TurnContinuationService).
-            //
-            // coalesce, not a plain `meta->kind` comparison: every other row
-            // has no `kind`, so the comparison is NULL there, the enclosing
-            // AND is NULL, and NOT NULL is NULL - which drops the row. That
-            // silently hid half the transcript when first written this way.
-            ->whereNot(function (Builder $inner): void {
-                $inner->where('m.role', 'user')
-                    ->whereRaw("coalesce(m.meta->>'kind', '') = ?", [
-                        SupersededAwareConversationStore::CONTINUATION_KIND,
-                    ]);
-            });
+            ->whereNull('m.superseded_at');
+
+        // In SQL, not after the fetch: a LIMIT must count visible rows only,
+        // or the pager reads a short page as the end of history.
+        return TypedMessages::exceptSynthetic($scoped, 'm');
     }
 }

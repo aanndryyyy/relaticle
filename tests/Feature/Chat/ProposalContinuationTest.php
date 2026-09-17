@@ -15,6 +15,7 @@ use Laravel\Ai\Contracts\ConversationStore;
 use Laravel\Pennant\Feature;
 use Livewire\Livewire;
 use Relaticle\Chat\Actions\ListConversationMessages;
+use Relaticle\Chat\Enums\MessageOrigin;
 use Relaticle\Chat\Enums\PendingActionOperation;
 use Relaticle\Chat\Enums\PendingActionStatus;
 use Relaticle\Chat\Jobs\ProcessChatMessage;
@@ -195,10 +196,10 @@ it('charges one credit for the resumed turn', function (): void {
 
 it('hides the resumed turn prompt from the transcript but keeps every other message', function (): void {
     $rows = [
-        ['role' => 'user', 'content' => 'Create a company', 'meta' => '[]'],
-        ['role' => 'assistant', 'content' => 'Review the proposal below.', 'meta' => '{"model": "claude-sonnet-4-6"}'],
-        ['role' => 'user', 'content' => TurnContinuationService::PROMPT, 'meta' => json_encode(['kind' => SupersededAwareConversationStore::CONTINUATION_KIND], JSON_THROW_ON_ERROR)],
-        ['role' => 'assistant', 'content' => 'Created it.', 'meta' => '{"model": "claude-sonnet-4-6"}'],
+        ['role' => 'user', 'content' => 'Create a company', 'origin' => MessageOrigin::Typed],
+        ['role' => 'assistant', 'content' => 'Review the proposal below.', 'origin' => MessageOrigin::Typed],
+        ['role' => 'user', 'content' => MessageOrigin::Resume->opener(), 'origin' => MessageOrigin::Resume],
+        ['role' => 'assistant', 'content' => 'Created it.', 'origin' => MessageOrigin::Typed],
     ];
 
     foreach ($rows as $index => $row) {
@@ -214,7 +215,8 @@ it('hides the resumed turn prompt from the transcript but keeps every other mess
             'tool_calls' => '[]',
             'tool_results' => '[]',
             'usage' => '[]',
-            'meta' => $row['meta'],
+            'meta' => '[]',
+            'origin' => $row['origin']->value,
             'created_at' => now()->addSeconds($index),
             'updated_at' => now()->addSeconds($index),
         ]);
@@ -224,7 +226,7 @@ it('hides the resumed turn prompt from the transcript but keeps every other mess
 
     expect($messages)->toHaveCount(3)
         ->and(array_column($messages, 'role'))->toBe(['user', 'assistant', 'assistant'])
-        ->and(collect($messages)->pluck('content')->implode(' '))->not->toContain('their outcome is in');
+        ->and(collect($messages)->pluck('content')->implode(' '))->not->toContain(MessageOrigin::Resume->opener());
 });
 
 it('clears the continuation flag when the resumed turn dies before it stores anything', function (): void {

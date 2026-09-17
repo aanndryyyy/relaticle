@@ -46,6 +46,7 @@ use Relaticle\Chat\Support\ModelDescriptor;
 use Relaticle\Chat\Support\RecordReferenceResolver;
 use Relaticle\Chat\Support\TranscriptScope;
 use Relaticle\Chat\Support\TurnPresence;
+use Relaticle\Chat\Support\TypedMessages;
 
 final readonly class ChatController
 {
@@ -470,9 +471,8 @@ final readonly class ChatController
             abort_if($anchor === null, 404);
             abort_if((string) $anchor->role !== 'user', 422, 'Only user messages can anchor a supersede.');
         } else {
-            $anchor = DB::table('agent_conversation_messages')
+            $anchor = TypedMessages::apply(DB::table('agent_conversation_messages'))
                 ->where('conversation_id', $conversationId)
-                ->where('role', 'user')
                 ->whereNull('superseded_at')
                 ->orderByDesc('id')
                 ->first();
