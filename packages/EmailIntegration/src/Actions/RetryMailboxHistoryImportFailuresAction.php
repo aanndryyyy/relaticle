@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Relaticle\EmailIntegration\Jobs\StoreEmailJob;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
+use Throwable;
 
 final readonly class RetryMailboxHistoryImportFailuresAction
 {
@@ -52,8 +53,19 @@ final readonly class RetryMailboxHistoryImportFailuresAction
                 return false;
             }
 
-            foreach ($retryableUuids as $failedJobUuid) {
-                Artisan::call('queue:retry', ['id' => $failedJobUuid]);
+            $alreadyAwaiting = $this->mailboxHistoryImport->hasAwaitingRetrySuccessNotice($batchId);
+            $this->mailboxHistoryImport->markAwaitingRetrySuccessNotice($batchId);
+
+            try {
+                foreach ($retryableUuids as $failedJobUuid) {
+                    Artisan::call('queue:retry', ['id' => $failedJobUuid]);
+                }
+            } catch (Throwable) {
+                if (! $alreadyAwaiting) {
+                    $this->mailboxHistoryImport->clearAwaitingRetrySuccessNotice($batchId);
+                }
+
+                return false;
             }
 
             $remainingUuids = DB::table('failed_jobs')
@@ -63,12 +75,14 @@ final readonly class RetryMailboxHistoryImportFailuresAction
                 ->all();
 
             if (array_diff($retryableUuids, $remainingUuids) === []) {
+                if (! $alreadyAwaiting) {
+                    $this->mailboxHistoryImport->clearAwaitingRetrySuccessNotice($batchId);
+                }
+
                 return false;
             }
 
             $account->update(['last_error' => null]);
-
-            $this->mailboxHistoryImport->markAwaitingRetrySuccessNotice($batchId);
 
             return true;
         });

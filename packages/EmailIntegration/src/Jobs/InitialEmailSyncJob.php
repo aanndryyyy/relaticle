@@ -48,6 +48,7 @@ final class InitialEmailSyncJob implements ShouldBeUnique, ShouldQueue
         MailboxHistoryImportService $mailboxHistoryImport,
     ): void {
         $account = $this->connectedAccount;
+        $mailboxHistoryImport->markEmailListingStarted($account);
         $service = $mailFactory->make($account);
         $page = $service->initialBackfill($this->initialDaysCap(), $this->pageToken);
 
@@ -111,6 +112,8 @@ final class InitialEmailSyncJob implements ShouldBeUnique, ShouldQueue
 
     public function failed(Throwable $exception): void
     {
+        resolve(MailboxHistoryImportService::class)->markEmailListingFinished($this->connectedAccount);
+
         $this->connectedAccount->update([
             'status' => $this->isAuthError($exception) ? EmailAccountStatus::REAUTH_REQUIRED : EmailAccountStatus::ERROR,
             'last_error' => $exception->getMessage(),
@@ -153,6 +156,8 @@ final class InitialEmailSyncJob implements ShouldBeUnique, ShouldQueue
         }
 
         $cursor = $historyCursor ?? $pageCursor;
+
+        resolve(MailboxHistoryImportService::class)->markEmailListingFinished($account);
 
         $account->update([
             'sync_cursor' => $cursor,

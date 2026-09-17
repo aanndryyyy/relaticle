@@ -23,6 +23,10 @@ final readonly class MailboxHistoryImportService
 
     private const string CALENDAR_FAILURES_PREFIX = 'email-integration:history-import-calendar-failures:';
 
+    private const string EMAIL_LISTING_PENDING_PREFIX = 'email-integration:history-import-email-listing:';
+
+    private const string CALENDAR_IMPORT_PENDING_PREFIX = 'email-integration:history-import-calendar-pending:';
+
     public function markAwaitingRetrySuccessNotice(string $batchId): void
     {
         Cache::put(self::AWAITING_RETRY_SUCCESS_NOTICE_PREFIX.$batchId, true, now()->addWeek());
@@ -36,6 +40,11 @@ final readonly class MailboxHistoryImportService
     public function hasAwaitingRetrySuccessNotice(string $batchId): bool
     {
         return Cache::has(self::AWAITING_RETRY_SUCCESS_NOTICE_PREFIX.$batchId);
+    }
+
+    public function clearAwaitingRetrySuccessNotice(string $batchId): void
+    {
+        Cache::forget(self::AWAITING_RETRY_SUCCESS_NOTICE_PREFIX.$batchId);
     }
 
     public function failureGeneration(string $batchId): int
@@ -56,14 +65,87 @@ final readonly class MailboxHistoryImportService
         return (int) Cache::increment($key);
     }
 
-    public function recordCalendarFailures(string $accountId, int $count): void
+    public function recordCalendarFailures(string $batchId, int $count): void
     {
-        Cache::put(self::CALENDAR_FAILURES_PREFIX.$accountId, max(0, $count), now()->addWeek());
+        $key = self::CALENDAR_FAILURES_PREFIX.$batchId;
+
+        if ($count <= 0) {
+            Cache::forget($key);
+
+            return;
+        }
+
+        Cache::put($key, $count, now()->addWeek());
     }
 
-    public function calendarFailureCount(string $accountId): int
+    public function calendarFailureCount(string $batchId): int
     {
-        return max(0, (int) Cache::get(self::CALENDAR_FAILURES_PREFIX.$accountId, 0));
+        return max(0, (int) Cache::get(self::CALENDAR_FAILURES_PREFIX.$batchId, 0));
+    }
+
+    public function clearCalendarFailures(string $batchId): void
+    {
+        Cache::forget(self::CALENDAR_FAILURES_PREFIX.$batchId);
+    }
+
+    public function markEmailListingStarted(ConnectedAccount $account): void
+    {
+        Cache::put(self::EMAIL_LISTING_PENDING_PREFIX.$account->getKey(), true, now()->addMonth());
+    }
+
+    public function markEmailListingFinished(ConnectedAccount $account): void
+    {
+        Cache::forget(self::EMAIL_LISTING_PENDING_PREFIX.$account->getKey());
+    }
+
+    public function isEmailListingInProgress(ConnectedAccount $account): bool
+    {
+        return Cache::has(self::EMAIL_LISTING_PENDING_PREFIX.$account->getKey());
+    }
+
+    public function markCalendarImportPending(string $batchId): void
+    {
+        Cache::put(self::CALENDAR_IMPORT_PENDING_PREFIX.$batchId, true, now()->addMonth());
+    }
+
+    public function markCalendarImportFinished(string $batchId): void
+    {
+        Cache::forget(self::CALENDAR_IMPORT_PENDING_PREFIX.$batchId);
+    }
+
+    public function isCalendarImportPending(string $batchId): bool
+    {
+        return Cache::has(self::CALENDAR_IMPORT_PENDING_PREFIX.$batchId);
+    }
+
+    public function touchCalendarImport(ConnectedAccount $account): void
+    {
+        MailboxSyncTracker::markCalendarStarted($account);
+
+        $batchId = $account->history_import_batch_id;
+
+        if (! is_string($batchId) || $batchId === '') {
+            return;
+        }
+
+        $this->markCalendarImportPending($batchId);
+    }
+
+    public function completeCalendarImport(ConnectedAccount $account, bool $succeeded): void
+    {
+        MailboxSyncTracker::markCalendarFinished($account);
+
+        $batchId = $account->history_import_batch_id;
+
+        if (! is_string($batchId) || $batchId === '') {
+            return;
+        }
+
+        $this->markCalendarImportFinished($batchId);
+
+        if ($succeeded) {
+            $this->clearCalendarFailures($batchId);
+        }
     }
 
     public function lockKey(ConnectedAccount $account): string
@@ -77,9 +159,17 @@ final readonly class MailboxHistoryImportService
             return false;
         }
 
+        if ($this->isEmailListingInProgress($account)) {
+            return true;
+        }
+
         $batch = Bus::findBatch($account->history_import_batch_id);
 
-        if ($batch instanceof Batch && $batch->totalJobs > 0 && ! $this->batchIsComplete($batch)) {
+        if (! $batch instanceof Batch || $batch->cancelled()) {
+            return false;
+        }
+
+        if ($batch->totalJobs > 0 && ! $this->batchIsComplete($batch)) {
             return true;
         }
 
@@ -88,8 +178,7 @@ final readonly class MailboxHistoryImportService
         }
 
         return $account->status === EmailAccountStatus::ACTIVE
-            && $batch instanceof Batch
-            && ! $batch->cancelled();
+            && ! $this->batchIsComplete($batch);
     }
 
     public function summary(ConnectedAccount $account): ?MailboxHistoryImportSummary

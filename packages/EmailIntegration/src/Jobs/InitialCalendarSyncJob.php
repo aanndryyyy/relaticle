@@ -19,7 +19,7 @@ use Relaticle\EmailIntegration\Jobs\Concerns\DetectsAuthErrors;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Meeting;
 use Relaticle\EmailIntegration\Services\Contracts\CalendarServiceFactoryInterface;
-use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 use Throwable;
 
 #[DeleteWhenMissingModels]
@@ -45,14 +45,14 @@ final class InitialCalendarSyncJob implements ShouldBeUnique, ShouldQueue
         $account = $this->connectedAccount;
 
         if (! $account->hasCalendar() || $account->status !== EmailAccountStatus::ACTIVE) {
-            MailboxSyncTracker::markCalendarFinished($account);
+            resolve(MailboxHistoryImportService::class)->completeCalendarImport($account, succeeded: false);
             resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
 
             return;
         }
 
         if ($account->calendar_sync_cursor === null) {
-            MailboxSyncTracker::markCalendarStarted($account);
+            resolve(MailboxHistoryImportService::class)->touchCalendarImport($account);
         }
 
         $service = $serviceFactory->make($account);
@@ -89,7 +89,7 @@ final class InitialCalendarSyncJob implements ShouldBeUnique, ShouldQueue
 
     public function failed(Throwable $exception): void
     {
-        MailboxSyncTracker::markCalendarFinished($this->connectedAccount);
+        resolve(MailboxHistoryImportService::class)->completeCalendarImport($this->connectedAccount, succeeded: false);
 
         $this->connectedAccount->update([
             'status' => $this->isAuthError($exception) ? EmailAccountStatus::REAUTH_REQUIRED : EmailAccountStatus::ERROR,
@@ -145,7 +145,7 @@ final class InitialCalendarSyncJob implements ShouldBeUnique, ShouldQueue
             }
         }
 
-        MailboxSyncTracker::markCalendarFinished($account);
+        resolve(MailboxHistoryImportService::class)->completeCalendarImport($account, succeeded: $account->calendar_sync_cursor !== null);
 
         resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
 

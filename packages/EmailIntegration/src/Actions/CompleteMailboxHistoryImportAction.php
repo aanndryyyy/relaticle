@@ -12,7 +12,6 @@ use Illuminate\Support\Facades\DB;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Notifications\MailboxHistoryImportCompletedNotification;
 use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
-use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 
 final readonly class CompleteMailboxHistoryImportAction
 {
@@ -47,7 +46,7 @@ final readonly class CompleteMailboxHistoryImportAction
                 return;
             }
 
-            if ($account->hasCalendar() && MailboxSyncTracker::isCalendarSyncing($account)) {
+            if ($account->hasCalendar() && $this->mailboxHistoryImport->isCalendarImportPending($batchId)) {
                 return;
             }
 
@@ -58,7 +57,7 @@ final readonly class CompleteMailboxHistoryImportAction
             }
 
             $failedEmailCount = count($batch->failedJobIds);
-            $failedCalendarCount = $this->mailboxHistoryImport->calendarFailureCount($accountId);
+            $failedCalendarCount = $this->mailboxHistoryImport->calendarFailureCount($batchId);
             $calendarDidNotFinish = $account->hasCalendar() && $account->calendar_sync_cursor === null;
             $hasEmailFailures = $failedEmailCount > 0;
             $hasCalendarIssues = $failedCalendarCount > 0 || $calendarDidNotFinish;
@@ -76,6 +75,8 @@ final readonly class CompleteMailboxHistoryImportAction
             $account->update($updates);
 
             if ($hasEmailFailures || $hasCalendarIssues) {
+                $this->mailboxHistoryImport->markAwaitingRetrySuccessNotice($batchId);
+
                 if ($this->alreadyNotified($user, $batchId)) {
                     return;
                 }
@@ -133,6 +134,9 @@ final readonly class CompleteMailboxHistoryImportAction
             $failedEmailCount,
             $failedCalendarCount,
             $calendarDidNotFinish,
+            $account->initial_sync_imported,
+            $account->hasCalendar() ? $account->initial_calendar_sync_imported : 0,
+            $account->hasCalendar(),
         );
         $user->notifyNow($notification, ['database']);
 

@@ -234,7 +234,8 @@ final class InitialSyncPageStoreBatch
             $batchId = $account->history_import_batch_id;
 
             if (is_string($batchId) && $batchId !== '') {
-                resolve(MailboxHistoryImportService::class)->recordCalendarFailures((string) $account->getKey(), $missingCount);
+                resolve(MailboxHistoryImportService::class)->recordCalendarFailures($batchId, $missingCount);
+                resolve(MailboxHistoryImportService::class)->completeCalendarImport($account, succeeded: false);
                 resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
             }
         }

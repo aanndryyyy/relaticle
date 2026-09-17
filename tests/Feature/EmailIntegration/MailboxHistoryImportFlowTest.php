@@ -311,6 +311,37 @@ it('still blocks re-import while store jobs remain after listing fails', functio
         ->toThrow(RuntimeException::class);
 });
 
+it('restarts history import after drained store jobs leave an active mailbox without a cursor', function (): void {
+    Notification::fake();
+
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'sync_cursor' => null,
+        'status' => EmailAccountStatus::ACTIVE,
+        'last_error' => null,
+    ]));
+    $staleBatchId = attachHistoryImportBatch($account);
+
+    DB::table('job_batches')->where('id', $staleBatchId)->update([
+        'total_jobs' => 4,
+        'pending_jobs' => 0,
+        'failed_jobs' => 0,
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    expect(resolve(MailboxHistoryImportService::class)->isRunning($account->fresh()))->toBeFalse();
+
+    Bus::fake([RelinkMailboxHistoryJob::class, InitialEmailSyncJob::class]);
+
+    resolve(StartMailboxHistoryImportAction::class)->execute($account->fresh());
+
+    expect($account->fresh())
+        ->status->toBe(EmailAccountStatus::ACTIVE)
+        ->and($account->fresh()?->history_import_batch_id)->not->toBe($staleBatchId)
+        ->and($account->fresh()?->history_import_batch_id)->not->toBeNull();
+
+    Bus::assertDispatched(InitialEmailSyncJob::class, fn (InitialEmailSyncJob $job): bool => $job->connectedAccount->is($account));
+});
+
 it('blocks concurrent re-import history starts with a cache lock', function (): void {
     Notification::fake();
 

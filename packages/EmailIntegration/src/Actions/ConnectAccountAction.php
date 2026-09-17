@@ -40,19 +40,26 @@ final readonly class ConnectAccountAction
                 && $existing->sync_cursor === null
                 && ! $this->mailboxHistoryImport->isRunning($existing);
 
+            $importStillDraining = $existing instanceof ConnectedAccount
+                && ! $existing->trashed()
+                && $this->mailboxHistoryImport->isRunning($existing);
+
             $values = [
                 'display_name' => $data->displayName,
                 'provider_account_id' => $data->providerAccountId,
                 'access_token' => $data->accessToken,
                 'token_expires_at' => $data->tokenExpiresAt,
-                'status' => 'active',
-                'last_error' => null,
                 'capabilities' => [
                     'email' => true,
                     'send' => $data->hasSend,
                     'calendar' => $data->hasCalendar,
                 ],
             ];
+
+            if (! $importStillDraining) {
+                $values['status'] = 'active';
+                $values['last_error'] = null;
+            }
 
             // On re-consent the provider often returns no refresh token (it is only
             // issued on first authorization). Overwriting with null would strip the

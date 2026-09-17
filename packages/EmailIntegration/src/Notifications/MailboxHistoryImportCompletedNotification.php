@@ -19,6 +19,12 @@ final class MailboxHistoryImportCompletedNotification extends Notification imple
 {
     use Queueable;
 
+    public readonly int $importedEmailCount;
+
+    public readonly int $importedCalendarCount;
+
+    public readonly bool $includesCalendar;
+
     public function __construct(
         public readonly ConnectedAccount $account,
         public readonly ?string $batchId = null,
@@ -26,7 +32,14 @@ final class MailboxHistoryImportCompletedNotification extends Notification imple
         public readonly int $failedEmailCount = 0,
         public readonly int $failedCalendarCount = 0,
         public readonly bool $calendarDidNotFinish = false,
-    ) {}
+        ?int $importedEmailCount = null,
+        ?int $importedCalendarCount = null,
+        ?bool $includesCalendar = null,
+    ) {
+        $this->importedEmailCount = $importedEmailCount ?? $account->emails()->count();
+        $this->importedCalendarCount = $importedCalendarCount ?? $account->meetings()->count();
+        $this->includesCalendar = $includesCalendar ?? $account->hasCalendar();
+    }
 
     /**
      * @return list<string>
@@ -161,11 +174,11 @@ final class MailboxHistoryImportCompletedNotification extends Notification imple
 
     private function importedSummary(): string
     {
-        $emails = trans_choice('filament/notifications/mailbox-import-complete.imported_emails', $this->emailCount(), [
-            'count' => $this->emailCount(),
+        $emails = trans_choice('filament/notifications/mailbox-import-complete.imported_emails', $this->importedEmailCount, [
+            'count' => $this->importedEmailCount,
         ]);
 
-        if (! $this->account->hasCalendar()) {
+        if (! $this->includesCalendar) {
             return __('filament/notifications/mailbox-import-complete.imported_without_calendar', [
                 'emails' => $emails,
             ]);
@@ -173,8 +186,8 @@ final class MailboxHistoryImportCompletedNotification extends Notification imple
 
         return __('filament/notifications/mailbox-import-complete.imported_with_calendar', [
             'emails' => $emails,
-            'events' => trans_choice('filament/notifications/mailbox-import-complete.imported_calendar_events', $this->calendarCount(), [
-                'count' => $this->calendarCount(),
+            'events' => trans_choice('filament/notifications/mailbox-import-complete.imported_calendar_events', $this->importedCalendarCount, [
+                'count' => $this->importedCalendarCount,
             ]),
         ]);
     }
@@ -198,16 +211,6 @@ final class MailboxHistoryImportCompletedNotification extends Notification imple
         }
 
         return implode(' ', $parts);
-    }
-
-    private function emailCount(): int
-    {
-        return $this->account->emails()->count();
-    }
-
-    private function calendarCount(): int
-    {
-        return $this->account->meetings()->count();
     }
 
     private function emailAccountsUrl(): ?string

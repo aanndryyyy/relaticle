@@ -42,6 +42,8 @@ final readonly class StartMailboxHistoryImportAction
                 'last_error' => null,
             ]);
 
+            $this->mailboxHistoryImport->markEmailListingStarted($account);
+
             if ($hadSyncCursor) {
                 $account->update([
                     'sync_cursor' => null,
@@ -58,6 +60,7 @@ final readonly class StartMailboxHistoryImportAction
                 return;
             }
 
+            $this->mailboxHistoryImport->markCalendarImportPending($batch->id);
             MailboxSyncTracker::markCalendarStarted($account);
 
             if ($account->calendar_sync_cursor !== null) {
