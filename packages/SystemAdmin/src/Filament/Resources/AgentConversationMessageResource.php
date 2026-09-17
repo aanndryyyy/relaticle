@@ -50,6 +50,7 @@ final class AgentConversationMessageResource extends Resource
             ->components([
                 Section::make([
                     TextEntry::make('role')->badge()->color(fn (string $state): string => self::ROLE_COLORS[$state] ?? 'info'),
+                    TextEntry::make('origin')->badge(),
                     TextEntry::make('agent')->placeholder('—'),
                     TextEntry::make('user.name')
                         ->label('User')
@@ -80,6 +81,8 @@ final class AgentConversationMessageResource extends Resource
                 TextColumn::make('role')
                     ->badge()
                     ->color(fn (string $state): string => self::ROLE_COLORS[$state] ?? 'info'),
+                TextColumn::make('origin')
+                    ->badge(),
                 TextColumn::make('content')
                     ->limit(80)
                     ->placeholder('—')

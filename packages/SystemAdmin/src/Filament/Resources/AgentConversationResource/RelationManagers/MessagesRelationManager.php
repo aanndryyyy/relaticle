@@ -38,6 +38,8 @@ final class MessagesRelationManager extends RelationManager
                     ->url(fn (AgentConversationMessage $record): string => AgentConversationMessageResource::getUrl('view', ['record' => $record])),
                 TextColumn::make('role')
                     ->badge(),
+                TextColumn::make('origin')
+                    ->badge(),
                 TextColumn::make('content')
                     ->limit(80)
                     ->placeholder('—')

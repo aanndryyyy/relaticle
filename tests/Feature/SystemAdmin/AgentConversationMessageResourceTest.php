@@ -6,6 +6,7 @@ use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Relaticle\Chat\Enums\MessageOrigin;
 use Relaticle\Chat\Models\AgentConversationMessage;
 use Relaticle\SystemAdmin\Filament\Resources\AgentConversationMessageResource;
 use Relaticle\SystemAdmin\Filament\Resources\AgentConversationMessageResource\Pages\ListAgentConversationMessages;
@@ -90,4 +91,18 @@ it('shows a message detail page including superseded state', function (): void {
 
     livewire(ViewAgentConversationMessage::class, ['record' => $message->getKey()])
         ->assertSuccessful();
+});
+
+it('labels a synthetic user row by its origin in the list and on the view page', function (): void {
+    $greeting = seedAdminMessage('user');
+    DB::table('agent_conversation_messages')->where('id', $greeting->getKey())->update(['origin' => MessageOrigin::Greeting->value]);
+    $greeting->refresh();
+
+    livewire(ListAgentConversationMessages::class)
+        ->assertCanSeeTableRecords([$greeting])
+        ->assertTableColumnExists('origin')
+        ->assertTableColumnFormattedStateSet('origin', MessageOrigin::Greeting->getLabel(), $greeting);
+
+    livewire(ViewAgentConversationMessage::class, ['record' => $greeting->getKey()])
+        ->assertSee(MessageOrigin::Greeting->getLabel());
 });
