@@ -37,10 +37,6 @@
 
             <x-slot name="afterHeader">
                 <div class="flex shrink-0 flex-wrap items-center justify-end gap-3">
-                    <x-email-integration::history-import-failure-status :account="$account">
-                        {{ ($this->retryFailedImportAction())(['account_id' => $account->getKey()]) }}
-                    </x-email-integration::history-import-failure-status>
-
                     @if ($account->showsSyncProgressOnAccountsPage())
                         <x-email-integration::importing-badge :account="$account" :icon="$this->syncingIcon()" />
                     @endif
