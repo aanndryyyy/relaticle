@@ -13,6 +13,7 @@ use App\Support\Impersonation\Impersonator;
 use Illuminate\Foundation\Application;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
@@ -58,6 +59,36 @@ it('keeps the customer signed in on the next panel request', function (): void {
         ->assertSuccessful();
 
     expect(Auth::guard('web')->id())->toBe($this->customer->getKey());
+});
+
+it('keeps the customer signed in when the session held the administrators own password hash', function (): void {
+    $administratorsOwnAccount = User::factory()->withWorkspace()->create(['password' => Hash::make('a-different-password')]);
+
+    actingAs($administratorsOwnAccount, 'web');
+    session()->put('password_hash_web', $administratorsOwnAccount->getAuthPassword());
+
+    $this->get(impersonationLink($this->customer));
+
+    $this->get(url()->getAppUrl($this->customer->currentWorkspace->slug))
+        ->assertSuccessful();
+
+    expect(Auth::guard('web')->id())->toBe($this->customer->getKey());
+});
+
+it('shows the impersonation banner only while impersonating', function (): void {
+    $workspacePath = url()->getAppUrl($this->customer->currentWorkspace->slug);
+
+    actingAs($this->customer, 'web')
+        ->get($workspacePath)
+        ->assertSuccessful()
+        ->assertDontSee(route('impersonation.stop'));
+
+    $this->get(impersonationLink($this->customer));
+
+    $this->get($workspacePath)
+        ->assertSuccessful()
+        ->assertSee(__('filament/panel.impersonation.banner', ['name' => $this->customer->name, 'email' => $this->customer->email]))
+        ->assertSee(route('impersonation.stop'));
 });
 
 it('lands in the named workspace', function (): void {
