@@ -11,6 +11,7 @@ use Laravel\Ai\Messages\ToolResultMessage;
 use Laravel\Ai\Prompts\AgentPrompt;
 use Laravel\Ai\Responses\AgentResponse;
 use Laravel\Ai\Storage\DatabaseConversationStore;
+use Relaticle\Chat\Enums\MessageOrigin;
 use Relaticle\Chat\Support\AssistantText;
 use Relaticle\Chat\Support\DisplayBlocks;
 use Relaticle\Chat\Support\FirstChatUsageTagger;
@@ -45,25 +46,6 @@ use Relaticle\Chat\Support\FirstChatUsageTagger;
  */
 final class SupersededAwareConversationStore extends DatabaseConversationStore
 {
-    /**
-     * `meta->kind` marking the synthetic user message a resumed turn runs on
-     * (see TurnContinuationService). The provider needs a final user turn, so
-     * one is stored; the transcript hides it, because the user did not type it.
-     */
-    public const string CONTINUATION_KIND = 'continuation';
-
-    /**
-     * Set by ProcessChatMessage for the single user message a continuation turn
-     * is about to store, and consumed on write.
-     *
-     * This store is a container singleton and queue workers do not rebuild
-     * singletons between jobs, so consumption alone is not enough: a turn that
-     * dies before the write would hand the flag to the next job on the worker.
-     * ProcessChatMessage therefore also clears it in a finally. Both halves are
-     * required; neither is redundant.
-     */
-    public bool $nextUserMessageIsContinuation = false;
-
     /**
      * Drop presentation-only display blocks from the history replayed to the model.
      *
@@ -131,19 +113,26 @@ final class SupersededAwareConversationStore extends DatabaseConversationStore
     {
         $messageId = parent::storeUserMessage($conversationId, $participantType, $participantId, $prompt);
 
-        if ($this->nextUserMessageIsContinuation) {
-            $this->nextUserMessageIsContinuation = false;
-
-            $this->table($this->messagesTable())
-                ->where('id', $messageId)
-                ->update(['meta' => json_encode(['kind' => self::CONTINUATION_KIND], JSON_THROW_ON_ERROR)]);
-
-            return $messageId;
+        if (MessageOrigin::current()->isTyped()) {
+            FirstChatUsageTagger::tagIfFirstMessage($messageId);
         }
 
-        FirstChatUsageTagger::tagIfFirstMessage($messageId);
-
         return $messageId;
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     * @return array<string, mixed>
+     */
+    protected function messageAttributes(string $messageId, string $conversationId, ?string $participantType, string|int|null $participantId, mixed $now, array $attributes): array
+    {
+        $attributes = parent::messageAttributes($messageId, $conversationId, $participantType, $participantId, $now, $attributes);
+
+        if (($attributes['role'] ?? null) === 'user') {
+            $attributes['origin'] = MessageOrigin::current()->value;
+        }
+
+        return $attributes;
     }
 
     /**

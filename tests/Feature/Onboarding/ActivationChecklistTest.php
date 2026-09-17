@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use App\Actions\Onboarding\DismissActivationChecklist;
 use App\Actions\Onboarding\RemoveSampleData;
-use App\Actions\Onboarding\StartSetupGreeting;
 use App\Enums\CreationSource;
 use App\Enums\WorkspaceRole;
 use App\Filament\Pages\ChatConversation;
@@ -23,6 +22,7 @@ use App\Services\WorkspaceActivationFacts;
 use Filament\Facades\Filament;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Relaticle\Chat\Enums\MessageOrigin;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 mutates(ActivationChecklist::class, DismissActivationChecklist::class, RemoveSampleData::class, WorkspaceActivationFacts::class);
@@ -177,13 +177,14 @@ it('leaves the assistant step open for a prompt the user never typed', function 
         'participant_type' => $this->owner->getMorphClass(),
         'participant_id' => (string) $this->owner->getKey(),
         'role' => 'user',
-        'content' => StartSetupGreeting::PROMPT,
+        'content' => MessageOrigin::Greeting->opener(),
         'agent' => 'crm',
         'attachments' => '[]',
         'tool_calls' => '[]',
         'tool_results' => '[]',
         'usage' => '{}',
-        'meta' => json_encode(['kind' => 'continuation']),
+        'meta' => '[]',
+        'origin' => MessageOrigin::Greeting->value,
         'created_at' => now(),
         'updated_at' => now(),
     ]);

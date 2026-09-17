@@ -9,7 +9,7 @@ use Tests\Helpers\ChatDocument;
 
 mutates(ListConversationMessages::class);
 
-it('hides synthetic [approval] user messages from the visible message list', function (): void {
+it('hides synthetic user messages from the visible message list', function (): void {
     $user = User::factory()->withPersonalWorkspace()->create();
     $this->actingAs($user);
 
@@ -35,12 +35,13 @@ it('hides synthetic [approval] user messages from the visible message list', fun
         'tool_results' => '[]',
         'usage' => '{}',
         'meta' => '{}',
+        'origin' => 'typed',
     ];
 
     DB::table('agent_conversation_messages')->insert([
         ['id' => '019df800-2222-7000-8000-000000000010', 'role' => 'user', 'content' => 'Create task for Angel', 'created_at' => now()->subSeconds(30), 'updated_at' => now()->subSeconds(30)] + $base,
         ['id' => '019df800-2222-7000-8000-000000000011', 'role' => 'assistant', 'content' => 'I have proposed creating a person.', 'created_at' => now()->subSeconds(20), 'updated_at' => now()->subSeconds(20)] + $base,
-        ['id' => '019df800-2222-7000-8000-000000000012', 'role' => 'user', 'content' => "[approval]\nstatus: approved\nentity_type: people\nrecord_id: 01abc\n", 'created_at' => now()->subSeconds(10), 'updated_at' => now()->subSeconds(10)] + $base,
+        ['id' => '019df800-2222-7000-8000-000000000012', 'role' => 'user', 'content' => "[approval]\nstatus: approved\nentity_type: people\nrecord_id: 01abc\n", 'origin' => 'resume', 'created_at' => now()->subSeconds(10), 'updated_at' => now()->subSeconds(10)] + $base,
         ['id' => '019df800-2222-7000-8000-000000000013', 'role' => 'assistant', 'content' => 'Now proposing the linked task.', 'created_at' => now(), 'updated_at' => now()] + $base,
     ]);
 
@@ -52,5 +53,5 @@ it('hides synthetic [approval] user messages from the visible message list', fun
     expect(implode("\n", $contents))->toContain('I have proposed creating a person.');
     expect(implode("\n", $contents))->toContain('Now proposing the linked task.');
 
-    expect($contents)->each->not->toStartWith('[approval]');
+    expect(array_column($messages, 'id'))->not->toContain('019df800-2222-7000-8000-000000000012');
 });

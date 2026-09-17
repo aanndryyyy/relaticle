@@ -2,6 +2,13 @@
 
 declare(strict_types=1);
 
+use Illuminate\Contracts\Database\Eloquent\Builder as EloquentBuilderContract;
+use Illuminate\Contracts\Database\Query\Builder as QueryBuilderContract;
+use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Scope;
+use Illuminate\Database\Query\Builder as QueryBuilder;
+
 /**
  * Guards documented conventions that pest-arch and PHPStan cannot express.
  * Each check enforces a rule stated in .ai/guidelines/relaticle/.
@@ -161,6 +168,73 @@ it('keeps every action on the canonical single-execute() shape', function (): vo
     expect($violations)->toBe(
         [],
         'Actions expose exactly one public method, execute() (.ai/guidelines/relaticle/architecture.md). Fix: '.json_encode($violations),
+    );
+});
+
+it('keeps reusable query predicates on their model as scopes', function (): void {
+    $root = dirname(__DIR__, 2);
+
+    $builders = [EloquentBuilder::class, QueryBuilder::class, EloquentBuilderContract::class, QueryBuilderContract::class];
+
+    $allowed = [
+        'Relaticle\SystemAdmin\Filament\Support\PivotSafeTableQuery::apply',
+    ];
+
+    $sources = ['App\\' => $root.'/app/'];
+
+    foreach (glob($root.'/packages/*/src', GLOB_ONLYDIR) ?: [] as $directory) {
+        $sources['Relaticle\\'.basename(dirname($directory)).'\\'] = $directory.'/';
+    }
+
+    $violations = [];
+
+    foreach ($sources as $namespace => $directory) {
+        $files = new RegexIterator(
+            new RecursiveIteratorIterator(new RecursiveDirectoryIterator($directory)),
+            '/\.php$/',
+        );
+
+        foreach ($files as $file) {
+            $class = $namespace.str_replace(['/', '.php'], ['\\', ''], mb_substr((string) $file, mb_strlen($directory)));
+
+            if (! class_exists($class)) {
+                continue;
+            }
+
+            $reflection = new ReflectionClass($class);
+
+            if ($reflection->isEnum()
+                || $reflection->isSubclassOf(Model::class)
+                || $reflection->isSubclassOf(EloquentBuilder::class)
+                || $reflection->implementsInterface(Scope::class)) {
+                continue;
+            }
+
+            foreach ($reflection->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+                if ($method->getFileName() !== $reflection->getFileName() || $method->hasPrototype()) {
+                    continue;
+                }
+
+                foreach ($method->getParameters() as $parameter) {
+                    $type = $parameter->getType();
+                    $types = $type instanceof ReflectionUnionType ? $type->getTypes() : [$type];
+                    $names = array_map(fn (?ReflectionType $named): string => $named instanceof ReflectionNamedType ? $named->getName() : '', $types);
+
+                    if (array_intersect($names, $builders) !== []) {
+                        $violations[] = "{$class}::{$method->getName()}";
+
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    $violations = array_values(array_diff($violations, $allowed));
+
+    expect($violations)->toBe(
+        [],
+        'A reusable query predicate is a #[Scope] on its model, read from DB::table callers through ->toBase() (.ai/guidelines/relaticle/architecture.md). Fix: '.implode(', ', $violations),
     );
 });
 
