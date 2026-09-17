@@ -22,8 +22,11 @@ use App\Http\Controllers\ComparisonController;
 use App\Http\Controllers\ContactController;
 use App\Http\Controllers\Dev\MailPreviewController;
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\Impersonation\StartImpersonationController;
+use App\Http\Controllers\Impersonation\StopImpersonationController;
 use App\Http\Controllers\JoinWorkspaceViaLinkController;
 use App\Http\Controllers\Mail\UnsubscribeController;
+use App\Http\Controllers\Media\ShowMediaController;
 use App\Http\Controllers\PrivacyPolicyController;
 use App\Http\Controllers\SwitchInvitationAccountController;
 use App\Http\Controllers\TermsOfServiceController;
@@ -50,7 +53,7 @@ use Spatie\MarkdownResponse\Middleware\ProvideMarkdownResponse;
 */
 
 Route::middleware('guest')->group(function () {
-    if (Feature::active(SocialAuth::class)) {
+    if (Feature::for(null)->active(SocialAuth::class)) {
         Route::get('/auth/redirect/{provider}', RedirectController::class)
             ->name('auth.socialite.redirect')
             ->middleware('throttle:10,1,socialite-redirect');
@@ -70,7 +73,7 @@ Route::middleware('guest')->group(function () {
 });
 
 Route::middleware('auth')->group(function (): void {
-    if (Feature::active(SocialAuth::class)) {
+    if (Feature::for(null)->active(SocialAuth::class)) {
         // Confirmation intent, not login: a linked provider re-authenticated here
         // proves current access to that identity for one sensitive operation.
         // Distinct from the link routes below, which establish a new association.
@@ -137,6 +140,10 @@ Route::middleware(['signed', 'throttle:30,1,mail-unsubscribe', 'no-referrer'])->
         ->name('mail.unsubscribe.store');
 });
 
+Route::get('/media/{media:uuid}', ShowMediaController::class)
+    ->middleware(['signed', 'throttle:300,1'])
+    ->name('media.show');
+
 Route::middleware([ProvideMarkdownResponse::class, AddVaryAcceptHeader::class])->group(function (): void {
     Route::get('/', HomeController::class);
     Route::get('/terms-of-service', TermsOfServiceController::class)->name('terms.show');
@@ -153,6 +160,17 @@ Route::middleware([ProvideMarkdownResponse::class, AddVaryAcceptHeader::class])-
 });
 
 Route::get('/dashboard', fn () => redirect()->to(url()->getAppUrl()))->name('dashboard');
+
+// Minted on the sysadmin host, consumed on the app host: the two keep separate
+// sessions, so the signed link carries the administrator instead of a guard.
+Route::prefix('impersonate')->group(function (): void {
+    Route::get('/{user}', StartImpersonationController::class)
+        ->middleware('signed:relative')
+        ->name('impersonation.start');
+
+    Route::delete('/', StopImpersonationController::class)
+        ->name('impersonation.stop');
+});
 
 Route::middleware(['auth', 'verified', 'no-referrer', AuthenticateSession::class])->group(function (): void {
     // Separate buckets: a shared one lets repeated views of the invite page
@@ -212,7 +230,7 @@ $legacyDocsRedirect = function (DocsRepository $repository, string $slug = ''): 
         : redirect('/developers', 301);
 };
 
-if (Feature::active(Documentation::class)) {
+if (Feature::for(null)->active(Documentation::class)) {
     Route::get('/documentation/{slug?}', $legacyDocsRedirect)->where('slug', '.*');
     Route::get('/docs/{slug?}', $legacyDocsRedirect)->where('slug', '.*');
 }

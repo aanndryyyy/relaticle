@@ -102,7 +102,7 @@ it('does not lowercase the leading acronym of an extensibility fact in alternati
     $html = $this->get('/alternatives/hubspot')->assertOk()->getContent();
 
     expect($html)->not->toContain('rEST')
-        ->and($html)->toContain('Relaticle&#039;s extensibility: REST API plus a 37-tool MCP server');
+        ->and($html)->toContain('Relaticle&#039;s extensibility: REST API plus a 39-tool MCP server');
 });
 
 it('keeps Attio FAQ structured data consistent with readable answers', function (): void {

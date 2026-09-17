@@ -4,12 +4,12 @@ declare(strict_types=1);
 
 use App\Enums\CustomFieldType;
 use App\Mcp\Resources\CompanySchemaResource;
-use App\Mcp\Resources\Concerns\ResolvesEntitySchema;
 use App\Mcp\Resources\NoteSchemaResource;
 use App\Mcp\Resources\OpportunitySchemaResource;
 use App\Mcp\Resources\PeopleSchemaResource;
 use App\Mcp\Resources\TaskSchemaResource;
 use App\Mcp\Schema\CustomFieldFilterSchema;
+use App\Mcp\Schema\CustomFieldSchema;
 use App\Mcp\Servers\RelaticleServer;
 use App\Mcp\Tools\GetCrmSchemaTool;
 use App\Models\CustomField;
@@ -18,16 +18,17 @@ use App\Models\CustomFieldSection;
 use App\Models\User;
 use App\Providers\AppServiceProvider;
 use Illuminate\Testing\Fluent\AssertableJson;
+use Relaticle\CustomFields\Facades\CustomFieldsType;
 
 mutates(
     AppServiceProvider::class,
     CompanySchemaResource::class,
     CustomFieldFilterSchema::class,
+    CustomFieldSchema::class,
     GetCrmSchemaTool::class,
     NoteSchemaResource::class,
     OpportunitySchemaResource::class,
     PeopleSchemaResource::class,
-    ResolvesEntitySchema::class,
     TaskSchemaResource::class,
 );
 
@@ -242,8 +243,8 @@ it('describes hyphenated choice and datetime field types correctly', function ()
     RelaticleServer::actingAs($this->user)
         ->resource(CompanySchemaResource::class)
         ->assertOk()
-        ->assertSee('array of option labels or IDs (see options)')
-        ->assertSee('option label or option ID (see options)')
+        ->assertSee('array of option labels or IDs')
+        ->assertSee('option label or option ID')
         ->assertSee('ISO 8601 datetime string')
         ->assertSee('Enterprise')
         ->assertSee('High');
@@ -397,11 +398,11 @@ function customFieldHintRows(): array
         ['link', 'array of URL strings'],
         ['checkbox', '"input_format": "boolean"'],
         ['toggle', '"input_format": "boolean"'],
-        ['select', 'option label or option ID (see options)'],
-        ['radio', 'option label or option ID (see options)'],
-        ['toggle-buttons', 'option label or option ID (see options)'],
-        ['multi-select', 'array of option labels or IDs (see options)'],
-        ['checkbox-list', 'array of option labels or IDs (see options)'],
+        ['select', 'option label or option ID'],
+        ['radio', 'option label or option ID'],
+        ['toggle-buttons', 'option label or option ID'],
+        ['multi-select', 'array of option labels or IDs'],
+        ['checkbox-list', 'array of option labels or IDs'],
         ['tags-input', 'array of arbitrary string values'],
         ['rich-editor', 'markdown, or HTML when the value starts with'],
         ['color-picker', 'hex color string'],
@@ -414,11 +415,55 @@ function customFieldHintRows(): array
 it('exercises the hint of every custom field type a tenant can create', function (): void {
     $exercised = array_column(customFieldHintRows(), 0);
 
-    $creatable = array_values(array_diff(
+    $configurator = config('custom-fields.field_type_configuration');
+
+    $creatable = array_values(array_filter(
         array_map(fn (CustomFieldType $case): string => $case->value, CustomFieldType::cases()),
-        // file-upload is disabled product-wide (config/custom-fields.php) and its writes ship in #699.
-        [CustomFieldType::FILE_UPLOAD->value],
+        fn (string $type): bool => $configurator->isFieldTypeAllowed($type),
     ));
 
     expect($exercised)->toEqualCanonicalizing($creatable);
+});
+
+it('has a custom field type case for every type the package registers', function (): void {
+    $missing = CustomFieldsType::toCollection()
+        ->pluck('key')
+        ->filter(fn (string $key): bool => CustomFieldType::tryFrom($key) === null)
+        ->values()
+        ->all();
+
+    expect($missing)->toBe([], 'Every enabled package field type needs an App\\Enums\\CustomFieldType case, or the MCP schema throws on it.');
+});
+
+it('serves the schema when a stored field carries a retired type with no enum case', function (): void {
+    $workspace = $this->user->personalWorkspace();
+
+    CustomField::query()->create([
+        'tenant_id' => $workspace->id,
+        'entity_type' => 'company',
+        'code' => 'legacy_brief',
+        'name' => 'Legacy Brief',
+        'type' => 'markdown-editor',
+        'sort_order' => 1,
+        'active' => true,
+        'validation_rules' => [],
+    ]);
+
+    CustomField::query()->create([
+        'tenant_id' => $workspace->id,
+        'entity_type' => 'company',
+        'code' => 'live_note',
+        'name' => 'Live Note',
+        'type' => 'text',
+        'sort_order' => 2,
+        'active' => true,
+        'validation_rules' => [],
+    ]);
+
+    RelaticleServer::actingAs($this->user)
+        ->resource(CompanySchemaResource::class)
+        ->assertOk()
+        ->assertHasNoErrors()
+        ->assertSee('live_note')
+        ->assertDontSee('legacy_brief');
 });

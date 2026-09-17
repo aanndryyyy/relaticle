@@ -6,6 +6,8 @@ namespace App\Http\Resources\V1\Concerns;
 
 use App\Enums\CustomFieldType;
 use App\Support\CustomFields\RecordNameResolver;
+use App\Support\Media\MediaLookup;
+use App\Support\Media\RichContentAttachments;
 use Illuminate\Contracts\Pagination\Paginator;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -17,7 +19,10 @@ trait FormatsCustomFields
 {
     public static function collection(mixed $resource): AnonymousResourceCollection
     {
-        resolve(RecordNameResolver::class)->prime($resource instanceof Paginator ? $resource->items() : $resource);
+        $records = $resource instanceof Paginator ? $resource->items() : $resource;
+
+        resolve(RecordNameResolver::class)->prime($records);
+        resolve(MediaLookup::class)->prime($records);
 
         return parent::collection($resource);
     }
@@ -46,6 +51,10 @@ trait FormatsCustomFields
 
         if ($customField->type === CustomFieldType::RECORD->value) {
             return $this->resolveRecordValue($customField, $rawValue);
+        }
+
+        if ($customField->type === CustomFieldType::RICH_EDITOR->value && is_string($rawValue)) {
+            return RichContentAttachments::forWorkspace((string) $fieldValue->getAttribute('tenant_id'))->rewriteAttachmentUrls($rawValue);
         }
 
         if (! $customField->typeData->dataType->isChoiceField()) {

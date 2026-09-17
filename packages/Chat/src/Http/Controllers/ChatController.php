@@ -26,21 +26,25 @@ use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Laravel\Pennant\Feature;
+use Relaticle\Chat\Actions\CreateConversation;
 use Relaticle\Chat\Actions\DeleteConversation;
 use Relaticle\Chat\Actions\ListConversations;
+use Relaticle\Chat\Actions\MarkAttachmentSent;
 use Relaticle\Chat\Actions\RenameConversation;
+use Relaticle\Chat\Actions\StoreImportHandoff;
 use Relaticle\Chat\Jobs\GenerateConversationTitle;
 use Relaticle\Chat\Jobs\ProcessChatMessage;
+use Relaticle\Chat\Models\AgentConversationMessage;
 use Relaticle\Chat\Models\AiCreditBalance;
 use Relaticle\Chat\Services\AiModelResolver;
 use Relaticle\Chat\Services\CreditService;
 use Relaticle\Chat\Services\ModelRegistry;
 use Relaticle\Chat\Services\TipTapDocumentParser;
+use Relaticle\Chat\Support\AttachedRows;
+use Relaticle\Chat\Support\ChatAttachment;
 use Relaticle\Chat\Support\ConversationTitleGate;
 use Relaticle\Chat\Support\ModelDescriptor;
 use Relaticle\Chat\Support\RecordReferenceResolver;
-use Relaticle\Chat\Support\TitleSanitizer;
-use Relaticle\Chat\Support\TranscriptScope;
 use Relaticle\Chat\Support\TurnPresence;
 
 final readonly class ChatController
@@ -56,6 +60,9 @@ final readonly class ChatController
         private AiModelResolver $modelResolver,
         private ModelRegistry $registry,
         private TipTapDocumentParser $documentParser,
+        private StoreImportHandoff $importHandoffs,
+        private MarkAttachmentSent $markAttachmentSent,
+        private CreateConversation $createConversation,
     ) {}
 
     /** @return list<string> */
@@ -84,6 +91,7 @@ final readonly class ChatController
             'document' => ['required', 'array'],
             'model' => ['nullable', 'string', Rule::in($this->modelIds())],
             'conversation_id' => ['nullable', 'string', 'uuid'],
+            'attachment_id' => ['nullable', 'string', 'uuid'],
             'page_context' => ['nullable', 'array'],
             'page_context.type' => ['required_with:page_context', 'string', 'max:32'],
             'page_context.id' => ['required_with:page_context', 'string', 'max:26'],
@@ -93,9 +101,14 @@ final readonly class ChatController
         $user = $request->user();
         $workspace = $user->currentWorkspace;
 
-        $parsed = $this->documentParser->parse($validated['document'], $workspace);
+        $conversation ??= $validated['conversation_id'] ?? null;
 
-        if ($parsed['text'] === '') {
+        abort_if($conversation === null, 422, 'conversation_id is required.');
+
+        $parsed = $this->documentParser->parse($validated['document'], $workspace);
+        $attachment = $this->resolveAttachment($validated['attachment_id'] ?? null, $user, $conversation);
+
+        if ($parsed['text'] === '' && ! $attachment instanceof ChatAttachment) {
             throw ValidationException::withMessages([
                 'document' => 'Message is empty.',
             ]);
@@ -106,10 +119,6 @@ final readonly class ChatController
                 'document' => 'Message is too long.',
             ]);
         }
-
-        $conversation ??= $validated['conversation_id'] ?? null;
-
-        abort_if($conversation === null, 422, 'conversation_id is required.');
 
         $existing = DB::table('agent_conversations')->where('id', $conversation)->first();
 
@@ -137,6 +146,21 @@ final readonly class ChatController
                     'upgrade_url' => $isFree ? $this->billingUrl($workspace) : null,
                 ], 403);
             }
+        }
+
+        $message = $attachment instanceof ChatAttachment
+            ? AttachedRows::inline($parsed['text'], $attachment)
+            : $parsed['text'];
+
+        if ($message === null) {
+            $stored = $this->importHandoffs->execute($user, $workspace, $conversation, $attachment, $parsed['text'], $validated['document']);
+
+            return response()->json([
+                'status' => 'stored',
+                'conversation_id' => $conversation,
+                'title' => $existing->title,
+                ...$stored,
+            ]);
         }
 
         $turnId = (string) Str::ulid();
@@ -195,7 +219,12 @@ final readonly class ChatController
         $resolved = $this->modelResolver->resolve($user, $validated['model'] ?? null);
         $pageContext = $this->resolvePageContext($validated['page_context'] ?? null, $user);
 
-        $this->maybeTitleConversation($conversation, $parsed['text'], $resolved['provider'], $pageContext);
+        $this->maybeTitleConversation(
+            $conversation,
+            $attachment instanceof ChatAttachment && $parsed['text'] === '' ? $attachment->name() : $parsed['text'],
+            $resolved['provider'],
+            $pageContext,
+        );
 
         TurnPresence::begin(
             $conversation,
@@ -209,19 +238,48 @@ final readonly class ChatController
         dispatch(new ProcessChatMessage(
             user: $user,
             workspace: $workspace,
-            message: $parsed['text'],
+            message: $message,
             conversationId: $conversation,
             resolved: $resolved,
             mentions: $parsed['mentions'],
             document: $validated['document'],
             pageContext: $pageContext,
             turnId: $turnId,
+            attachment: $attachment?->meta(),
         ));
+
+        if ($attachment instanceof ChatAttachment) {
+            $this->markAttachmentSent->execute($attachment);
+        }
 
         return response()->json([
             'status' => 'processing',
             'conversation_id' => $conversation,
         ]);
+    }
+
+    // An upload is bound to the conversation it was made in; a message in
+    // another conversation cannot pick it up.
+    private function resolveAttachment(?string $attachmentId, User $user, ?string $conversation = null): ?ChatAttachment
+    {
+        if ($attachmentId === null) {
+            return null;
+        }
+
+        $attachment = ChatAttachment::find($user, $attachmentId);
+
+        $usable = $attachment instanceof ChatAttachment
+            && ! $attachment->isSent()
+            && $attachment->fileExists()
+            && ($conversation === null || $attachment->conversationId() === $conversation);
+
+        if (! $usable) {
+            throw ValidationException::withMessages([
+                'attachment_id' => __('That attachment is no longer available. Attach the file again.'),
+            ]);
+        }
+
+        return $attachment;
     }
 
     /**
@@ -312,6 +370,7 @@ final readonly class ChatController
         $validated = $request->validate([
             'document' => ['required', 'array'],
             'model' => ['nullable', 'string', Rule::in($this->modelIds())],
+            'attachment_id' => ['nullable', 'string', 'uuid'],
         ]);
 
         /** @var User $user */
@@ -321,8 +380,9 @@ final readonly class ChatController
         abort_if($workspace === null, 403);
 
         $parsed = $this->documentParser->parse($validated['document'], $workspace);
+        $attachment = $this->resolveAttachment($validated['attachment_id'] ?? null, $user);
 
-        if ($parsed['text'] === '') {
+        if ($parsed['text'] === '' && ! $attachment instanceof ChatAttachment) {
             throw ValidationException::withMessages([
                 'document' => 'Message is empty.',
             ]);
@@ -334,19 +394,13 @@ final readonly class ChatController
             ]);
         }
 
-        $conversationId = (string) Str::uuid7();
+        $title = $attachment instanceof ChatAttachment && $parsed['text'] === ''
+            ? $attachment->name()
+            : $parsed['text'];
 
-        DB::table('agent_conversations')->insert([
-            'id' => $conversationId,
-            'participant_type' => $user->getMorphClass(),
-            'participant_id' => (string) $user->getKey(),
-            'workspace_id' => $workspace->getKey(),
-            'title' => TitleSanitizer::clean($parsed['text']),
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        $conversation = $this->createConversation->execute($user, $workspace, $title, $attachment);
 
-        return response()->json(['conversation_id' => $conversationId]);
+        return response()->json(['conversation_id' => (string) $conversation->getKey()]);
     }
 
     public function cancel(Request $request, string $conversationId): JsonResponse
@@ -381,7 +435,7 @@ final readonly class ChatController
      *
      * anchor_id targets a persisted user message; when the client only has an
      * optimistic (not yet persisted) message it sends anchor_content instead,
-     * which must match the latest user row. A mismatch means that row belongs
+     * which must match the latest typed user row. A mismatch means that row belongs
      * to an OLDER turn (the optimistic one never persisted), and superseding it
      * would hide a good turn, so we refuse and supersede nothing.
      */
@@ -414,13 +468,18 @@ final readonly class ChatController
                 ->first();
 
             abort_if($anchor === null, 404);
-            abort_if((string) $anchor->role !== 'user', 422, 'Only user messages can anchor a supersede.');
+            abort_unless(
+                AgentConversationMessage::query()->typed()->whereKey($anchorId)->exists(),
+                422,
+                'Only user messages can anchor a supersede.',
+            );
         } else {
-            $anchor = DB::table('agent_conversation_messages')
+            $anchor = AgentConversationMessage::query()
+                ->typed()
                 ->where('conversation_id', $conversationId)
-                ->where('role', 'user')
                 ->whereNull('superseded_at')
                 ->orderByDesc('id')
+                ->toBase()
                 ->first();
 
             if ($anchor === null) {
@@ -446,10 +505,11 @@ final readonly class ChatController
     /**
      * Search within one conversation.
      *
-     * Scoped through TranscriptScope, the same predicate set the pager applies,
-     * so every id returned here is one the transcript can actually reach. A hit
-     * the pager could never render would send the client's load-until-found
-     * loop all the way to the top of the history and then report nothing.
+     * Scoped through AgentConversationMessage::visibleTo(), the same predicate
+     * set the pager applies, so every id returned here is one the transcript can
+     * actually reach. A hit the pager could never render would send the client's
+     * load-until-found loop all the way to the top of the history and then
+     * report nothing.
      *
      * `q` is a user-supplied pattern, so it goes through LikePattern::escape
      * before the ILIKE: a literal `%` or `_` typed into the search box must
@@ -476,15 +536,13 @@ final readonly class ChatController
 
         $escaped = LikePattern::escape($validated['q']);
 
-        $matches = TranscriptScope::apply(
-            DB::table('agent_conversation_messages as m'),
-            $user,
-            $conversationId,
-        )
-            ->where('m.content', 'ilike', "%{$escaped}%")
-            ->orderByDesc('m.id')
+        $matches = AgentConversationMessage::query()
+            ->visibleTo($user, $conversationId)
+            ->where('content', 'ilike', "%{$escaped}%")
+            ->orderByDesc('id')
             ->limit(self::SEARCH_MATCH_LIMIT)
-            ->get(['m.id', 'm.content']);
+            ->toBase()
+            ->get(['id', 'content']);
 
         return response()->json([
             'matches' => $matches

@@ -6,7 +6,7 @@ namespace App\Jobs;
 
 use App\Enums\CustomFields\CompanyField;
 use App\Models\Company;
-use App\Services\Favicon\SsrfGuard;
+use App\Support\Http\SsrfGuard;
 use AshAllenDesign\FaviconFetcher\Facades\Favicon;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;

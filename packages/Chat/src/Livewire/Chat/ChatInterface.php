@@ -4,21 +4,22 @@ declare(strict_types=1);
 
 namespace Relaticle\Chat\Livewire\Chat;
 
+use App\Actions\Onboarding\StartSetupGreeting;
 use App\Livewire\BaseLivewireComponent;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\Date;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Livewire\Attributes\Renderless;
 use Relaticle\Chat\Actions\FindConversation;
 use Relaticle\Chat\Actions\ListConversationMessages;
+use Relaticle\Chat\Enums\MessageOrigin;
 use Relaticle\Chat\Enums\PendingActionStatus;
+use Relaticle\Chat\Models\AgentConversationMessage;
 use Relaticle\Chat\Models\PendingAction;
 use Relaticle\Chat\Support\DisplayBlocks;
 use Relaticle\Chat\Support\NextSteps;
 use Relaticle\Chat\Support\RecordReferenceResolver;
 use Relaticle\Chat\Support\TitleSanitizer;
-use Relaticle\Chat\Support\TranscriptScope;
 use Relaticle\Chat\Support\TurnPresence;
 
 final class ChatInterface extends BaseLivewireComponent
@@ -64,7 +65,7 @@ final class ChatInterface extends BaseLivewireComponent
     private const int MAX_PROMPT_LENGTH = 5000;
 
     /**
-     * @var array<int, array{id?: string, role: string, content: string, created_at?: ?string, document?: array<string, mixed>, pending_actions?: array<int, mixed>, display_blocks?: list<array<string, mixed>>, next_steps?: list<array{label: string, prompt: string}>, feedback?: array{rating: string, category: ?string}|null, mentions?: list<array{type: string, id: string, label: string, url?: ?string}>, page_context?: array{type: string, id: string, label: string, url?: ?string}|null}>
+     * @var array<int, array{id?: string, role: string, content: string, created_at?: ?string, document?: array<string, mixed>, pending_actions?: array<int, mixed>, display_blocks?: list<array<string, mixed>>, next_steps?: list<array{label: string, prompt: string}>, feedback?: array{rating: string, category: ?string}|null, mentions?: list<array{type: string, id: string, label: string, url?: ?string}>, page_context?: array{type: string, id: string, label: string, url?: ?string}|null, attachment?: array{id: string, name: string, row_count: int}|null}>
      */
     public array $messages = [];
 
@@ -100,7 +101,22 @@ final class ChatInterface extends BaseLivewireComponent
             $this->oldestMessageId = $this->messages === [] ? null : ($this->messages[0]['id'] ?? null);
             $this->hasMoreMessages = count($this->messages) === self::PAGE_SIZE;
             $this->appendInFlightTurnState($this->conversationId);
+            $this->greetIfSetupConversation($this->conversationId);
         }
+    }
+
+    /**
+     * The setup conversation is seeded empty, so opening it is what makes the
+     * assistant speak. Arming turnInFlight here paints the thread as working
+     * from the first frame, the same as a reload mid-turn does.
+     */
+    private function greetIfSetupConversation(string $conversationId): void
+    {
+        if ($this->messages !== [] || $this->turnInFlight) {
+            return;
+        }
+
+        $this->turnInFlight = resolve(StartSetupGreeting::class)->execute($this->authUser(), $conversationId);
     }
 
     /**
@@ -128,7 +144,7 @@ final class ChatInterface extends BaseLivewireComponent
         if ($presence !== null && ! $this->turnAlreadyPersisted($presence['started_at'])) {
             $this->turnInFlight = true;
 
-            if ($presence['kind'] === 'message') {
+            if ($presence['origin'] === MessageOrigin::Typed->value) {
                 $this->messages[] = $this->inFlightUserMessage($presence);
             }
         }
@@ -182,7 +198,7 @@ final class ChatInterface extends BaseLivewireComponent
      * The in-flight user message, shaped like a ListConversationMessages row so
      * the client renders it exactly as the persisted one will after the turn.
      *
-     * @param  array{kind: string, message: string, document: array<string, mixed>, mentions: list<array{type: string, id: string, label: string}>, page_context: array{type: string, id: string, label: string}|null, started_at: string}  $presence
+     * @param  array{origin: string, message: string, document: array<string, mixed>, mentions: list<array{type: string, id: string, label: string}>, page_context: array{type: string, id: string, label: string}|null, started_at: string}  $presence
      * @return array{role: string, content: string, created_at: string, document: array<string, mixed>, pending_actions: array<int, mixed>, display_blocks: list<array<string, mixed>>, next_steps: list<array{label: string, prompt: string}>, feedback: null, mentions: list<array{type: string, id: string, label: string, url: ?string}>, page_context: array{type: string, id: string, label: string, url: ?string}|null}
      */
     private function inFlightUserMessage(array $presence): array
@@ -299,11 +315,13 @@ final class ChatInterface extends BaseLivewireComponent
 
         $user = $this->authUser();
 
-        $row = TranscriptScope::apply(DB::table('agent_conversation_messages as m'), $user, $conversationId)
-            ->where('m.role', 'assistant')
-            ->latest('m.created_at')
-            ->orderByDesc('m.id')
-            ->first(['m.id', 'm.content', 'm.tool_results', 'm.meta']);
+        $row = AgentConversationMessage::query()
+            ->visibleTo($user, $conversationId)
+            ->where('role', 'assistant')
+            ->latest()
+            ->orderByDesc('id')
+            ->toBase()
+            ->first(['id', 'content', 'tool_results', 'meta']);
 
         if ($row === null) {
             return null;

@@ -16,6 +16,7 @@ use App\Notifications\Auth\VerifyEmail;
 use App\Observers\UserObserver;
 use Carbon\CarbonImmutable;
 use Database\Factories\UserFactory;
+use DateTimeZone;
 use Exception;
 use Filament\Facades\Filament;
 use Filament\Models\Contracts\FilamentUser;
@@ -39,6 +40,7 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Date;
 use Laravel\Fortify\Contracts\PasskeyUser;
 use Laravel\Fortify\PasskeyAuthenticatable;
 use Laravel\Fortify\TwoFactorAuthenticatable;
@@ -203,6 +205,40 @@ final class User extends Authenticatable implements FilamentUser, HasAvatar, Has
     {
         return $query->whereNotNull('scheduled_deletion_at')
             ->where('scheduled_deletion_at', '<=', now());
+    }
+
+    /**
+     * @param  Builder<User>  $query
+     * @return Builder<User>
+     */
+    #[Scope]
+    protected function memberOf(Builder $query, Workspace $workspace): Builder
+    {
+        return $query->where(function (Builder $members) use ($workspace): void {
+            $members->whereKey($workspace->user_id)
+                ->orWhereHas('workspaces', fn (Builder $workspaces): Builder => $workspaces->whereKey($workspace->getKey()));
+        });
+    }
+
+    /**
+     * @param  Builder<User>  $query
+     * @return Builder<User>
+     */
+    #[Scope]
+    protected function atLocalHour(Builder $query, int $hour): Builder
+    {
+        $timezones = array_values(array_filter(
+            DateTimeZone::listIdentifiers(),
+            fn (string $timezone): bool => (int) Date::now($timezone)->format('G') === $hour,
+        ));
+
+        return $query->where(function (Builder $local) use ($timezones): void {
+            $local->whereIn('timezone', $timezones);
+
+            if (in_array((string) config('app.timezone'), $timezones, true)) {
+                $local->orWhereNull('timezone');
+            }
+        });
     }
 
     /**

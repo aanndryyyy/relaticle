@@ -32,10 +32,11 @@ anatomy mirrors a Laravel app: `src/`, `config/`, `routes/`, `resources/`,
 
 ## Actions (the write path)
 
-All write operations (create, update, delete) go through action classes in
-`app/Actions/<Domain>/`. Never inline business logic in controllers, MCP tools,
-Livewire components, or Filament resources. Actions are the single source of
-truth for business logic and side effects (notifications, syncs, etc.).
+Write operations (create, update, delete) that reach the domain from a transport
+surface go through action classes in `app/Actions/<Domain>/`. Never inline business
+logic in controllers, MCP tools, Livewire components, or Filament resources.
+Actions are the single source of truth for business logic and side effects
+(notifications, syncs, etc.).
 
 The canonical shape is `final readonly`, with a single `execute()` method and
 authorization plus tenant-ownership checks inside the action itself:
@@ -61,11 +62,43 @@ final readonly class CreateOpportunity
   plain `Model::create()`/`->update()` with no extra logic. Side effects
   (e.g., notifications) must still be triggered via `->after()` hooks calling the
   appropriate action
+- An action exists to keep business logic out of transport surfaces and to share one
+  write between callers. A console command is neither: it has no `$user`, so the
+  canonical `abort_unless` plus `assertOwned` shape does not apply. Give a command an
+  action when a second caller shares the write, otherwise the logic lives in `handle()`
 - When reviewing or refactoring code, extract inline business logic into action classes
 - Use `App\Data` (spatie/laravel-data) objects for structured payloads where they
   already exist; don't introduce new patterns
 - Name domain concepts plainly (`Plan`, not `AiPlan`). Context comes from the
-  namespace. Never store the same fact in two places; pick one source of truth
+  namespace
+
+## One fact, one owner
+
+A fact more than one surface publishes gets an owner class, and every surface reads it.
+The working examples: `CustomFieldFilterSchema` owns filter operators,
+`App\Mcp\Schema\CustomFieldSchema` plus `CustomFieldType::inputFormat()` own how a
+custom field is described to an agent, `CrmEntity::titleColumn()` owns the name column.
+Facts that are a pure function of an enum case (a label, a format, a capability) live on
+the enum, never in a private `match` inside a consumer.
+
+The measurement that produced this rule: of four cross-surface axes, the two with an
+owner class had zero drift and the two without had three, including a company owner the
+REST API silently dropped while MCP and chat both wrote it.
+
+`tests/Feature/CRM/SurfaceParityTest.php` is the gate for the surfaces that still carry
+a per-entity copy: API form request, MCP tool, chat tool, MCP schema resource. Adding a
+writable field or a relation include to one of them fails that test until the others
+follow.
+
+A query predicate over one model's columns has one owner too: a `#[Scope]` on that model,
+such as `AgentConversation::ownedBy()` or `AgentConversationMessage::typed()`. Every
+reader goes through it. A `DB::table` reader that wants plain rows keeps them with
+`Model::query()->ownedBy($user)->toBase()` and never copies the `where` clauses. Readers
+that each wrote their own filter drifted: `sentBy()` skipped the typed check and tagged
+users `has-ai-usage` who had never typed. Scoped queries take no table alias, because
+`whereKey()` and `whereRelation()` qualify columns with the table name, which Postgres
+rejects under an alias. `tests/Arch/ConventionsTest.php` fails when a public method
+outside a model, enum, or `Scope` class takes a query builder.
 
 ## i18n enforcement
 

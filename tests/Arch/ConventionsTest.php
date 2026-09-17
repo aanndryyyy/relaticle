@@ -2,6 +2,13 @@
 
 declare(strict_types=1);
 
+use Illuminate\Contracts\Database\Eloquent\Builder as EloquentBuilderContract;
+use Illuminate\Contracts\Database\Query\Builder as QueryBuilderContract;
+use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Scope;
+use Illuminate\Database\Query\Builder as QueryBuilder;
+
 /**
  * Guards documented conventions that pest-arch and PHPStan cannot express.
  * Each check enforces a rule stated in .ai/guidelines/relaticle/.
@@ -37,6 +44,33 @@ it('keeps migrations forward-only (no down methods)', function (): void {
     expect($offenders)->toBe(
         [],
         'Migrations are forward-only (.ai/guidelines/relaticle/core.md). Remove down() from: '.implode(', ', $offenders),
+    );
+});
+
+it('queues only commands that exist from migrations', function (): void {
+    $declared = [];
+
+    foreach (glob(dirname(__DIR__, 2).'/app/Console/Commands/*.php') ?: [] as $file) {
+        if (preg_match('/#\[Signature\(\s*\'([a-z0-9:_-]+)/i', (string) file_get_contents($file), $match) === 1) {
+            $declared[] = $match[1];
+        }
+    }
+
+    $offenders = [];
+
+    foreach (migrationFiles() as $file) {
+        preg_match_all('/Artisan::queue\(\s*\'([^\']+)\'/', (string) file_get_contents($file), $matches);
+
+        foreach ($matches[1] as $name) {
+            if (! in_array($name, $declared, true)) {
+                $offenders[] = basename($file).': '.$name;
+            }
+        }
+    }
+
+    expect($offenders)->toBe(
+        [],
+        'A migration outlives the command it queues (.ai/guidelines/relaticle/core.md). Restore or rename: '.implode(', ', $offenders),
     );
 });
 
@@ -134,6 +168,73 @@ it('keeps every action on the canonical single-execute() shape', function (): vo
     expect($violations)->toBe(
         [],
         'Actions expose exactly one public method, execute() (.ai/guidelines/relaticle/architecture.md). Fix: '.json_encode($violations),
+    );
+});
+
+it('keeps reusable query predicates on their model as scopes', function (): void {
+    $root = dirname(__DIR__, 2);
+
+    $builders = [EloquentBuilder::class, QueryBuilder::class, EloquentBuilderContract::class, QueryBuilderContract::class];
+
+    $allowed = [
+        'Relaticle\SystemAdmin\Filament\Support\PivotSafeTableQuery::apply',
+    ];
+
+    $sources = ['App\\' => $root.'/app/'];
+
+    foreach (glob($root.'/packages/*/src', GLOB_ONLYDIR) ?: [] as $directory) {
+        $sources['Relaticle\\'.basename(dirname($directory)).'\\'] = $directory.'/';
+    }
+
+    $violations = [];
+
+    foreach ($sources as $namespace => $directory) {
+        $files = new RegexIterator(
+            new RecursiveIteratorIterator(new RecursiveDirectoryIterator($directory)),
+            '/\.php$/',
+        );
+
+        foreach ($files as $file) {
+            $class = $namespace.str_replace(['/', '.php'], ['\\', ''], mb_substr((string) $file, mb_strlen($directory)));
+
+            if (! class_exists($class)) {
+                continue;
+            }
+
+            $reflection = new ReflectionClass($class);
+
+            if ($reflection->isEnum()
+                || $reflection->isSubclassOf(Model::class)
+                || $reflection->isSubclassOf(EloquentBuilder::class)
+                || $reflection->implementsInterface(Scope::class)) {
+                continue;
+            }
+
+            foreach ($reflection->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+                if ($method->getFileName() !== $reflection->getFileName() || $method->hasPrototype()) {
+                    continue;
+                }
+
+                foreach ($method->getParameters() as $parameter) {
+                    $type = $parameter->getType();
+                    $types = $type instanceof ReflectionUnionType ? $type->getTypes() : [$type];
+                    $names = array_map(fn (?ReflectionType $named): string => $named instanceof ReflectionNamedType ? $named->getName() : '', $types);
+
+                    if (array_intersect($names, $builders) !== []) {
+                        $violations[] = "{$class}::{$method->getName()}";
+
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    $violations = array_values(array_diff($violations, $allowed));
+
+    expect($violations)->toBe(
+        [],
+        'A reusable query predicate is a #[Scope] on its model, read from DB::table callers through ->toBase() (.ai/guidelines/relaticle/architecture.md). Fix: '.implode(', ', $violations),
     );
 });
 
@@ -271,5 +372,41 @@ it('keeps published copy and source free of em-dashes', function (): void {
         'Em-dashes are banned in copy, docs, and comments (.ai/guidelines/relaticle/writing.md). '.
         "Rewrite the sentence rather than swapping the character; the standalone {$dataGlyph} data glyph is allowed. ".
         'Offending lines: '.implode(', ', array_slice($offenders, 0, 40)),
+    );
+});
+
+it('keeps new file uploads on medialibrary', function (): void {
+    $root = dirname(__DIR__, 2);
+    $allowed = [
+        'app/Filament/CustomFields/RichEditorFieldType.php',
+        'app/Livewire/App/Profile/UpdateProfileInformation.php',
+    ];
+    $offenders = [];
+
+    foreach ([$root.'/app', $root.'/packages'] as $directory) {
+        $files = new RegexIterator(
+            new RecursiveIteratorIterator(new RecursiveDirectoryIterator($directory)),
+            '/\.php$/',
+        );
+
+        /** @var SplFileInfo $file */
+        foreach ($files as $file) {
+            $relative = str_replace($root.'/', '', $file->getPathname());
+
+            if (in_array($relative, $allowed, true)) {
+                continue;
+            }
+
+            $source = (string) file_get_contents($file->getPathname());
+
+            if (preg_match('/\bFileUpload::make\(|->fileAttachments\(|->fileAttachmentsDisk\(|->fileAttachmentsDirectory\(/', $source) === 1) {
+                $offenders[] = $relative;
+            }
+        }
+    }
+
+    expect($offenders)->toBe(
+        [],
+        'Durable uploads go through medialibrary (.ai/rules/file-uploads.md). Offending files: '.implode(', ', $offenders),
     );
 });

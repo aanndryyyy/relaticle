@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Enums\BillingStatus;
+use App\Enums\OnboardingUseCase;
 use App\Enums\Plan;
 use App\Models\ActivityLog\Activity;
 use App\Models\ActivityLog\Scopes\WorkspaceScope;
@@ -22,10 +23,11 @@ use Relaticle\SystemAdmin\Filament\Resources\WorkspaceResource\Pages\ViewWorkspa
 use Relaticle\SystemAdmin\Filament\Resources\WorkspaceResource\RelationManagers\ActivityRelationManager;
 use Relaticle\SystemAdmin\Filament\Resources\WorkspaceResource\RelationManagers\CompaniesRelationManager;
 use Relaticle\SystemAdmin\Filament\Resources\WorkspaceResource\RelationManagers\MembersRelationManager;
+use Relaticle\SystemAdmin\Filament\Support\Impersonate;
 use Relaticle\SystemAdmin\Filament\Support\PivotSafeTableQuery;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
 
-mutates(UpdateCustomerRecord::class, EditCustomerRecord::class, BillingStatus::class, WorkspaceResource::class, MembersRelationManager::class, CompaniesRelationManager::class, ActivityRelationManager::class, PivotSafeTableQuery::class);
+mutates(UpdateCustomerRecord::class, EditCustomerRecord::class, BillingStatus::class, WorkspaceResource::class, MembersRelationManager::class, CompaniesRelationManager::class, ActivityRelationManager::class, PivotSafeTableQuery::class, Impersonate::class);
 
 beforeEach(function (): void {
     $this->actingAs(SystemAdministrator::factory()->create(), 'sysadmin');
@@ -442,4 +444,67 @@ it('prefers a live subscription over a trial that has not run out yet', function
     Subscription::factory()->active()->create(['workspace_id' => $workspace->getKey()]);
 
     expect($workspace->fresh()?->billingStatus())->toBe(BillingStatus::Subscribed);
+});
+
+it('shows what a workspace said it tracks, and its use case details by label', function (): void {
+    $owner = User::factory()->withPersonalWorkspace()->create();
+    $workspace = $owner->ownedWorkspaces()->first();
+    $workspace->forceFill([
+        'onboarding_use_case' => OnboardingUseCase::Sales,
+        'onboarding_context' => ['outbound', 'partner_led'],
+        'onboarding_other_use_case' => 'Wholesale buyers and distributors',
+    ])->save();
+
+    livewire(ViewWorkspace::class, ['record' => $workspace->getKey()])
+        ->assertSuccessful()
+        ->assertSee('Wholesale buyers and distributors')
+        ->assertSee('Outbound')
+        ->assertSee('Partner-led')
+        ->assertDontSee('partner_led');
+});
+
+it('finds a workspace by the free text it gave for its use case', function (): void {
+    $owner = User::factory()->withPersonalWorkspace()->create();
+    $workspace = $owner->ownedWorkspaces()->first();
+    $workspace->forceFill([
+        'onboarding_use_case' => OnboardingUseCase::Other,
+        'onboarding_other_use_case' => 'Grant applications',
+    ])->save();
+
+    $other = User::factory()->withPersonalWorkspace()->create();
+
+    livewire(ListWorkspaces::class)
+        ->searchTable('Grant applications')
+        ->assertCanSeeTableRecords([$workspace])
+        ->assertCanNotSeeTableRecords([$other->ownedWorkspaces()->first()]);
+});
+
+it('offers owner impersonation to super administrators of a workspace that has an owner', function (): void {
+    $workspace = User::factory()->withPersonalWorkspace()->create()->ownedWorkspaces()->firstOrFail();
+    $ownerless = Workspace::factory()->create();
+    $ownerless->owner()->delete();
+
+    livewire(ViewWorkspace::class, ['record' => $workspace->getKey()])
+        ->assertActionVisible('impersonateOwner');
+
+    livewire(ViewWorkspace::class, ['record' => $ownerless->getKey()])
+        ->assertActionHidden('impersonateOwner');
+
+    $this->actingAs(SystemAdministrator::factory()->administrator()->create(), 'sysadmin');
+
+    livewire(ViewWorkspace::class, ['record' => $workspace->getKey()])
+        ->assertActionHidden('impersonateOwner');
+});
+
+it('lands the owner impersonation link in the viewed workspace', function (): void {
+    $workspace = User::factory()->withPersonalWorkspace()->create()->ownedWorkspaces()->firstOrFail();
+
+    $link = livewire(ViewWorkspace::class, ['record' => $workspace->getKey()])
+        ->callAction('impersonateOwner')
+        ->effects['redirect'];
+
+    parse_str((string) parse_url($link, PHP_URL_QUERY), $query);
+
+    expect($link)->toStartWith(url()->getPublicUrl("impersonate/{$workspace->user_id}?"))
+        ->and($query['workspace'])->toBe($workspace->getKey());
 });

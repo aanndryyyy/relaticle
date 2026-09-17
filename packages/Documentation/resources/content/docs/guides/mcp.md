@@ -1,8 +1,8 @@
 ---
 title: MCP Server
-description: Read the reference for Relaticle's 37 MCP tools, with OAuth and personal access token setup, custom field access and direct writes.
+description: Read the reference for Relaticle's 39 MCP tools, with OAuth and personal access token setup, custom field access and direct writes.
 order: 2
-updated: "2026-08-28"
+updated: "2026-09-15"
 ---
 
 MCP (Model Context Protocol) lets AI assistants like Claude work directly with your Relaticle CRM data. Instead of copy-pasting between tools, your AI assistant can list companies, create tasks, update contacts, and more -- all from a natural conversation.
@@ -154,7 +154,7 @@ Add this to your VS Code settings (`.vscode/mcp.json`):
 
 ## Available Tools
 
-The server provides 37 tools. They cover account context, cross-entity discovery, workspace analysis, full CRUD across five CRM entities, and relationship management.
+The server provides 39 tools. They cover account context, cross-entity discovery, workspace analysis, full CRUD across five CRM entities, relationship management, and file uploads.
 
 ### Cross-entity discovery
 
@@ -232,6 +232,15 @@ The server provides 37 tools. They cover account context, cross-entity discovery
 | `delete-note-tool` | Soft-delete a note by ID |
 | `attach-note-to-entities-tool` | Link a note to companies, people, or opportunities. Adds without removing existing links. |
 | `detach-note-from-entities-tool` | Unlink a note from companies, people, or opportunities |
+
+### Files
+
+| Tool | Description |
+|------|-------------|
+| `upload-file` | Store a file in the workspace from a public https URL, a base64 body with `filename`, or an `upload_id`. Returns `suggested_markdown` to embed the file in a rich-editor field such as a note body, plus `file_id` for the stored file. Allowed types: pdf, doc, docx, xlsx, pptx, jpg, jpeg, png, gif, webp, up to 10 MB. 60 calls per hour per workspace. |
+| `create-upload-url` | Get a five-minute signed URL to `PUT` a file body to, then pass the returned `upload_id` to `upload-file`. |
+
+Uploads stay pending for 24 hours. Saving a record whose rich-editor body embeds the file claims it; unclaimed files are purged.
 
 Entity list tools support `search`, `per_page` (default 15, maximum 25), and `page`. They also support date filters, custom-field filters, sorting, and selected relationship includes.
 

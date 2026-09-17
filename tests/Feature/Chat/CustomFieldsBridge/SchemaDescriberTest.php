@@ -22,8 +22,7 @@ it('describes the system-seeded task custom fields with type hints', function ()
         ->toContain('due_date')
         ->toContain('date-time')
         ->toContain('ISO 8601')
-        ->toContain('status')
-        ->toContain('single-choice')
+        ->toContain('status (select')
         ->toContain('"To do"')
         ->toContain('"In progress"')
         ->toContain('"Done"')
@@ -72,7 +71,7 @@ it('lists a deactivated field separately from the settable codes', function (): 
         ->and($inactivePart)->toContain('priority');
 });
 
-it('describes a record field as record ids and a multi-choice field as option labels or ids', function (): void {
+it('describes a record field as record ids and a multi-select field as option labels or ids', function (): void {
     $user = User::factory()->withPersonalWorkspace()->create();
     $workspaceId = $user->currentWorkspace->getKey();
 
@@ -97,6 +96,6 @@ it('describes a record field as record ids and a multi-choice field as option la
         ->toContain('linked_company (record')
         ->toContain('array of record IDs of the lookup entity; records must belong to this workspace')
         ->and($lines->first(fn (string $line): bool => str_contains($line, 'markets')))
-        ->toContain('markets (multi-choice')
+        ->toContain('markets (multi-select')
         ->toContain('array of option labels or IDs');
 });

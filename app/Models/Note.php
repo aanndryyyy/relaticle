@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\CreationSource;
+use App\Enums\MediaCollection;
 use App\Models\Concerns\BelongsToWorkspaceCreator;
 use App\Models\Concerns\HasCreator;
 use App\Models\Concerns\HasWorkspace;
+use App\Support\Media\UploadAllowlist;
 use Carbon\CarbonImmutable;
 use Database\Factories\NoteFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -25,6 +27,8 @@ use Relaticle\CustomFields\Models\Concerns\UsesCustomFields;
 use Relaticle\CustomFields\Models\Contracts\HasCustomFields;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
 use Spatie\Activitylog\Support\LogOptions;
+use Spatie\MediaLibrary\HasMedia;
+use Spatie\MediaLibrary\InteractsWithMedia;
 
 /**
  * @property CarbonImmutable|null $deleted_at
@@ -33,7 +37,7 @@ use Spatie\Activitylog\Support\LogOptions;
 #[Fillable([
     'creation_source',
 ])]
-final class Note extends Model implements HasCustomFields, HasTimeline
+final class Note extends Model implements HasCustomFields, HasMedia, HasTimeline
 {
     use BelongsToWorkspaceCreator;
     use HasCreator;
@@ -43,6 +47,7 @@ final class Note extends Model implements HasCustomFields, HasTimeline
 
     use HasUlids;
     use HasWorkspace;
+    use InteractsWithMedia;
     use InteractsWithTimeline;
     use LogsActivity;
     use SoftDeletes;
@@ -117,6 +122,12 @@ final class Note extends Model implements HasCustomFields, HasTimeline
                 ->orWhereHas('people', fn (Builder $sub) => $sub->where('noteables.noteable_id', $id))
                 ->orWhereHas('opportunities', fn (Builder $sub) => $sub->where('noteables.noteable_id', $id));
         });
+    }
+
+    public function registerMediaCollections(): void
+    {
+        $this->addMediaCollection(MediaCollection::Attachments->value)
+            ->acceptsMimeTypes(UploadAllowlist::mimeTypes());
     }
 
     public function getActivitylogOptions(): LogOptions

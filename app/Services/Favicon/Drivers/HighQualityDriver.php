@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Favicon\Drivers;
 
-use App\Services\Favicon\SsrfGuard;
+use App\Support\Http\SsrfGuard;
 use AshAllenDesign\FaviconFetcher\Collections\FaviconCollection;
 use AshAllenDesign\FaviconFetcher\Concerns\HasDefaultFunctionality;
 use AshAllenDesign\FaviconFetcher\Concerns\MakesHttpRequests;

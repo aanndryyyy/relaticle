@@ -17,7 +17,6 @@ use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Laravel\Passport\AccessToken as PassportAccessToken;
 use Relaticle\CustomFields\Services\TenantContextService;
@@ -130,15 +129,7 @@ final readonly class SetApiWorkspaceContext
 
     private function applyTenantScopes(Workspace $workspace): void
     {
-        $tenantId = $workspace->getKey();
-
-        User::addGlobalScope(
-            'tenant',
-            fn (Builder $query) => $query->where(function (Builder $q) use ($tenantId): void {
-                $q->whereIn('users.id', DB::table('workspace_user')->where('workspace_id', $tenantId)->select('user_id'))
-                    ->orWhere('users.id', DB::table('workspaces')->where('id', $tenantId)->select('user_id'));
-            })
-        );
+        User::addGlobalScope('tenant', fn (Builder $query): Builder => $query->memberOf($workspace));
 
         Company::addGlobalScope(new WorkspaceScope);
         People::addGlobalScope(new WorkspaceScope);

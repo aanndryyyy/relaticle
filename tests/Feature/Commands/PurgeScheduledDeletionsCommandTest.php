@@ -2,11 +2,18 @@
 
 declare(strict_types=1);
 
+use App\Actions\Jetstream\DeleteWorkspace;
+use App\Enums\MediaCollection;
+use App\Models\Note;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Notifications\UserDeletionReminderNotification;
 use App\Notifications\WorkspaceDeletionReminderNotification;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Storage;
+use Spatie\MediaLibrary\MediaCollections\Models\Media;
+
+mutates(DeleteWorkspace::class);
 
 test('expired users are permanently deleted', function () {
     $user = User::factory()->withPersonalWorkspace()->scheduledForDeletion(-1)->create();
@@ -133,4 +140,55 @@ test('ownerless workspaces are skipped without aborting the deletion reminders',
 
     Notification::assertSentTo($owner, WorkspaceDeletionReminderNotification::class);
     Notification::assertSentTimes(WorkspaceDeletionReminderNotification::class, 1);
+});
+
+it('removes every workspace upload during permanent deletion and preserves other workspaces', function (bool $deleteOwner): void {
+    Storage::fake('local');
+    $owner = User::factory()->withWorkspace()->create();
+    $workspace = $owner->currentWorkspace;
+    $otherWorkspace = User::factory()->withWorkspace()->create()->currentWorkspace;
+    $note = Note::factory()->create(['workspace_id' => $workspace->getKey()]);
+    $attachment = $note->addMediaFromString(pdfBytes())->usingFileName('contract.pdf')
+        ->withAttributes(['workspace_id' => $workspace->getKey()])
+        ->toMediaCollection(MediaCollection::Attachments->value);
+    $pending = $workspace->addMediaFromString(pdfBytes())->usingFileName('pending.pdf')
+        ->withAttributes(['workspace_id' => $workspace->getKey()])
+        ->toMediaCollection(MediaCollection::PendingUploads->value);
+    $unrelated = $otherWorkspace->addMediaFromString(pdfBytes())->usingFileName('other.pdf')
+        ->withAttributes(['workspace_id' => $otherWorkspace->getKey()])
+        ->toMediaCollection(MediaCollection::PendingUploads->value);
+    $attachmentPath = $attachment->getPathRelativeToRoot();
+    $pendingPath = $pending->getPathRelativeToRoot();
+    $note->delete();
+    ($deleteOwner ? $owner : $workspace)->update(['scheduled_deletion_at' => now()->subDay()]);
+
+    $this->artisan('app:purge-scheduled-deletions')->assertSuccessful();
+
+    expect(Workspace::query()->find($workspace->getKey()))->toBeNull()
+        ->and(Media::query()->where('workspace_id', $workspace->getKey())->exists())->toBeFalse()
+        ->and($unrelated->fresh())->not->toBeNull();
+    Storage::disk('local')->assertMissing([$attachmentPath, $pendingPath]);
+    Storage::disk('local')->assertExists($unrelated->getPathRelativeToRoot());
+})->with(['workspace deletion' => false, 'owner deletion' => true]);
+
+it('keeps attachment bytes when permanent workspace deletion rolls back', function (): void {
+    Storage::fake('local');
+    $workspace = User::factory()->withWorkspace()->create()->currentWorkspace;
+    $workspace->update(['scheduled_deletion_at' => now()->subDay()]);
+    $note = Note::factory()->create(['workspace_id' => $workspace->getKey()]);
+    $attachment = $note->addMediaFromString(pdfBytes())->usingFileName('contract.pdf')
+        ->withAttributes(['workspace_id' => $workspace->getKey()])
+        ->toMediaCollection(MediaCollection::Attachments->value);
+    Workspace::deleting(function (Workspace $deleting) use ($workspace): void {
+        if ($deleting->is($workspace)) {
+            throw new RuntimeException('Workspace deletion failed');
+        }
+    });
+
+    expect(fn (): int => Artisan::call('app:purge-scheduled-deletions'))
+        ->toThrow(RuntimeException::class, 'Workspace deletion failed');
+
+    expect($workspace->fresh())->not->toBeNull()
+        ->and($attachment->fresh())->not->toBeNull();
+    Storage::disk('local')->assertExists($attachment->getPathRelativeToRoot());
 });

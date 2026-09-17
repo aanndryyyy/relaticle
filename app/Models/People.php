@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\CreationSource;
+use App\Enums\MediaCollection;
 use App\Models\Concerns\BelongsToWorkspaceCreator;
 use App\Models\Concerns\HasCreator;
 use App\Models\Concerns\HasNotes;
 use App\Models\Concerns\HasWorkspace;
 use App\Observers\PeopleObserver;
 use App\Services\AvatarService;
+use App\Support\Media\UploadAllowlist;
 use Carbon\CarbonImmutable;
 use Database\Factories\PeopleFactory;
 use Filament\Models\Contracts\HasAvatar;
@@ -29,6 +31,8 @@ use Relaticle\CustomFields\Models\Concerns\UsesCustomFields;
 use Relaticle\CustomFields\Models\Contracts\HasCustomFields;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
 use Spatie\Activitylog\Support\LogOptions;
+use Spatie\MediaLibrary\HasMedia;
+use Spatie\MediaLibrary\InteractsWithMedia;
 
 /**
  * @property CarbonImmutable|null $deleted_at
@@ -39,7 +43,7 @@ use Spatie\Activitylog\Support\LogOptions;
     'name',
     'creation_source',
 ])]
-final class People extends Model implements HasAvatar, HasCustomFields, HasTimeline
+final class People extends Model implements HasAvatar, HasCustomFields, HasMedia, HasTimeline
 {
     use BelongsToWorkspaceCreator;
     use HasCreator;
@@ -50,6 +54,7 @@ final class People extends Model implements HasAvatar, HasCustomFields, HasTimel
     use HasNotes;
     use HasUlids;
     use HasWorkspace;
+    use InteractsWithMedia;
     use InteractsWithTimeline;
     use LogsActivity;
     use SoftDeletes;
@@ -98,6 +103,12 @@ final class People extends Model implements HasAvatar, HasCustomFields, HasTimel
     public function tasks(): MorphToMany
     {
         return $this->morphToMany(Task::class, 'taskable');
+    }
+
+    public function registerMediaCollections(): void
+    {
+        $this->addMediaCollection(MediaCollection::Attachments->value)
+            ->acceptsMimeTypes(UploadAllowlist::mimeTypes());
     }
 
     public function getActivitylogOptions(): LogOptions
