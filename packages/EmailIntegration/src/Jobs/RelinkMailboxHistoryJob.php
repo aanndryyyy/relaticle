@@ -79,6 +79,9 @@ final class RelinkMailboxHistoryJob implements ShouldBeUnique, ShouldQueue
 
     public function uniqueId(): string
     {
-        return 'relink-history-'.$this->connectedAccount->getKey();
+        $account = $this->connectedAccount->fresh() ?? $this->connectedAccount;
+        $batchId = $account->history_import_batch_id ?? 'none';
+
+        return 'relink-history-'.$account->getKey().'-'.$batchId;
     }
 }

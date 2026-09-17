@@ -225,7 +225,7 @@ it('preserves the stored refresh token when a reconnect returns none', function 
     Bus::assertDispatchedTimes(InitialEmailSyncJob::class, 1);
 });
 
-it('does not restart history import when an active mailbox is reconnected', function (): void {
+it('restarts history import when an active mailbox is reconnected', function (): void {
     Bus::fake();
 
     $user = User::factory()->withWorkspace()->create();
@@ -263,11 +263,12 @@ it('does not restart history import when an active mailbox is reconnected', func
 
     $account = $connect();
 
-    expect($account->sync_cursor)->toBe('history-done')
-        ->and($account->history_import_batch_id)->toBe('batch-1');
+    expect($account->sync_cursor)->toBeNull()
+        ->and($account->history_import_batch_id)->not->toBe('batch-1')
+        ->and($account->history_import_batch_id)->not->toBeNull();
 
-    Bus::assertDispatchedTimes(InitialEmailSyncJob::class, 1);
-    Bus::assertDispatchedTimes(RelinkMailboxHistoryJob::class, 1);
+    Bus::assertDispatchedTimes(InitialEmailSyncJob::class, 2);
+    Bus::assertDispatchedTimes(RelinkMailboxHistoryJob::class, 2);
 });
 
 it('dispatches history import when a disconnected account is reconnected', function (): void {
@@ -398,6 +399,50 @@ it('dispatches history import when reauthenticating a live mailbox whose listing
         ->and($account->history_import_batch_id)->not->toBeNull();
 
     Bus::assertDispatched(InitialEmailSyncJob::class, fn (InitialEmailSyncJob $job): bool => $job->connectedAccount->is($account));
+});
+
+it('dispatches history import when reauthenticating a mailbox that already finished listing', function (): void {
+    Bus::fake();
+
+    $user = User::factory()->withWorkspace()->create();
+    $this->actingAs($user);
+
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'user_id' => $user->getKey(),
+        'workspace_id' => $user->current_workspace_id,
+        'email_address' => 'reauth-done@example.com',
+        'provider' => EmailProvider::GMAIL,
+        'provider_account_id' => 'gmail-reauth-done',
+        'sync_cursor' => 'history-done',
+        'history_import_batch_id' => 'batch-before-reauth',
+        'status' => EmailAccountStatus::REAUTH_REQUIRED,
+    ]));
+
+    $social = new SocialiteUser;
+    $social->id = 'gmail-reauth-done';
+    $social->email = 'reauth-done@example.com';
+    $social->name = 'Demo';
+    $social->token = 'access-token';
+    $social->refreshToken = 'refresh-token';
+    $social->expiresIn = 3600;
+    $social->approvedScopes = [
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.send',
+    ];
+
+    Socialite::fake('gmail', $social);
+    bindMailboxOAuthWorkspace($user);
+    $this->get(route('email-accounts.callback', ['provider' => 'gmail']))->assertRedirect();
+
+    $account->refresh();
+
+    expect($account->status)->toBe(EmailAccountStatus::ACTIVE)
+        ->and($account->history_import_batch_id)->not->toBe('batch-before-reauth')
+        ->and($account->history_import_batch_id)->not->toBeNull()
+        ->and($account->sync_cursor)->toBeNull();
+
+    Bus::assertDispatched(InitialEmailSyncJob::class, fn (InitialEmailSyncJob $job): bool => $job->connectedAccount->is($account));
+    Bus::assertDispatched(RelinkMailboxHistoryJob::class, fn (RelinkMailboxHistoryJob $job): bool => $job->connectedAccount->is($account));
 });
 
 it('does not start a second history import when reauthenticating during listing', function (): void {

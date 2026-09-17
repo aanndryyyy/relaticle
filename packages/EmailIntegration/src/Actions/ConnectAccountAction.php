@@ -44,6 +44,11 @@ final readonly class ConnectAccountAction
                 && ! $existing->trashed()
                 && $this->mailboxHistoryImport->isRunning($existing);
 
+            $restartImportOnLiveReconnect = $existing instanceof ConnectedAccount
+                && ! $existing->trashed()
+                && $existing->sync_cursor !== null
+                && ! $this->mailboxHistoryImport->isRunning($existing);
+
             $values = [
                 'display_name' => $data->displayName,
                 'provider_account_id' => $data->providerAccountId,
@@ -71,9 +76,15 @@ final readonly class ConnectAccountAction
 
             $account = ConnectedAccount::withTrashed()->updateOrCreate($lookup, $values);
 
-            $needsHistoryImport = $account->wasRecentlyCreated || $account->trashed() || $resumeStoppedImport;
+            $needsHistoryImport = ! $importStillDraining
+                && (
+                    $account->wasRecentlyCreated
+                    || $account->trashed()
+                    || $resumeStoppedImport
+                    || $restartImportOnLiveReconnect
+                );
 
-            if ($resumeStoppedImport) {
+            if (! $account->trashed() && ($resumeStoppedImport || $restartImportOnLiveReconnect)) {
                 $account->update(['history_import_batch_id' => null]);
             }
 
