@@ -51,8 +51,16 @@ final class InitialCalendarSyncJob implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        if ($account->calendar_sync_cursor === null) {
-            resolve(MailboxHistoryImportService::class)->touchCalendarImport($account);
+        $import = resolve(MailboxHistoryImportService::class);
+
+        if ($this->pageToken === null) {
+            $batchId = $account->history_import_batch_id;
+
+            if (is_string($batchId) && $batchId !== '') {
+                $import->clearCalendarFailures($batchId);
+            }
+
+            $import->touchCalendarImport($account);
         }
 
         $service = $serviceFactory->make($account);
@@ -89,14 +97,24 @@ final class InitialCalendarSyncJob implements ShouldBeUnique, ShouldQueue
 
     public function failed(Throwable $exception): void
     {
-        resolve(MailboxHistoryImportService::class)->completeCalendarImport($this->connectedAccount, succeeded: false);
+        $account = $this->connectedAccount;
+        $hasHistoryImport = is_string($account->history_import_batch_id) && $account->history_import_batch_id !== '';
+        $import = resolve(MailboxHistoryImportService::class);
 
-        $this->connectedAccount->update([
-            'status' => $this->isAuthError($exception) ? EmailAccountStatus::REAUTH_REQUIRED : EmailAccountStatus::ERROR,
+        if ($hasHistoryImport && $account->calendar_sync_cursor !== null) {
+            $import->failCalendarImport($account);
+        } else {
+            $import->completeCalendarImport($account, succeeded: false);
+        }
+
+        $account->update([
+            'status' => $this->isAuthError($exception)
+                ? EmailAccountStatus::REAUTH_REQUIRED
+                : ($hasHistoryImport ? EmailAccountStatus::ACTIVE : EmailAccountStatus::ERROR),
             'last_error' => $exception->getMessage(),
         ]);
 
-        resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($this->connectedAccount);
+        resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
     }
 
     public function uniqueId(): string
@@ -127,11 +145,16 @@ final class InitialCalendarSyncJob implements ShouldBeUnique, ShouldQueue
             'initial_calendar_sync_imported' => $imported,
         ];
 
-        if (! resolve(MailboxHistoryImportService::class)->historyImportHasUnresolvedEmailFailures($account)) {
+        $import = resolve(MailboxHistoryImportService::class);
+
+        if (! $import->historyImportHasUnresolvedEmailFailures($account)) {
             $update['last_error'] = null;
         }
 
-        if ($nextSyncToken !== null && $nextSyncToken !== '') {
+        $batchId = $account->history_import_batch_id;
+        $keepStoreFailures = is_string($batchId) && $batchId !== '' && $import->calendarFailureCount($batchId) > 0;
+
+        if ($nextSyncToken !== null && $nextSyncToken !== '' && ! $keepStoreFailures) {
             $update['calendar_sync_cursor'] = $nextSyncToken;
         }
 
@@ -148,7 +171,10 @@ final class InitialCalendarSyncJob implements ShouldBeUnique, ShouldQueue
             }
         }
 
-        resolve(MailboxHistoryImportService::class)->completeCalendarImport($account, succeeded: $account->calendar_sync_cursor !== null);
+        $import->completeCalendarImport(
+            $account,
+            succeeded: $account->calendar_sync_cursor !== null && ! $keepStoreFailures,
+        );
 
         resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
 

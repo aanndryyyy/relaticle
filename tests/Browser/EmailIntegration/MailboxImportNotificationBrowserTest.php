@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use App\Models\User;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Relaticle\EmailIntegration\Filament\Pages\EmailAccountsPage;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
@@ -11,7 +10,7 @@ use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 
 mutates(EmailAccountsPage::class, MailboxHistoryImportService::class);
 
-it('retries failed imports from the accounts page callout', function (string $theme): void {
+it('stays in sync on the accounts page after history import store failures', function (string $theme): void {
     $user = User::factory()->withWorkspace()->create();
     $workspace = $user->currentWorkspace;
     $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
@@ -28,17 +27,6 @@ it('retries failed imports from the accounts page callout', function (string $th
         'failed_job_ids' => json_encode(['failed-job']),
         'finished_at' => now()->getTimestamp(),
     ]);
-    insertHistoryImportFailedJob($account, $batchId, 'failed-job');
-
-    Artisan::partialMock()
-        ->shouldReceive('call')
-        ->once()
-        ->with('queue:retry', ['id' => 'failed-job'])
-        ->andReturnUsing(function (): int {
-            DB::table('failed_jobs')->where('uuid', 'failed-job')->delete();
-
-            return 0;
-        });
 
     visit('/app/login')->{$theme}()
         ->type('[id="form.email"]', $user->email)
@@ -47,9 +35,9 @@ it('retries failed imports from the accounts page callout', function (string $th
         ->click('button[type="submit"]')
         ->assertPathIs("/app/{$workspace->slug}")
         ->navigate("/app/{$workspace->slug}/email-settings/accounts")
-        ->waitForText(__('filament/pages/email-accounts.history_import_failure.badge'))
-        ->assertSee(__('filament/pages/email-accounts.actions.retry_failed_import.label'))
-        ->click(__('filament/pages/email-accounts.actions.retry_failed_import.label'))
-        ->waitForText(__('filament/pages/email-accounts.notifications.retry_failed_import_queued.title'))
+        ->waitForText($account->email_address)
+        ->assertSee(__('filament/pages/email-accounts.in_sync'))
+        ->assertDontSee(__('filament/pages/email-accounts.history_import_failure.badge'))
+        ->assertDontSee(__('filament/pages/email-accounts.actions.retry_failed_import.label'))
         ->assertNoJavaScriptErrors();
 })->with(['inLightMode', 'inDarkMode']);

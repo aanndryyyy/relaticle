@@ -11,14 +11,15 @@ use Relaticle\EmailIntegration\Data\CalendarEventData;
 use Relaticle\EmailIntegration\Data\CalendarSyncResult;
 use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
 use Relaticle\EmailIntegration\Jobs\InitialCalendarSyncJob;
+use Relaticle\EmailIntegration\Jobs\InitialSyncPageStoreBatch;
 use Relaticle\EmailIntegration\Jobs\StoreMeetingJob;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Meeting;
 use Relaticle\EmailIntegration\Services\Contracts\CalendarServiceFactoryInterface;
 use Relaticle\EmailIntegration\Services\Contracts\CalendarServiceInterface;
-use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 
-mutates(InitialCalendarSyncJob::class);
+mutates(InitialCalendarSyncJob::class, InitialSyncPageStoreBatch::class);
 
 function invokeInitialCalendarSyncBatchFinallyCallbacks(): void
 {
@@ -528,7 +529,7 @@ it('stores the sync token when the batch completion callback runs', function ():
         ->and($account->fresh()?->last_calendar_synced_at)->not->toBeNull();
 });
 
-it('does not advance the initial calendar import while page events are still missing', function (): void {
+it('keeps the mailbox active and continues calendar import when page events cannot be stored', function (): void {
     Bus::fake();
     config()->set('email-integration.sync.initial_store_attempts', 1);
 
@@ -584,9 +585,59 @@ it('does not advance the initial calendar import while page events are still mis
 
     invokeInitialCalendarSyncBatchFinallyCallbacks();
 
-    Bus::assertDispatchedTimes(InitialCalendarSyncJob::class, 0);
+    Bus::assertDispatched(
+        InitialCalendarSyncJob::class,
+        fn (InitialCalendarSyncJob $job): bool => $job->pageToken === 'page-2',
+    );
     expect($account->fresh()?->calendar_sync_cursor)->toBeNull()
-        ->and($account->fresh()?->status)->toBe(EmailAccountStatus::ERROR)
-        ->and($account->fresh()?->last_error)->toContain('2 event(s)')
-        ->and(MailboxSyncTracker::isCalendarSyncing($account))->toBeFalse();
+        ->and($account->fresh()?->status)->toBe(EmailAccountStatus::ACTIVE)
+        ->and($account->fresh()?->last_error)->toBeNull()
+        ->and($account->fresh()?->hasSyncError())->toBeFalse();
+});
+
+it('records unstorable calendar events as import issues instead of a sync error', function (): void {
+    Bus::fake();
+    config()->set('email-integration.sync.initial_store_attempts', 1);
+
+    $account = ConnectedAccount::withoutEvents(fn () => ConnectedAccount::factory()->create([
+        'capabilities' => ['email' => true, 'calendar' => true],
+        'sync_cursor' => 'history-done',
+    ]));
+    $batchId = attachHistoryImportBatch($account);
+
+    $event = new CalendarEventData(
+        providerEventId: 'evt-missing',
+        providerRecurringEventId: null,
+        iCalUid: null,
+        title: 'Missing',
+        description: null,
+        startsAt: Date::now()->addDay(),
+        endsAt: Date::now()->addDay()->addHour(),
+        isAllDay: false,
+        location: null,
+        htmlLink: null,
+        status: 'confirmed',
+        visibility: 'default',
+        organizerEmail: null,
+        organizerName: null,
+        attendees: [],
+    );
+
+    $service = Mockery::mock(CalendarServiceInterface::class);
+    $service->shouldReceive('initialSync')->once()
+        ->andReturn(new CalendarSyncResult(events: [$event], nextSyncToken: 'token-after-skip'));
+
+    $factory = Mockery::mock(CalendarServiceFactoryInterface::class);
+    $factory->shouldReceive('make')->once()->andReturn($service);
+
+    (new InitialCalendarSyncJob($account))->handle($factory);
+
+    invokeInitialCalendarSyncBatchFinallyCallbacks();
+
+    expect($account->fresh()?->status)->toBe(EmailAccountStatus::ACTIVE)
+        ->and($account->fresh()?->last_error)->toBeNull()
+        ->and($account->fresh()?->calendar_sync_cursor)->toBeNull()
+        ->and($account->fresh()?->hasSyncError())->toBeFalse()
+        ->and(resolve(MailboxHistoryImportService::class)->calendarFailureCount($batchId))->toBe(1)
+        ->and($account->fresh()?->showsMailboxHistoryImportFailureSummary())->toBeTrue();
 });

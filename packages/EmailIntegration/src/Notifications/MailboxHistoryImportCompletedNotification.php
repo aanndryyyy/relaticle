@@ -5,14 +5,13 @@ declare(strict_types=1);
 namespace Relaticle\EmailIntegration\Notifications;
 
 use App\Models\User;
-use App\Models\Workspace;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification as FilamentNotification;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
-use Relaticle\EmailIntegration\Filament\Pages\EmailAccountsPage;
+use Relaticle\EmailIntegration\Livewire\EmailAccessNotificationHandler;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 
 final class MailboxHistoryImportCompletedNotification extends Notification implements ShouldQueue
@@ -51,7 +50,7 @@ final class MailboxHistoryImportCompletedNotification extends Notification imple
 
     public function toMail(object $notifiable): MailMessage
     {
-        $mail = (new MailMessage)
+        return (new MailMessage)
             ->subject($this->mailSubject())
             ->greeting(__('filament/notifications/mailbox-import-complete.mail.greeting', [
                 'name' => $notifiable instanceof User ? $notifiable->name : '',
@@ -61,17 +60,6 @@ final class MailboxHistoryImportCompletedNotification extends Notification imple
                 'imported' => $this->importedSummary(),
                 'failures' => $this->failureSummary(),
             ]));
-
-        $url = $this->emailAccountsUrl();
-
-        if ($this->hasIssues() && $url !== null) {
-            $mail->action(
-                __('filament/notifications/mailbox-import-complete.actions.review_and_retry'),
-                $url,
-            );
-        }
-
-        return $mail;
     }
 
     /**
@@ -82,6 +70,7 @@ final class MailboxHistoryImportCompletedNotification extends Notification imple
         $notification = FilamentNotification::make()
             ->viewData([
                 'batch_id' => $this->batchId,
+                'account_id' => (string) $this->account->getKey(),
                 'kind' => $this->kind(),
             ])
             ->title(__($this->titleKey()))
@@ -98,15 +87,20 @@ final class MailboxHistoryImportCompletedNotification extends Notification imple
             $notification->success();
         }
 
-        $url = $this->emailAccountsUrl();
-
-        if ($this->hasIssues() && $url !== null) {
+        if ($this->hasIssues() && is_string($this->batchId) && $this->batchId !== '') {
             $notification->actions([
-                Action::make('reviewAndRetry')
-                    ->label(__('filament/notifications/mailbox-import-complete.actions.review_and_retry'))
+                Action::make('retry')
+                    ->label(__('filament/notifications/mailbox-import-complete.actions.retry'))
                     ->link()
-                    ->url($url)
-                    ->markAsRead(),
+                    ->color('warning')
+                    ->dispatchTo(
+                        EmailAccessNotificationHandler::LIVEWIRE_ALIAS,
+                        'retry-mailbox-history-import',
+                    )
+                    ->eventData([
+                        'accountId' => (string) $this->account->getKey(),
+                        'batchId' => $this->batchId,
+                    ]),
             ]);
         }
 
@@ -211,16 +205,5 @@ final class MailboxHistoryImportCompletedNotification extends Notification imple
         }
 
         return implode(' ', $parts);
-    }
-
-    private function emailAccountsUrl(): ?string
-    {
-        $workspace = $this->account->workspace;
-
-        if (! $workspace instanceof Workspace) {
-            return null;
-        }
-
-        return EmailAccountsPage::getUrl(panel: 'app', tenant: $workspace);
     }
 }

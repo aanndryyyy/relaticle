@@ -9,7 +9,6 @@ use Illuminate\Bus\Batch;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Config;
-use Relaticle\EmailIntegration\Actions\CompleteMailboxHistoryImportAction;
 use Relaticle\EmailIntegration\Data\CalendarEventData;
 use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
@@ -143,22 +142,20 @@ final class InitialSyncPageStoreBatch
 
                 $missingEvents = self::missingMeetingEvents($account, $pageEvents);
 
-                if ($missingEvents !== []) {
-                    if ($storeAttempt < self::maxStoreAttempts()) {
-                        self::dispatchMeetings(
-                            $account,
-                            $pageEvents,
-                            $missingEvents,
-                            $onPageStored,
-                            $storeAttempt + 1,
-                        );
-
-                        return;
-                    }
-
-                    self::markImportStoreFailed($account, count($missingEvents), 'event(s)', 'calendar');
+                if ($missingEvents !== [] && $storeAttempt < self::maxStoreAttempts()) {
+                    self::dispatchMeetings(
+                        $account,
+                        $pageEvents,
+                        $missingEvents,
+                        $onPageStored,
+                        $storeAttempt + 1,
+                    );
 
                     return;
+                }
+
+                if ($missingEvents !== []) {
+                    self::recordCalendarStoreFailures($account, count($missingEvents));
                 }
 
                 $onPageStored($account);
@@ -229,20 +226,19 @@ final class InitialSyncPageStoreBatch
                 .self::maxStoreAttempts().' attempts.',
         ]);
 
-        if ($syncKind === 'calendar') {
-            MailboxSyncTracker::markCalendarFinished($account);
-
-            $batchId = $account->history_import_batch_id;
-
-            if (is_string($batchId) && $batchId !== '') {
-                resolve(MailboxHistoryImportService::class)->recordCalendarFailures($batchId, $missingCount);
-                resolve(MailboxHistoryImportService::class)->completeCalendarImport($account, succeeded: false);
-                resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
-            }
-        }
-
         if ($syncKind === 'email') {
             MailboxSyncTracker::markEmailFinished($account);
         }
+    }
+
+    private static function recordCalendarStoreFailures(ConnectedAccount $account, int $missingCount): void
+    {
+        $batchId = $account->history_import_batch_id;
+
+        if (! is_string($batchId) || $batchId === '') {
+            return;
+        }
+
+        resolve(MailboxHistoryImportService::class)->addCalendarFailures($batchId, $missingCount);
     }
 }

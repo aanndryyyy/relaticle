@@ -20,7 +20,7 @@
         >
             @foreach ($this->connectedAccounts as $account)
                 <div wire:key="email-account-{{ $account->getKey() }}" class="space-y-3 rounded-lg border border-gray-200 px-4 py-3 dark:border-white/10">
-                    <div class="grid grid-cols-1 items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:gap-x-4">
+                    <div class="grid grid-cols-1 items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-x-4">
                         <div class="flex min-w-0 items-center gap-3">
                             <x-filament::icon :icon="$account->provider->getIcon()" class="h-5 w-5 shrink-0 text-gray-400" />
 
@@ -38,10 +38,6 @@
                                 </p>
                             </div>
                         </div>
-
-                        <x-email-integration::history-import-failure-status :account="$account" class="w-full sm:w-auto">
-                            {{ ($this->retryFailedImportAction())(['account_id' => $account->getKey()]) }}
-                        </x-email-integration::history-import-failure-status>
 
                         <div class="flex shrink-0 items-center gap-3 sm:justify-end">
                             @if ($account->showsSyncProgressOnAccountsPage())

@@ -17,7 +17,6 @@ use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\HtmlString;
 use Relaticle\EmailIntegration\Actions\DisconnectConnectedAccountAction;
-use Relaticle\EmailIntegration\Actions\RetryMailboxHistoryImportFailuresAction;
 use Relaticle\EmailIntegration\Actions\SetDefaultConnectedAccountAction;
 use Relaticle\EmailIntegration\Actions\StartMailboxHistoryImportAction;
 use Relaticle\EmailIntegration\Actions\StopCalendarPushChannelAction;
@@ -112,43 +111,6 @@ trait HasConnectedAccountActions
 
                 return MailboxOAuthWorkspace::redirectUrl($account->provider->value, $account->workspace);
             }, true);
-    }
-
-    public function retryFailedImportAction(): Action
-    {
-        return Action::make('retryFailedImport')
-            ->label(__('filament/pages/email-accounts.actions.retry_failed_import.label'))
-            ->icon('heroicon-m-arrow-path')
-            ->link()
-            ->color('warning')
-            ->size(Size::Small)
-            ->visible(fn (array $arguments): bool => (bool) $this->findAccount($arguments)?->showsMailboxHistoryImportFailureSummary())
-            ->action(function (array $arguments): void {
-                $account = $this->findOwnedAccountOrFail($arguments);
-                $user = auth()->user();
-                abort_unless($user instanceof User, 403);
-
-                $batchId = $account->history_import_batch_id;
-                abort_unless(is_string($batchId) && $batchId !== '', 404);
-
-                $retried = resolve(RetryMailboxHistoryImportFailuresAction::class)->execute($user, $account, $batchId);
-
-                $this->afterAccountChanged();
-
-                $notification = Notification::make()
-                    ->title($retried
-                        ? __('filament/pages/email-accounts.notifications.retry_failed_import_queued.title')
-                        : __('filament/pages/email-accounts.notifications.retry_failed_import_unavailable.title'))
-                    ->status($retried ? 'success' : 'warning');
-
-                if ($retried) {
-                    $notification->body(__('filament/pages/email-accounts.notifications.retry_failed_import_queued.body'));
-                } else {
-                    $notification->body(__('filament/pages/email-accounts.notifications.retry_failed_import_unavailable.body'));
-                }
-
-                $notification->send();
-            });
     }
 
     public function syncCalendarAction(): Action

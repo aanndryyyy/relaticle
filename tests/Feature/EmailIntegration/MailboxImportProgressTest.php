@@ -8,8 +8,9 @@ use Illuminate\Support\Facades\DB;
 use Relaticle\EmailIntegration\Filament\Pages\EmailAccountsPage;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
+use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 
-mutates(EmailAccountsPage::class, ConnectedAccount::class, MailboxHistoryImportService::class);
+mutates(EmailAccountsPage::class, ConnectedAccount::class, MailboxHistoryImportService::class, MailboxSyncTracker::class);
 
 it('shows import progress while the mailbox cursor has not been written', function (): void {
     $user = User::factory()->withWorkspace()->create();
@@ -95,4 +96,33 @@ it('shows 0% until store jobs exist on the history import batch', function (): v
         ->assertSee('role="progressbar"', false)
         ->assertSee('aria-valuenow="0"', false)
         ->assertSee('motion-safe:animate-spin', false);
+});
+
+it('keeps import progress at 100% while calendar history continues after email listing finishes', function (): void {
+    $user = User::factory()->withWorkspace()->create();
+    $this->actingAs($user);
+    Filament::setTenant($user->currentWorkspace);
+
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'workspace_id' => $user->currentWorkspace->getKey(),
+        'user_id' => $user->getKey(),
+        'capabilities' => ['email' => true, 'calendar' => true],
+        'sync_cursor' => 'history-done',
+        'calendar_sync_cursor' => null,
+        'initial_sync_imported' => 40,
+        'initial_sync_estimated' => 40,
+    ]));
+    $batchId = attachHistoryImportBatch($account);
+    setHistoryImportBatchProgress($batchId, 40, 0);
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    resolve(MailboxHistoryImportService::class)->markCalendarImportPending($batchId);
+    MailboxSyncTracker::markCalendarStarted($account);
+
+    livewire(EmailAccountsPage::class)
+        ->assertSee(__('filament/pages/email-accounts.importing'))
+        ->assertSee('aria-valuenow="100"', false)
+        ->assertDontSee('aria-valuenow="0"', false);
 });

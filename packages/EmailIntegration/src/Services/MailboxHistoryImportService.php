@@ -78,6 +78,18 @@ final readonly class MailboxHistoryImportService
         Cache::put($key, $count, now()->addWeek());
     }
 
+    public function addCalendarFailures(string $batchId, int $count): void
+    {
+        if ($count <= 0) {
+            return;
+        }
+
+        $key = self::CALENDAR_FAILURES_PREFIX.$batchId;
+        $current = max(0, (int) Cache::get($key, 0));
+
+        Cache::put($key, $current + $count, now()->addWeek());
+    }
+
     public function calendarFailureCount(string $batchId): int
     {
         return max(0, (int) Cache::get(self::CALENDAR_FAILURES_PREFIX.$batchId, 0));

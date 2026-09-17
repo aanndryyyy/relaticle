@@ -21,6 +21,9 @@ final class StoreMeetingJob implements ShouldQueue
 
     public int $tries = 3;
 
+    /** @var array<int, int> */
+    public array $backoff = [5, 5, 5];
+
     public function __construct(
         public readonly ConnectedAccount $connectedAccount,
         public readonly CalendarEventData $event,

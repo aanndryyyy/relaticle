@@ -303,6 +303,21 @@ it('does not show the syncing badge during background incremental email sync', f
         ->assertDontSee(__('filament/pages/email-accounts.importing'));
 });
 
+it('does not show the syncing badge during background incremental calendar sync', function (): void {
+    $this->account->update([
+        'sync_cursor' => 'done',
+        'calendar_sync_cursor' => 'done',
+        'last_synced_at' => now(),
+        'capabilities' => ['email' => true, 'calendar' => true],
+    ]);
+
+    MailboxSyncTracker::markCalendarStarted($this->account);
+
+    livewire(EmailAccountsPage::class)
+        ->assertSee(__('filament/pages/email-accounts.in_sync'))
+        ->assertDontSee(__('filament/pages/email-accounts.importing'));
+});
+
 it('shows a sync issue badge when incremental sync could not store mail', function (): void {
     $this->account->update([
         'sync_cursor' => 'mail-cursor',
@@ -315,7 +330,7 @@ it('shows a sync issue badge when incremental sync could not store mail', functi
         ->assertDontSee(__('filament/pages/email-accounts.in_sync'));
 });
 
-it('shows a warning badge and retry link after history import failures', function (): void {
+it('stays in sync after history import store failures', function (): void {
     $batch = resolve(MailboxHistoryImportService::class)->startBatch($this->account);
 
     $this->account->update([
@@ -332,19 +347,19 @@ it('shows a warning badge and retry link after history import failures', functio
     ]);
 
     livewire(EmailAccountsPage::class)
-        ->assertSee(__('filament/pages/email-accounts.history_import_failure.badge'))
-        ->assertSee(__('filament/pages/email-accounts.actions.retry_failed_import.label'))
-        ->assertActionVisible(TestAction::make('retryFailedImport')->arguments(['account_id' => $this->account->id]))
+        ->assertDontSee(__('filament/pages/email-accounts.history_import_failure.badge'))
+        ->assertDontSee(__('filament/pages/email-accounts.actions.retry_failed_import.label'))
         ->assertDontSee(__('filament/pages/email-accounts.sync_error.heading'))
         ->assertSee(__('filament/pages/email-accounts.in_sync'));
 });
 
-it('shows syncing progress after the user retries a failed history import', function (): void {
+it('does not show a retry control after history import store failures', function (): void {
     $batch = resolve(MailboxHistoryImportService::class)->startBatch($this->account);
 
     $this->account->update([
         'sync_cursor' => 'history-done',
         'history_import_batch_id' => $batch->id,
+        'last_error' => 'This message could not be stored after several tries.',
     ]);
 
     DB::table('job_batches')->where('id', $batch->id)->update([
@@ -355,16 +370,10 @@ it('shows syncing progress after the user retries a failed history import', func
         'finished_at' => now()->getTimestamp(),
     ]);
 
-    insertHistoryImportFailedJob($this->account, $batch->id, 'failed-1');
-    fakeHistoryImportQueueRetry('failed-1');
-
     livewire(EmailAccountsPage::class)
-        ->callAction('retryFailedImport', arguments: ['account_id' => $this->account->id])
-        ->assertNotified()
-        ->assertSee(__('filament/pages/email-accounts.history_import_failure.badge'))
-        ->assertActionVisible(TestAction::make('retryFailedImport')->arguments(['account_id' => $this->account->id]));
-
-    expect($this->account->fresh()->last_error)->toBeNull();
+        ->assertDontSee(__('filament/pages/email-accounts.history_import_failure.badge'))
+        ->assertDontSee(__('filament/pages/email-accounts.actions.retry_failed_import.label'))
+        ->assertSee(__('filament/pages/email-accounts.in_sync'));
 });
 
 it('shows in sync when the mailbox has no recorded error', function (): void {

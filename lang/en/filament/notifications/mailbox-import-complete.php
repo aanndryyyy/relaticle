@@ -19,7 +19,17 @@ return [
         'body' => 'Previously missing messages from :email are imported. :imported are in Relaticle now.',
     ],
     'actions' => [
-        'review_and_retry' => 'Review and retry',
+        'retry' => 'Retry',
+    ],
+    'retry' => [
+        'queued' => [
+            'title' => 'Retry queued.',
+            'body' => 'We are retrying what could not be imported. We will notify you when it finishes.',
+        ],
+        'unavailable' => [
+            'title' => 'Retry unavailable',
+            'body' => 'No failed imports are available to retry for this import.',
+        ],
     ],
     'mail' => [
         'subject' => 'Your mailbox import is complete',

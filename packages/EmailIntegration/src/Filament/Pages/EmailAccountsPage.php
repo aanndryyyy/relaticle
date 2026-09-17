@@ -112,8 +112,7 @@ final class EmailAccountsPage extends Page
     public function isImportingAnyAccount(): bool
     {
         return $this->connectedAccounts->contains(
-            fn (ConnectedAccount $account): bool => $account->showsSyncProgress()
-                || $account->showsMailboxHistoryImportFailureSummary(),
+            fn (ConnectedAccount $account): bool => $account->showsSyncProgress(),
         );
     }
 

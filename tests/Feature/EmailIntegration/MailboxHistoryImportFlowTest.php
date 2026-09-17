@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 use App\Models\User;
-use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Bus\PendingBatch;
 use Illuminate\Notifications\SendQueuedNotifications;
@@ -29,6 +28,7 @@ use Relaticle\EmailIntegration\Filament\Pages\EmailAccountsPage;
 use Relaticle\EmailIntegration\Jobs\InitialEmailSyncJob;
 use Relaticle\EmailIntegration\Jobs\RelinkMailboxHistoryJob;
 use Relaticle\EmailIntegration\Jobs\StoreEmailJob;
+use Relaticle\EmailIntegration\Livewire\EmailAccessNotificationHandler;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Email;
 use Relaticle\EmailIntegration\Notifications\MailboxHistoryImportCompletedNotification;
@@ -39,6 +39,7 @@ use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 mutates(
     CompleteMailboxHistoryImportAction::class,
     ConnectedAccount::class,
+    EmailAccessNotificationHandler::class,
     InitialEmailSyncJob::class,
     RecordMailboxHistoryImportStoreFailureAction::class,
     RetryMailboxHistoryImportFailuresAction::class,
@@ -751,7 +752,7 @@ it('notifies with issues when the import batch finishes with failed jobs', funct
         ->and($notification->data['status'])->toBe('warning')
         ->and($notification->data['viewData']['kind'])->toBe('partial')
         ->and($notification->data['body'])->toContain("1 message couldn't be imported")
-        ->and(collect($notification->data['actions'] ?? [])->pluck('name')->all())->toContain('reviewAndRetry');
+        ->and(collect($notification->data['actions'] ?? [])->pluck('name')->all())->toBe(['retry']);
 
     Queue::assertPushed(SendQueuedNotifications::class);
 
@@ -765,7 +766,7 @@ it('notifies with issues when the import batch finishes with failed jobs', funct
         ->and($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeTrue();
 });
 
-it('retries a mailbox import from the accounts page callout', function (): void {
+it('retries a mailbox import from the notification action', function (): void {
     $user = User::factory()->withWorkspace()->create();
     $this->actingAs($user);
     Filament::setTenant($user->currentWorkspace);
@@ -782,9 +783,11 @@ it('retries a mailbox import from the accounts page callout', function (): void 
     insertHistoryImportFailedJob($account, $batchId, 'failed-job');
     fakeHistoryImportQueueRetry('failed-job');
 
-    Livewire::test(EmailAccountsPage::class)
-        ->callAction(TestAction::make('retryFailedImport')->arguments(['account_id' => $account->getKey()]))
-        ->assertNotified(__('filament/pages/email-accounts.notifications.retry_failed_import_queued.title'));
+    Livewire::test(EmailAccessNotificationHandler::class)
+        ->dispatch('retry-mailbox-history-import', accountId: (string) $account->getKey(), batchId: $batchId)
+        ->assertNotified(__('filament/notifications/mailbox-import-complete.retry.queued.title'));
+
+    expect(resolve(MailboxHistoryImportService::class)->hasAwaitingRetrySuccessNotice($batchId))->toBeTrue();
 });
 
 it('resolves failed store job uuids from the failed jobs table when batch ids are empty', function (): void {
@@ -816,7 +819,7 @@ it('resolves failed store job uuids from the failed jobs table when batch ids ar
         ->execute($user, $account, 'batch-from-failed-jobs'))->toBeTrue();
 });
 
-it('recovers the failed email through the accounts page callout using the real queue retry command', function (): void {
+it('recovers the failed email through the notification retry using the real queue retry command', function (): void {
     config()->set('queue.default', 'database');
     $user = User::factory()->withWorkspace()->create();
     $this->actingAs($user);
@@ -852,10 +855,7 @@ it('recovers the failed email through the accounts page callout using the real q
         ->and($user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->count())->toBe(1)
         ->and($user->notifications()->sole()->data['title'])->toBe(__('filament/notifications/mailbox-import-complete.title_with_issues'));
 
-    Livewire::test(EmailAccountsPage::class)
-        ->assertSee(__('filament/pages/email-accounts.history_import_failure.badge'))
-        ->callAction(TestAction::make('retryFailedImport')->arguments(['account_id' => $account->getKey()]))
-        ->assertNotified(__('filament/pages/email-accounts.notifications.retry_failed_import_queued.title'));
+    expect(resolve(RetryMailboxHistoryImportFailuresAction::class)->execute($user, $account->fresh(), $batchId))->toBeTrue();
 
     expect($account->fresh()->last_error)->toBeNull();
     expect($import->hasAwaitingRetrySuccessNotice($batchId))->toBeTrue();
@@ -880,10 +880,9 @@ it('recovers the failed email through the accounts page callout using the real q
     expect(resolve(RetryMailboxHistoryImportFailuresAction::class)->execute($user, $account->fresh(), $batchId))->toBeFalse();
     expect($user->notifications()->count())->toBe(2);
 
-    Livewire::test(EmailAccountsPage::class)
+    livewire(EmailAccountsPage::class)
         ->assertDontSee(__('filament/pages/email-accounts.history_import_failure.badge'))
-        ->assertSee(__('filament/pages/email-accounts.in_sync'))
-        ->assertActionHidden(TestAction::make('retryFailedImport')->arguments(['account_id' => $account->getKey()]));
+        ->assertSee(__('filament/pages/email-accounts.in_sync'));
 });
 
 it('does not send a retry-success notice until every failed import job succeeds', function (): void {
@@ -918,10 +917,7 @@ it('does not send a retry-success notice until every failed import job succeeds'
     expect($user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->count())->toBe(1)
         ->and($user->notifications()->sole()->data['title'])->toBe(__('filament/notifications/mailbox-import-complete.title_with_issues'));
 
-    Livewire::test(EmailAccountsPage::class)
-        ->assertSee(__('filament/pages/email-accounts.history_import_failure.badge'))
-        ->callAction(TestAction::make('retryFailedImport')->arguments(['account_id' => $account->getKey()]))
-        ->assertNotified(__('filament/pages/email-accounts.notifications.retry_failed_import_queued.title'));
+    expect(resolve(RetryMailboxHistoryImportFailuresAction::class)->execute($user, $account->fresh(), $batchId))->toBeTrue();
 
     Artisan::call('queue:work', ['connection' => 'database', '--queue' => 'emails-sync', '--once' => true]);
 
@@ -929,10 +925,7 @@ it('does not send a retry-success notice until every failed import job succeeds'
         ->and($account->emails()->count())->toBe(0)
         ->and($user->notifications()->count())->toBe(1);
 
-    Livewire::test(EmailAccountsPage::class)
-        ->assertSee(__('filament/pages/email-accounts.history_import_failure.badge'))
-        ->callAction(TestAction::make('retryFailedImport')->arguments(['account_id' => $account->getKey()]))
-        ->assertNotified(__('filament/pages/email-accounts.notifications.retry_failed_import_queued.title'));
+    expect(resolve(RetryMailboxHistoryImportFailuresAction::class)->execute($user, $account->fresh(), $batchId))->toBeTrue();
 
     Artisan::call('queue:work', ['connection' => 'database', '--queue' => 'emails-sync', '--once' => true]);
 
