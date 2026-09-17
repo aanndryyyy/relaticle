@@ -14,6 +14,7 @@ use Relaticle\EmailIntegration\Enums\EmailBlocklistType;
 use Relaticle\EmailIntegration\Enums\EmailVisibilityEnforcement;
 
 /**
+ * @property string $workspace_id
  * @property EmailBlocklistType $type
  * @property EmailVisibilityEnforcement $enforcement_level
  * @property string $value

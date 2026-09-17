@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Support\Migrations\TenantMigration;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -10,9 +11,11 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('email_threads', function (Blueprint $table): void {
+        $workspaceId = TenantMigration::foreignKeyColumn();
+
+        Schema::create('email_threads', function (Blueprint $table) use ($workspaceId): void {
             $table->ulid('id')->primary();
-            $table->foreignUlid('team_id')->constrained()->cascadeOnDelete();
+            $table->foreignUlid($workspaceId)->constrained(TenantMigration::table())->cascadeOnDelete();
             $table->foreignUlid('connected_account_id')->constrained('connected_accounts')->cascadeOnDelete();
 
             $table->string('thread_id');                     // provider thread/conversation ID
@@ -25,7 +28,7 @@ return new class extends Migration
             $table->timestamps();
 
             $table->unique(['connected_account_id', 'thread_id']);
-            $table->index(['team_id', 'last_email_at']);
+            $table->index([$workspaceId, 'last_email_at']);
         });
     }
 };

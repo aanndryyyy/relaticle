@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Support\Migrations\TenantMigration;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -10,7 +11,9 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('email_batches', function (Blueprint $table): void {
+        $workspaceId = TenantMigration::foreignKeyColumn();
+
+        Schema::create('email_batches', function (Blueprint $table) use ($workspaceId): void {
             $table->ulid('id')->primary();
             $table->teams();
             $table->foreignUlid('user_id')->constrained()->cascadeOnDelete();
@@ -22,7 +25,7 @@ return new class extends Migration
             $table->string('status', 20)->default('queued'); // queued | sending | completed | partial_failure
             $table->timestamps();
 
-            $table->index(['team_id', 'created_at']);
+            $table->index([$workspaceId, 'created_at']);
             $table->index(['user_id', 'status']);
         });
     }

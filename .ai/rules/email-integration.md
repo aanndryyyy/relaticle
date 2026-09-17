@@ -45,7 +45,8 @@ Graph mail folders must be identified by well-known path names
 Mailbox search (inbox and record email pages) must go through
 `EmailSearchService`. Never `ilike` on `subject` or `snippet` alone.
 Metadata-only teammate rows stay in the list, but those columns are hidden.
-A guessed subject must not match. Participants remain searchable.
+A guessed subject must not match. Participants remain searchable, except
+other people's BCC rows (same gate as recipient suggestions).
 
 ## Per-viewer shares override the email default in search
 

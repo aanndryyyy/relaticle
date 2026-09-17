@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Support\Migrations\TenantMigration;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -10,7 +11,9 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('emails', function (Blueprint $table): void {
+        $workspaceId = TenantMigration::foreignKeyColumn();
+
+        Schema::create('emails', function (Blueprint $table) use ($workspaceId): void {
             $table->ulid('id')->primary();
             $table->teams();
             $table->foreignUlid('user_id')->constrained()->cascadeOnDelete();    // explicit owner (survives account deletion)
@@ -55,18 +58,18 @@ return new class extends Migration
             $table->unique(['connected_account_id', 'rfc_message_id'], 'idx_emails_account_msgid');
 
             // Query patterns
-            $table->index(['team_id', 'thread_id']);
-            $table->index(['team_id', 'sent_at']);
+            $table->index([$workspaceId, 'thread_id']);
+            $table->index([$workspaceId, 'sent_at']);
             $table->index(['connected_account_id', 'sent_at']);
             $table->index('provider_message_id');
             $table->index(['user_id', 'privacy_tier']);
-            $table->index(['team_id', 'deleted_at', 'creation_source', 'created_at'], 'idx_emails_team_activity');
+            $table->index([$workspaceId, 'deleted_at', 'creation_source', 'created_at'], 'idx_emails_workspace_activity');
             $table->index('batch_id');
             $table->index(['connected_account_id', 'status', 'scheduled_for'], 'idx_emails_dispatcher');
             $table->index(['user_id', 'status'], 'idx_emails_user_status');
             $table->index(
-                ['team_id', 'user_id', 'rfc_message_id'],
-                'emails_team_user_message_id_idx',
+                [$workspaceId, 'user_id', 'rfc_message_id'],
+                'emails_workspace_user_message_id_idx',
             );
         });
     }

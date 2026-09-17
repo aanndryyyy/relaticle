@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Support\Migrations\TenantMigration;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -10,9 +11,11 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('meetings', function (Blueprint $table): void {
+        $workspaceId = TenantMigration::foreignKeyColumn();
+
+        Schema::create('meetings', function (Blueprint $table) use ($workspaceId): void {
             $table->ulid('id')->primary();
-            $table->foreignUlid('team_id')->constrained('teams')->cascadeOnDelete();
+            $table->foreignUlid($workspaceId)->constrained(TenantMigration::table())->cascadeOnDelete();
             $table->foreignUlid('connected_account_id')->constrained('connected_accounts')->cascadeOnDelete();
 
             $table->string('provider_event_id');
@@ -39,7 +42,7 @@ return new class extends Migration
             $table->softDeletes();
 
             $table->unique(['connected_account_id', 'provider_event_id']);
-            $table->index(['team_id', 'starts_at']);
+            $table->index([$workspaceId, 'starts_at']);
             $table->index('provider_recurring_event_id');
         });
     }

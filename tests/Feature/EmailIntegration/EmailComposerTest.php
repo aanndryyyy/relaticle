@@ -76,6 +76,24 @@ it('opens via the composer:open event with the default account preselected', fun
         ->assertSet('accountId', $this->account->id);
 });
 
+it('prefills to from the current page when compose opens without a payload', function (): void {
+    Livewire::test(EmailComposer::class, ['pageTo' => 'jane@example.com'])
+        ->dispatch('composer:open')
+        ->assertSet('to', ['jane@example.com']);
+});
+
+it('uses the payload to instead of the page email', function (): void {
+    Livewire::test(EmailComposer::class, ['pageTo' => 'jane@example.com'])
+        ->dispatch('composer:open', payload: ['to' => ['other@example.com']])
+        ->assertSet('to', ['other@example.com']);
+});
+
+it('leaves to blank when the current page has no email', function (): void {
+    Livewire::test(EmailComposer::class)
+        ->dispatch('composer:open')
+        ->assertSet('to', []);
+});
+
 it('puts merge tags last on the message toolbar instead of the footer', function (): void {
     $html = Livewire::test(EmailComposer::class)
         ->dispatch('composer:open')
@@ -637,24 +655,18 @@ it('rejects a client-posted accountId that does not belong to the user', functio
         ->assertSet('accountId', null);
 });
 
-it('saves a draft when minimized and reopens it with state intact', function (): void {
-    $component = Livewire::test(EmailComposer::class)
+it('does not save a draft when minimized', function (): void {
+    Livewire::test(EmailComposer::class)
         ->dispatch('composer:open')
         ->set('to', ['draft@example.com'])
         ->set('subject', 'Half-written')
         ->set('bodyHtml', '<p>wip</p>')
         ->call('minimize')
-        ->assertNotified(__('filament/emails/composer.notifications.draft_saved.title'));
-
-    $draft = Email::query()->where('status', EmailStatus::DRAFT)->sole();
-    expect($draft->subject)->toBe('Half-written')
-        ->and($draft->user_id)->toBe($this->user->id);
-
-    Livewire::test(EmailComposer::class)
-        ->dispatch('composer:open', draftId: $draft->id)
+        ->assertSet('isMinimized', true)
         ->assertSet('subject', 'Half-written')
-        ->assertSet('to', ['draft@example.com'])
-        ->assertSet('draftId', $draft->id);
+        ->assertNotNotified(__('filament/emails/composer.notifications.draft_saved.title'));
+
+    expect(Email::query()->where('status', EmailStatus::DRAFT)->exists())->toBeFalse();
 });
 
 it('notifies when a draft is saved on close', function (): void {
@@ -704,7 +716,7 @@ it('deletes the draft after a successful send', function (): void {
         ->set('to', ['x@example.com'])
         ->set('subject', 'From draft')
         ->set('bodyHtml', '<p>b</p>')
-        ->call('minimize');
+        ->call('close');
 
     $draft = Email::query()->where('status', EmailStatus::DRAFT)->sole();
 
@@ -732,7 +744,7 @@ it('never lists drafts in the mail panes', function (): void {
         ->set('to', ['d@example.com'])
         ->set('subject', 'Hidden draft')
         ->set('bodyHtml', '<p>b</p>')
-        ->call('minimize');
+        ->call('close');
 
     Livewire::test(EmailInboxPage::class)
         ->call('setFolder', 'all')
@@ -755,7 +767,7 @@ it('does not load another user\'s draft into the composer', function (): void {
         ->set('to', ['victim@example.com'])
         ->set('subject', 'Confidential draft')
         ->set('bodyHtml', '<p>secret</p>')
-        ->call('minimize');
+        ->call('close');
 
     $draft = Email::query()->where('status', EmailStatus::DRAFT)->where('subject', 'Confidential draft')->sole();
     expect($draft->connected_account_id)->toBe($otherAccount->id);
@@ -776,7 +788,7 @@ it('closes and queues exactly once even when the draft row was already deleted b
         ->set('to', ['x@example.com'])
         ->set('subject', 'Racing draft')
         ->set('bodyHtml', '<p>b</p>')
-        ->call('minimize');
+        ->call('close');
 
     $draft = Email::query()->where('status', EmailStatus::DRAFT)->sole();
 
@@ -1064,13 +1076,15 @@ it('does not attach a saved draft file twice when the draft is saved again', fun
         ->dispatch('composer:open')
         ->set('subject', 'Saved twice')
         ->set('attachments', [UploadedFile::fake()->create('once.pdf', 10)])
-        ->call('minimize')
-        ->call('minimize')
         ->call('close');
 
     $draft = Email::query()->where('subject', 'Saved twice')->sole();
 
-    expect($draft->attachments)->toHaveCount(1);
+    Livewire::test(EmailComposer::class)
+        ->dispatch('composer:open', draftId: (string) $draft->getKey())
+        ->call('close');
+
+    expect($draft->refresh()->attachments)->toHaveCount(1);
 });
 
 it('removes a saved attachment from the draft and from disk', function (): void {
@@ -1566,7 +1580,7 @@ it('falls back to the default account and warns when a draft\'s connected accoun
         ->set('to', ['x@example.com'])
         ->set('subject', 'Stale account draft')
         ->set('bodyHtml', '<p>b</p>')
-        ->call('minimize');
+        ->call('close');
 
     $draft = Email::query()->where('status', EmailStatus::DRAFT)->sole();
 

@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Query\Builder as BaseBuilder;
+use Relaticle\EmailIntegration\Enums\EmailParticipantRole;
 use Relaticle\EmailIntegration\Enums\EmailPrivacyTier;
 use Relaticle\EmailIntegration\Models\Email;
 
@@ -15,7 +16,7 @@ final readonly class EmailSearchService
 {
     /**
      * Match only fields the viewer is allowed to see. Subject and snippet stay
-     * out of metadata-only rows; participants remain searchable.
+     * out of metadata-only rows. Participant search skips other people's BCC rows.
      *
      * @param  Builder<Email>|Relation<Email, *, *>  $query
      * @return Builder<Email>|Relation<Email, *, *>
@@ -26,11 +27,20 @@ final readonly class EmailSearchService
         $viewerId = $viewer->getKey();
 
         return $query->where(function (Builder $outer) use ($needle, $viewerId): void {
-            $outer->whereHas('participants', function (Builder $participantQuery) use ($needle): void {
-                $participantQuery->where(function (Builder $match) use ($needle): void {
-                    $match->where('name', 'ilike', $needle)
-                        ->orWhere('email_address', 'ilike', $needle);
-                });
+            $outer->whereHas('participants', function (Builder $participantQuery) use ($needle, $viewerId): void {
+                $participantQuery
+                    ->where(function (Builder $roleGate) use ($viewerId): void {
+                        $roleGate
+                            ->where('role', '!=', EmailParticipantRole::BCC)
+                            ->orWhereHas(
+                                'email',
+                                fn (Builder $ownedEmail): Builder => $ownedEmail->where('user_id', $viewerId),
+                            );
+                    })
+                    ->where(function (Builder $match) use ($needle): void {
+                        $match->where('name', 'ilike', $needle)
+                            ->orWhere('email_address', 'ilike', $needle);
+                    });
             });
 
             $outer->orWhere(function (Builder $subjectQuery) use ($needle, $viewerId): void {

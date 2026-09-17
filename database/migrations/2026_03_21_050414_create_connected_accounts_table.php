@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Support\Migrations\TenantMigration;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -11,7 +12,9 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('connected_accounts', function (Blueprint $table): void {
+        $workspaceId = TenantMigration::foreignKeyColumn();
+
+        Schema::create('connected_accounts', function (Blueprint $table) use ($workspaceId): void {
             $table->ulid('id')->primary();
             $table->teams();
             $table->foreignUlid('user_id')->constrained()->cascadeOnDelete();
@@ -54,16 +57,15 @@ return new class extends Migration
             $table->softDeletes();
 
             $table->unique(
-                ['user_id', 'team_id', 'provider', 'email_address'],
-                'connected_accounts_user_team_provider_email_unique',
+                ['user_id', $workspaceId, 'provider', 'email_address'],
+                'connected_accounts_user_workspace_provider_email_unique',
             );
-            $table->index(['team_id', 'status']);
+            $table->index([$workspaceId, 'status']);
         });
 
-        // At most one live default account per user within a team.
         DB::statement(
-            'CREATE UNIQUE INDEX connected_accounts_one_default_per_user_team '.
-            'ON connected_accounts (user_id, team_id) '.
+            'CREATE UNIQUE INDEX connected_accounts_one_default_per_user_workspace '.
+            "ON connected_accounts (user_id, {$workspaceId}) ".
             'WHERE is_default = true AND deleted_at IS NULL'
         );
     }

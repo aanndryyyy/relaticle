@@ -34,7 +34,7 @@
     @if ($isOpen)
         @if ($isModal)
             {{-- Backdrop click minimises rather than closes: the corner window keeps the
-                 draft in progress and in sight, where closing would file it away. --}}
+                 compose session in progress and in sight, where closing would file a draft. --}}
             <div wire:click="minimize" class="fi-email-reader-backdrop fixed inset-0 z-40 bg-gray-950/50"></div>
         @endif
 

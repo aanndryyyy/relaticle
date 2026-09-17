@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Support\Migrations\TenantMigration;
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
@@ -10,7 +11,9 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('email_signatures', function (Blueprint $table): void {
+        $workspaceId = TenantMigration::foreignKeyColumn();
+
+        Schema::create('email_signatures', function (Blueprint $table) use ($workspaceId): void {
             $table->ulid('id')->primary();
             $table->teams();
             $table->foreignUlid('connected_account_id')
@@ -24,7 +27,7 @@ return new class extends Migration
 
             $table->timestamps();
 
-            $table->index(['team_id', 'connected_account_id']);
+            $table->index([$workspaceId, 'connected_account_id']);
         });
     }
 };

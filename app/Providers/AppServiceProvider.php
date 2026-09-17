@@ -46,6 +46,7 @@ use App\Support\BrandColors;
 use App\Support\CustomFields\CustomFieldInput;
 use App\Support\CustomFields\RecordNameResolver;
 use App\Support\Markdown\TableAwareLeagueDriver;
+use App\Support\Migrations\TenantMigration;
 use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
 use Filament\Auth\Notifications\NoticeOfEmailChangeRequest;
@@ -667,7 +668,7 @@ final class AppServiceProvider extends ServiceProvider
     private function configureMacros(): void
     {
         Blueprint::macro('teams', function (): void {
-            $this->foreignUlid('team_id')->constrained()->cascadeOnDelete();
+            TenantMigration::addForeignKey($this);
         });
     }
 
