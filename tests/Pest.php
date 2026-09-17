@@ -21,12 +21,14 @@ use Filament\Actions\Testing\TestAction;
 use Illuminate\Contracts\Broadcasting\Broadcaster as BroadcasterContract;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 use Pest\Browser\Api\AwaitableWebpage;
 use Pest\Browser\Playwright\Playwright;
 use Relaticle\EmailIntegration\Controllers\RedirectController;
+use Relaticle\EmailIntegration\Jobs\StoreEmailJob;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 use Relaticle\EmailIntegration\Support\MailboxOAuthWorkspace;
@@ -111,6 +113,41 @@ function attachHistoryImportBatch(ConnectedAccount $account): string
     $account->update(['history_import_batch_id' => $batch->id]);
 
     return $batch->id;
+}
+
+function insertHistoryImportFailedJob(ConnectedAccount $account, string $batchId, string $uuid, string $messageId = 'failed-message'): void
+{
+    $job = new StoreEmailJob($account, $messageId);
+    $job->withBatchId($batchId);
+
+    DB::table('failed_jobs')->insert([
+        'uuid' => $uuid,
+        'connection' => config('queue.default'),
+        'queue' => 'emails-sync',
+        'payload' => json_encode([
+            'uuid' => $uuid,
+            'displayName' => StoreEmailJob::class,
+            'job' => 'Illuminate\\Queue\\CallQueuedHandler@call',
+            'data' => [
+                'commandName' => StoreEmailJob::class,
+                'command' => serialize($job),
+            ],
+        ]),
+        'exception' => 'RuntimeException: Provider unavailable',
+        'failed_at' => now(),
+    ]);
+}
+
+function fakeHistoryImportQueueRetry(string $uuid): void
+{
+    Artisan::shouldReceive('call')
+        ->once()
+        ->with('queue:retry', ['id' => $uuid])
+        ->andReturnUsing(function () use ($uuid): int {
+            DB::table('failed_jobs')->where('uuid', $uuid)->delete();
+
+            return 0;
+        });
 }
 
 function setHistoryImportBatchProgress(string $batchId, int $totalJobs, int $pendingJobs): void

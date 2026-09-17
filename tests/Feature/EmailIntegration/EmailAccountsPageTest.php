@@ -6,7 +6,6 @@ use App\Models\User;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
@@ -356,7 +355,8 @@ it('shows syncing progress after the user retries a failed history import', func
         'finished_at' => now()->getTimestamp(),
     ]);
 
-    Artisan::shouldReceive('call')->with('queue:retry', ['id' => 'failed-1'])->once()->andReturn(0);
+    insertHistoryImportFailedJob($this->account, $batch->id, 'failed-1');
+    fakeHistoryImportQueueRetry('failed-1');
 
     livewire(EmailAccountsPage::class)
         ->callAction('retryFailedImport', arguments: ['account_id' => $this->account->id])

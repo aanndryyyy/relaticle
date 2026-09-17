@@ -7,11 +7,13 @@ namespace Relaticle\EmailIntegration\Actions;
 use Illuminate\Support\Facades\DB;
 use Relaticle\EmailIntegration\Data\ConnectAccountData;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 
 final readonly class ConnectAccountAction
 {
     public function __construct(
         private StartMailboxHistoryImportAction $startMailboxHistoryImport,
+        private MailboxHistoryImportService $mailboxHistoryImport,
     ) {}
 
     public function execute(ConnectAccountData $data): ConnectedAccount
@@ -24,6 +26,20 @@ final readonly class ConnectAccountAction
             // restored rather than inserted again. Uniqueness is per workspace
             // (user, team, provider, email), so the same mailbox can exist on
             // another team without colliding.
+            $lookup = [
+                'user_id' => $data->userId,
+                'provider' => $data->provider,
+                'email_address' => $data->emailAddress,
+                'workspace_id' => $data->teamId,
+            ];
+
+            $existing = ConnectedAccount::withTrashed()->where($lookup)->first();
+
+            $resumeStoppedImport = $existing instanceof ConnectedAccount
+                && ! $existing->trashed()
+                && $existing->sync_cursor === null
+                && ! $this->mailboxHistoryImport->isRunning($existing);
+
             $values = [
                 'display_name' => $data->displayName,
                 'provider_account_id' => $data->providerAccountId,
@@ -46,17 +62,13 @@ final readonly class ConnectAccountAction
                 $values['refresh_token'] = $data->refreshToken;
             }
 
-            $account = ConnectedAccount::withTrashed()->updateOrCreate(
-                [
-                    'user_id' => $data->userId,
-                    'provider' => $data->provider,
-                    'email_address' => $data->emailAddress,
-                    'workspace_id' => $data->teamId,
-                ],
-                $values
-            );
+            $account = ConnectedAccount::withTrashed()->updateOrCreate($lookup, $values);
 
-            $needsHistoryImport = $account->wasRecentlyCreated || $account->trashed();
+            $needsHistoryImport = $account->wasRecentlyCreated || $account->trashed() || $resumeStoppedImport;
+
+            if ($resumeStoppedImport) {
+                $account->update(['history_import_batch_id' => null]);
+            }
 
             if ($account->trashed()) {
                 // Disconnect promotes a successor but leaves is_default set while trashed.
@@ -75,6 +87,7 @@ final readonly class ConnectAccountAction
                 }
 
                 $account->restore();
+                $account->update(['history_import_batch_id' => null]);
             }
 
             // The first account a user connects becomes their default. This also

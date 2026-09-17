@@ -40,15 +40,29 @@ final readonly class RetryMailboxHistoryImportFailuresAction
                 return false;
             }
 
-            $retried = 0;
+            /** @var list<string> $retryableUuids */
+            $retryableUuids = DB::table('failed_jobs')
+                ->whereIn('uuid', $failedJobUuids)
+                ->pluck('uuid')
+                ->map(static fn (mixed $uuid): string => (string) $uuid)
+                ->values()
+                ->all();
 
-            foreach ($failedJobUuids as $failedJobUuid) {
-                if (Artisan::call('queue:retry', ['id' => $failedJobUuid]) === 0) {
-                    $retried++;
-                }
+            if ($retryableUuids === []) {
+                return false;
             }
 
-            if ($retried === 0) {
+            foreach ($retryableUuids as $failedJobUuid) {
+                Artisan::call('queue:retry', ['id' => $failedJobUuid]);
+            }
+
+            $remainingUuids = DB::table('failed_jobs')
+                ->whereIn('uuid', $retryableUuids)
+                ->pluck('uuid')
+                ->map(static fn (mixed $uuid): string => (string) $uuid)
+                ->all();
+
+            if (array_diff($retryableUuids, $remainingUuids) === []) {
                 return false;
             }
 

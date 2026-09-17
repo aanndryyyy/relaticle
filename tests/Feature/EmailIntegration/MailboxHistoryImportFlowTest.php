@@ -31,6 +31,7 @@ use Relaticle\EmailIntegration\Jobs\RelinkMailboxHistoryJob;
 use Relaticle\EmailIntegration\Jobs\StoreEmailJob;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Email;
+use Relaticle\EmailIntegration\Notifications\MailboxHistoryImportCompletedNotification;
 use Relaticle\EmailIntegration\Services\Contracts\MailServiceFactoryInterface;
 use Relaticle\EmailIntegration\Services\Contracts\MailServiceInterface;
 use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
@@ -170,6 +171,7 @@ it('treats the import batch as finished when all jobs are done but some failed',
         'total_jobs' => 10,
         'pending_jobs' => 0,
         'failed_jobs' => 3,
+        'failed_job_ids' => json_encode(['failed-1', 'failed-2', 'failed-3']),
         'finished_at' => null,
     ]);
 
@@ -260,6 +262,50 @@ it('blocks duplicate re-import history requests for the same mailbox', function 
     ]));
 
     attachHistoryImportBatch($account);
+
+    expect(fn () => resolve(StartMailboxHistoryImportAction::class)->execute($account->fresh()))
+        ->toThrow(RuntimeException::class);
+});
+
+it('restarts history import after pagination exhausts retries and no jobs remain', function (): void {
+    Bus::fake([RelinkMailboxHistoryJob::class, InitialEmailSyncJob::class]);
+    Notification::fake();
+
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'sync_cursor' => null,
+    ]));
+    $staleBatchId = attachHistoryImportBatch($account);
+
+    (new InitialEmailSyncJob($account, historyImportBatchId: $staleBatchId))
+        ->failed(new RuntimeException('Provider 500'));
+
+    resolve(StartMailboxHistoryImportAction::class)->execute($account->fresh());
+
+    expect($account->fresh())
+        ->status->toBe(EmailAccountStatus::ACTIVE)
+        ->and($account->fresh()?->history_import_batch_id)->not->toBe($staleBatchId)
+        ->and($account->fresh()?->history_import_batch_id)->not->toBeNull();
+
+    Bus::assertDispatched(InitialEmailSyncJob::class, fn (InitialEmailSyncJob $job): bool => $job->connectedAccount->is($account));
+});
+
+it('still blocks re-import while store jobs remain after listing fails', function (): void {
+    Notification::fake();
+
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'sync_cursor' => null,
+    ]));
+    $batchId = attachHistoryImportBatch($account);
+
+    (new InitialEmailSyncJob($account, historyImportBatchId: $batchId))
+        ->failed(new RuntimeException('Provider 500'));
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 4,
+        'pending_jobs' => 2,
+        'failed_jobs' => 0,
+        'finished_at' => null,
+    ]);
 
     expect(fn () => resolve(StartMailboxHistoryImportAction::class)->execute($account->fresh()))
         ->toThrow(RuntimeException::class);
@@ -507,34 +553,26 @@ it('uses store batch progress while jobs are still pending after listing finishe
 });
 
 it('retries only failed jobs from the history import batch', function (): void {
-    Artisan::spy();
-
     $user = User::factory()->withWorkspace()->create();
     $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
-        'history_import_batch_id' => 'batch-retry',
         'user_id' => $user->id,
         'workspace_id' => $user->current_workspace_id,
         'sync_cursor' => 'done',
     ]));
+    $batchId = attachHistoryImportBatch($account);
 
-    DB::table('job_batches')->insert([
-        'id' => 'batch-retry',
-        'name' => 'Mailbox history import',
+    DB::table('job_batches')->where('id', $batchId)->update([
         'total_jobs' => 2,
         'pending_jobs' => 0,
         'failed_jobs' => 1,
         'failed_job_ids' => json_encode(['failed-uuid-1']),
-        'options' => serialize([]),
-        'cancelled_at' => null,
-        'created_at' => now()->getTimestamp(),
         'finished_at' => now()->getTimestamp(),
     ]);
 
-    resolve(RetryMailboxHistoryImportFailuresAction::class)->execute($account->user, $account, 'batch-retry');
+    insertHistoryImportFailedJob($account, $batchId, 'failed-uuid-1');
+    fakeHistoryImportQueueRetry('failed-uuid-1');
 
-    Artisan::shouldHaveReceived('call')
-        ->with('queue:retry', ['id' => 'failed-uuid-1'])
-        ->once();
+    expect(resolve(RetryMailboxHistoryImportFailuresAction::class)->execute($account->user, $account, $batchId))->toBeTrue();
 });
 
 it('bumps the import issue dismiss token when a store failure is recorded again', function (): void {
@@ -579,6 +617,7 @@ it('surfaces the failure summary after the import batch finishes with failed job
         'total_jobs' => 10,
         'pending_jobs' => 2,
         'failed_jobs' => 2,
+        'failed_job_ids' => json_encode(['failed-1', 'failed-2']),
         'finished_at' => now()->getTimestamp(),
     ]);
 
@@ -692,7 +731,6 @@ it('does not notify when the import batch finishes with failed jobs', function (
 });
 
 it('retries a mailbox import from the accounts page callout', function (): void {
-    Artisan::spy();
     $user = User::factory()->withWorkspace()->create();
     $this->actingAs($user);
     Filament::setTenant($user->currentWorkspace);
@@ -706,16 +744,15 @@ it('retries a mailbox import from the accounts page callout', function (): void 
         'failed_job_ids' => json_encode(['failed-job']),
         'finished_at' => now()->getTimestamp(),
     ]);
+    insertHistoryImportFailedJob($account, $batchId, 'failed-job');
+    fakeHistoryImportQueueRetry('failed-job');
 
     Livewire::test(EmailAccountsPage::class)
         ->callAction(TestAction::make('retryFailedImport')->arguments(['account_id' => $account->getKey()]))
-        ->assertNotified();
-
-    Artisan::shouldHaveReceived('call')->with('queue:retry', ['id' => 'failed-job'])->once();
+        ->assertNotified(__('filament/pages/email-accounts.notifications.retry_failed_import_queued.title'));
 });
 
 it('resolves failed store job uuids from the failed jobs table when batch ids are empty', function (): void {
-    Artisan::spy();
     $user = User::factory()->withWorkspace()->create();
     $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
         'user_id' => $user->id,
@@ -737,30 +774,11 @@ it('resolves failed store job uuids from the failed jobs table when batch ids ar
         'finished_at' => now()->getTimestamp(),
     ]);
 
-    $job = new StoreEmailJob($account, 'msg-failed');
-    $job->withBatchId('batch-from-failed-jobs');
+    insertHistoryImportFailedJob($account, 'batch-from-failed-jobs', 'failed-uuid-from-table', 'msg-failed');
+    fakeHistoryImportQueueRetry('failed-uuid-from-table');
 
-    DB::table('failed_jobs')->insert([
-        'uuid' => 'failed-uuid-from-table',
-        'connection' => 'database',
-        'queue' => 'emails-sync',
-        'payload' => json_encode([
-            'uuid' => 'failed-uuid-from-table',
-            'displayName' => StoreEmailJob::class,
-            'job' => 'Illuminate\\Queue\\CallQueuedHandler@call',
-            'data' => [
-                'commandName' => StoreEmailJob::class,
-                'command' => serialize($job),
-            ],
-        ]),
-        'exception' => 'RuntimeException: Provider unavailable',
-        'failed_at' => now(),
-    ]);
-
-    resolve(RetryMailboxHistoryImportFailuresAction::class)
-        ->execute($user, $account, 'batch-from-failed-jobs');
-
-    Artisan::shouldHaveReceived('call')->with('queue:retry', ['id' => 'failed-uuid-from-table'])->once();
+    expect(resolve(RetryMailboxHistoryImportFailuresAction::class)
+        ->execute($user, $account, 'batch-from-failed-jobs'))->toBeTrue();
 });
 
 it('recovers the failed email through the accounts page callout using the real queue retry command', function (): void {
@@ -771,8 +789,10 @@ it('recovers the failed email through the accounts page callout using the real q
     $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
         'user_id' => $user->id, 'workspace_id' => $user->current_workspace_id,
         'sync_cursor' => 'done', 'sync_inbox' => true,
+        'last_error' => 'This message could not be stored after several tries.',
     ]));
     $batchId = attachHistoryImportBatch($account);
+    $import = resolve(MailboxHistoryImportService::class);
     $service = Mockery::mock(MailServiceInterface::class);
     $service->shouldReceive('fetchMessage')->once()->ordered()->andThrow(new RuntimeException('Provider unavailable'));
     $service->shouldReceive('fetchMessage')->once()->ordered()->andReturn(new FetchedEmailData(
@@ -797,11 +817,121 @@ it('recovers the failed email through the accounts page callout using the real q
 
     Livewire::test(EmailAccountsPage::class)
         ->callAction(TestAction::make('retryFailedImport')->arguments(['account_id' => $account->getKey()]))
-        ->assertNotified();
+        ->assertNotified(__('filament/pages/email-accounts.notifications.retry_failed_import_queued.title'));
+
+    expect($account->fresh()->last_error)->toBeNull();
+    expect($import->hasAwaitingRetrySuccessNotice($batchId))->toBeTrue();
+    expect(resolve(RetryMailboxHistoryImportFailuresAction::class)->execute($user, $account->fresh(), $batchId))->toBeFalse();
+    expect($import->hasAwaitingRetrySuccessNotice($batchId))->toBeTrue();
+    expect($user->notifications()->count())->toBe(0);
 
     Artisan::call('queue:work', ['connection' => 'database', '--queue' => 'emails-sync', '--once' => true]);
 
-    expect(DB::table('failed_jobs')->count())->toBe(0)
-        ->and($account->emails()->sole()->provider_message_id)->toBe('retry-message')
-        ->and(Bus::findBatch($batchId)->failedJobIds)->toBe([]);
+    expect(DB::table('failed_jobs')->count())->toBe(0);
+    expect($account->emails()->sole()->provider_message_id)->toBe('retry-message');
+    expect(Bus::findBatch($batchId)->failedJobIds)->toBe([]);
+    expect($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeFalse();
+    expect($import->hasAwaitingRetrySuccessNotice($batchId))->toBeFalse();
+    expect($user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->count())->toBe(1);
+    expect($user->notifications()->sole()->data['title'])->toBe(__('filament/notifications/mailbox-import-complete.retry_success.title'));
+    expect(resolve(RetryMailboxHistoryImportFailuresAction::class)->execute($user, $account->fresh(), $batchId))->toBeFalse();
+    expect($user->notifications()->count())->toBe(1);
+
+    Livewire::test(EmailAccountsPage::class)
+        ->assertDontSee(__('filament/pages/email-accounts.history_import_failure.badge'))
+        ->assertSee(__('filament/pages/email-accounts.in_sync'))
+        ->assertActionHidden(TestAction::make('retryFailedImport')->arguments(['account_id' => $account->getKey()]));
+});
+
+it('notifies once after a store job fails twice then succeeds through the real queue', function (): void {
+    config()->set('queue.default', 'database');
+    $user = User::factory()->withWorkspace()->create();
+    $this->actingAs($user);
+    Filament::setTenant($user->currentWorkspace);
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'user_id' => $user->id, 'workspace_id' => $user->current_workspace_id,
+        'sync_cursor' => 'done', 'sync_inbox' => true,
+    ]));
+    $batchId = attachHistoryImportBatch($account);
+    $service = Mockery::mock(MailServiceInterface::class);
+    $service->shouldReceive('fetchMessage')->once()->ordered()->andThrow(new RuntimeException('Provider unavailable'));
+    $service->shouldReceive('fetchMessage')->once()->ordered()->andThrow(new RuntimeException('Provider unavailable'));
+    $service->shouldReceive('fetchMessage')->once()->ordered()->andReturn(new FetchedEmailData(
+        providerMessageId: 'retry-twice-message', threadId: 'retry-twice-thread', rfcMessageId: '<retry-twice@example.com>',
+        inReplyTo: null, subject: 'Quarterly review', snippet: 'Quarterly review',
+        bodyText: 'Quarterly review', bodyHtml: '<p>Quarterly review</p>',
+        direction: EmailDirection::INBOUND, folder: EmailFolder::Inbox,
+        sentAt: now(), isRead: true, hasAttachments: false, participants: [], attachments: [],
+    ));
+    $factory = Mockery::mock(MailServiceFactoryInterface::class);
+    $factory->shouldReceive('make')->andReturn($service);
+    app()->instance(MailServiceFactoryInterface::class, $factory);
+
+    $job = new StoreEmailJob($account, 'retry-twice-message');
+    $job->tries = 1;
+    Bus::findBatch($batchId)->add([$job]);
+    Artisan::call('queue:work', ['connection' => 'database', '--queue' => 'emails-sync', '--once' => true]);
+
+    Livewire::test(EmailAccountsPage::class)
+        ->callAction(TestAction::make('retryFailedImport')->arguments(['account_id' => $account->getKey()]))
+        ->assertNotified(__('filament/pages/email-accounts.notifications.retry_failed_import_queued.title'));
+
+    Artisan::call('queue:work', ['connection' => 'database', '--queue' => 'emails-sync', '--once' => true]);
+
+    expect($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeTrue()
+        ->and($account->emails()->count())->toBe(0)
+        ->and($user->notifications()->count())->toBe(0);
+
+    Livewire::test(EmailAccountsPage::class)
+        ->callAction(TestAction::make('retryFailedImport')->arguments(['account_id' => $account->getKey()]))
+        ->assertNotified(__('filament/pages/email-accounts.notifications.retry_failed_import_queued.title'));
+
+    Artisan::call('queue:work', ['connection' => 'database', '--queue' => 'emails-sync', '--once' => true]);
+
+    expect($account->emails()->sole()->provider_message_id)->toBe('retry-twice-message');
+    expect($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeFalse();
+    expect($user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->count())->toBe(1);
+});
+
+it('does not treat a missing failed job record as retried', function (): void {
+    $user = User::factory()->withWorkspace()->create();
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'user_id' => $user->id,
+        'workspace_id' => $user->current_workspace_id,
+        'sync_cursor' => 'history-done',
+        'last_error' => 'This message could not be stored after several tries.',
+    ]));
+    $batchId = attachHistoryImportBatch($account);
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 1,
+        'pending_jobs' => 0,
+        'failed_jobs' => 1,
+        'failed_job_ids' => json_encode(['missing-uuid']),
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    expect(resolve(RetryMailboxHistoryImportFailuresAction::class)->execute($user, $account, $batchId))->toBeFalse();
+    expect($account->fresh()->last_error)->toBe('This message could not be stored after several tries.');
+    expect(resolve(MailboxHistoryImportService::class)->hasAwaitingRetrySuccessNotice($batchId))->toBeFalse();
+});
+
+it('does not surface an import issue after resolved failures leave an empty failed job id list', function (): void {
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'sync_cursor' => 'history-done',
+    ]));
+    $batchId = attachHistoryImportBatch($account);
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 3,
+        'pending_jobs' => 0,
+        'failed_jobs' => 2,
+        'failed_job_ids' => json_encode([]),
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    $summary = resolve(MailboxHistoryImportService::class)->summary($account->fresh());
+
+    expect($summary?->failedJobs)->toBe(0)
+        ->and($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeFalse();
 });

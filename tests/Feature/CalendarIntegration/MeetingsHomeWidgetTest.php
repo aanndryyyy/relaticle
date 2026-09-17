@@ -8,7 +8,6 @@ use App\Models\People;
 use App\Models\User;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
-use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Laravel\Pennant\Feature;
@@ -182,7 +181,8 @@ it('retries the failed import from the home callout', function (): void {
         'finished_at' => now()->getTimestamp(),
     ]);
 
-    Artisan::shouldReceive('call')->with('queue:retry', ['id' => 'failed-1'])->once()->andReturn(0);
+    insertHistoryImportFailedJob($this->account, $batchId, 'failed-1');
+    fakeHistoryImportQueueRetry('failed-1');
 
     livewire(MeetingsHomeWidget::class)
         ->callAction('retryFailedImport', arguments: ['account_id' => $this->account->id])

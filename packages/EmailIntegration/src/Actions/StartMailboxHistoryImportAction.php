@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Relaticle\EmailIntegration\Actions;
 
 use Illuminate\Support\Facades\Cache;
+use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
 use Relaticle\EmailIntegration\Jobs\IncrementalCalendarSyncJob;
 use Relaticle\EmailIntegration\Jobs\InitialCalendarSyncJob;
 use Relaticle\EmailIntegration\Jobs\InitialEmailSyncJob;
@@ -35,7 +36,11 @@ final readonly class StartMailboxHistoryImportAction
 
             $batch = $this->mailboxHistoryImport->startBatch($account);
 
-            $account->update(['history_import_batch_id' => $batch->id]);
+            $account->update([
+                'history_import_batch_id' => $batch->id,
+                'status' => EmailAccountStatus::ACTIVE,
+                'last_error' => null,
+            ]);
 
             if ($hadSyncCursor) {
                 $account->update([

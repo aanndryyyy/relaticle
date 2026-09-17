@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
 use Relaticle\EmailIntegration\Actions\CompleteMailboxHistoryImportAction;
 use Relaticle\EmailIntegration\Data\MailboxHistoryImportSummary;
+use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
 use Relaticle\EmailIntegration\Jobs\StoreEmailJob;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 
@@ -64,21 +65,19 @@ final readonly class MailboxHistoryImportService
             return false;
         }
 
-        if ($account->sync_cursor === null) {
+        $batch = Bus::findBatch($account->history_import_batch_id);
+
+        if ($batch instanceof Batch && $batch->totalJobs > 0 && ! $this->batchIsComplete($batch)) {
             return true;
         }
 
-        $batch = Bus::findBatch($account->history_import_batch_id);
-
-        if (! $batch instanceof Batch) {
+        if ($account->sync_cursor !== null) {
             return false;
         }
 
-        if ($batch->totalJobs === 0) {
-            return false;
-        }
-
-        return ! $this->batchIsComplete($batch);
+        return $account->status === EmailAccountStatus::ACTIVE
+            && $batch instanceof Batch
+            && ! $batch->cancelled();
     }
 
     public function summary(ConnectedAccount $account): ?MailboxHistoryImportSummary
@@ -189,18 +188,11 @@ final readonly class MailboxHistoryImportService
     }
 
     /**
-     * Laravel's failed_jobs counter increments on every failed attempt (including retries).
-     * failed_job_ids lists each batch job once, which matches messages the user must retry.
+     * Distinct unresolved batch jobs, not Laravel's cumulative failed-attempt counter.
      */
     private function batchFailedJobCount(Batch $batch): int
     {
-        $failedJobIds = $batch->failedJobIds;
-
-        if ($failedJobIds !== []) {
-            return count($failedJobIds);
-        }
-
-        return $batch->failedJobs;
+        return count($batch->failedJobIds);
     }
 
     /**
@@ -238,14 +230,16 @@ final readonly class MailboxHistoryImportService
     public function startBatch(ConnectedAccount $account): Batch
     {
         $accountId = (string) $account->getKey();
+        $complete = static function (Batch $batch) use ($accountId): void {
+            resolve(CompleteMailboxHistoryImportAction::class)->execute($accountId, $batch->id);
+        };
 
         return Bus::batch([])
             ->name("Mailbox history import: {$account->email_address}")
             ->onQueue('emails-sync')
             ->allowFailures()
-            ->finally(static function (Batch $batch) use ($accountId): void {
-                resolve(CompleteMailboxHistoryImportAction::class)->execute($accountId, $batch->id);
-            })
+            ->progress($complete)
+            ->finally($complete)
             ->dispatch();
     }
 

@@ -28,12 +28,17 @@ it('retries failed imports from the accounts page callout', function (string $th
         'failed_job_ids' => json_encode(['failed-job']),
         'finished_at' => now()->getTimestamp(),
     ]);
+    insertHistoryImportFailedJob($account, $batchId, 'failed-job');
 
     Artisan::partialMock()
         ->shouldReceive('call')
         ->once()
         ->with('queue:retry', ['id' => 'failed-job'])
-        ->andReturn(0);
+        ->andReturnUsing(function (): int {
+            DB::table('failed_jobs')->where('uuid', 'failed-job')->delete();
+
+            return 0;
+        });
 
     visit('/app/login')->{$theme}()
         ->type('[id="form.email"]', $user->email)
