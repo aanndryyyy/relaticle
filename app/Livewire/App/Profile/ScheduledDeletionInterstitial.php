@@ -7,6 +7,7 @@ namespace App\Livewire\App\Profile;
 use App\Actions\Jetstream\CancelUserDeletion;
 use App\Livewire\BaseLivewireComponent;
 use App\Models\User;
+use App\Support\Impersonation\Impersonator;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Illuminate\Http\RedirectResponse;
@@ -58,6 +59,12 @@ final class ScheduledDeletionInterstitial extends BaseLivewireComponent
 
     public function logout(): Redirector|RedirectResponse
     {
+        if (resolve(Impersonator::class)->active(request())) {
+            resolve(Impersonator::class)->stop(request());
+
+            return redirect()->to(url()->getSysadminUrl('users'));
+        }
+
         filament()->auth()->logout();
 
         return redirect(Filament::getLoginUrl());

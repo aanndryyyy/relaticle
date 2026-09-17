@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Support\Impersonation;
 
 use App\Models\User;
+use App\Support\Auth\AuthenticationSession;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Session\Session;
 use Illuminate\Http\Request;
@@ -56,6 +57,7 @@ final readonly class Impersonator
             return;
         }
 
+        AuthenticationSession::clear();
         $session->forget([Auth::guard('web')->getName(), self::PASSWORD_HASH]);
         $session->migrate(true);
         Auth::guard('web')->forgetUser();
@@ -106,15 +108,22 @@ final readonly class Impersonator
      * `last_login_at`, which feeds the engagement buckets and the Mailcoach
      * subscriber tags; logout cycles the remember token, signing the customer
      * out of every device they stayed signed in on.
+     *
+     * Proofs are session-scoped, so they are cleared and re-stamped as at login;
+     * the administrator's authority stands in for the assumed user's second factor.
      */
     private function assume(Session $session, User $user): void
     {
         $guard = Auth::guard('web');
+
+        AuthenticationSession::clear();
 
         $session->put($guard->getName(), $user->getAuthIdentifier());
         $session->migrate(true);
         $session->put(self::PASSWORD_HASH, $user->getAuthPassword());
 
         $guard->setUser($user);
+
+        AuthenticationSession::markComplete($user);
     }
 }

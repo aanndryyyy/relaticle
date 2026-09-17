@@ -2,18 +2,23 @@
 
 declare(strict_types=1);
 
+use App\Http\Middleware\StopImpersonationOnLogout;
+use App\Livewire\App\Profile\ScheduledDeletionInterstitial;
 use App\Models\ActivityLog\Activity;
 use App\Models\ActivityLog\Scopes\WorkspaceScope;
 use App\Models\Company;
 use App\Models\User;
+use App\Support\Auth\AuthenticationSession;
 use App\Support\Impersonation\Impersonator;
+use Illuminate\Foundation\Application;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\URL;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
 
 use function Pest\Laravel\actingAs;
 
-mutates(Impersonator::class);
+mutates(Impersonator::class, StopImpersonationOnLogout::class, ScheduledDeletionInterstitial::class);
 
 function impersonationLink(User $target, array $parameters = []): string
 {
@@ -202,4 +207,102 @@ it('leaves an ordinary write untagged', function (): void {
         ->first();
 
     expect($activity->properties->get('impersonated_by'))->toBeNull();
+});
+
+it('drops the administrators identity confirmation when assuming the customer', function (): void {
+    $administratorsOwnAccount = User::factory()->withWorkspace()->create();
+
+    actingAs($administratorsOwnAccount, 'web');
+    session()->put('auth.password_confirmed_at', time());
+    AuthenticationSession::startOperation($administratorsOwnAccount, 'set_password', null);
+
+    actingAs($this->administrator, 'sysadmin')->get(impersonationLink($this->customer));
+    Auth::shouldUse('web');
+
+    $this->get(route('auth.socialite.link.redirect', ['provider' => 'google']))
+        ->assertRedirect(route('password.confirm'));
+
+    expect(AuthenticationSession::pendingOperation())->toBe([]);
+});
+
+it('drops the confirmation the customer session held when restoring the administrator', function (): void {
+    $administratorsOwnAccount = User::factory()->withWorkspace()->create();
+
+    actingAs($administratorsOwnAccount, 'web');
+    actingAs($this->administrator, 'sysadmin')->get(impersonationLink($this->customer));
+    session()->put('auth.password_confirmed_at', time());
+
+    $this->delete(route('impersonation.stop'));
+    Auth::shouldUse('web');
+
+    $this->get(route('auth.socialite.link.redirect', ['provider' => 'google']))
+        ->assertRedirect(route('password.confirm'));
+});
+
+it('keeps an mfa enrolled customer signed in on the next panel request', function (): void {
+    $customer = User::factory()->withConfirmedMfa()->withWorkspace()->create();
+
+    actingAs($this->administrator, 'sysadmin')->get(impersonationLink($customer));
+
+    $this->get(url()->getAppUrl($customer->currentWorkspace->slug))
+        ->assertSuccessful();
+
+    expect(Auth::guard('web')->id())->toBe($customer->getKey());
+});
+
+it('keeps the administrators own mfa session complete after stopping', function (): void {
+    $administratorsOwnAccount = User::factory()->withConfirmedMfa()->withWorkspace()->create();
+
+    actingAs($administratorsOwnAccount, 'web');
+    AuthenticationSession::markComplete($administratorsOwnAccount);
+    actingAs($this->administrator, 'sysadmin')->get(impersonationLink($this->customer));
+
+    $this->delete(route('impersonation.stop'));
+
+    $this->get(url()->getAppUrl($administratorsOwnAccount->currentWorkspace->slug))
+        ->assertSuccessful();
+
+    expect(Auth::guard('web')->id())->toBe($administratorsOwnAccount->getKey());
+});
+
+it('ends the impersonation instead of signing the customer out', function (string $routeName, array $parameters): void {
+    $this->customer->forceFill(['remember_token' => 'keep-me-signed-in'])->saveQuietly();
+
+    actingAs($this->administrator, 'sysadmin')->get(impersonationLink($this->customer));
+
+    $this->post(route($routeName, $parameters))
+        ->assertRedirect(url()->getSysadminUrl('users'));
+
+    expect($this->customer->refresh()->remember_token)->toBe('keep-me-signed-in')
+        ->and(Auth::guard('web')->check())->toBeFalse()
+        ->and(session('impersonation.target_id'))->toBeNull();
+})->with([
+    'panel sign out' => ['filament.app.auth.logout', []],
+    'fortify sign out' => ['logout', []],
+    'invitation account switch' => ['workspace-invitations.token.switch', ['token' => str_repeat('a', 40)]],
+]);
+
+it('ends the impersonation from the scheduled deletion interstitial instead of signing the customer out', function (): void {
+    $customer = User::factory()->withPersonalWorkspace()->scheduledForDeletion()->create();
+    $customer->forceFill(['remember_token' => 'keep-me-signed-in'])->saveQuietly();
+
+    actingAs($this->administrator, 'sysadmin')->get(impersonationLink($customer));
+    Auth::shouldUse('web');
+    app()->rebinding('request', fn (Application $app, Request $request) => $request->setLaravelSession($app['session.store']));
+
+    livewire(ScheduledDeletionInterstitial::class)
+        ->callAction('logout')
+        ->assertRedirect(url()->getSysadminUrl('users'));
+
+    expect($customer->refresh()->remember_token)->toBe('keep-me-signed-in')
+        ->and(Auth::guard('web')->check())->toBeFalse();
+});
+
+it('leaves the sysadmin panels own sign out alone', function (): void {
+    actingAs($this->administrator, 'sysadmin')->get(impersonationLink($this->customer));
+
+    $this->post(route('filament.sysadmin.auth.logout'))
+        ->assertRedirect(url()->getSysadminUrl('login'));
+
+    expect(Auth::guard('sysadmin')->check())->toBeFalse();
 });
