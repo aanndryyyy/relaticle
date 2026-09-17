@@ -15,13 +15,14 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Relaticle\Chat\Enums\MessageOrigin;
+use Relaticle\Chat\Support\TypedMessages;
 use Spatie\MailcoachSdk\Exceptions\InvalidData;
 use Spatie\MailcoachSdk\Exceptions\RateLimited;
 use Spatie\MailcoachSdk\Exceptions\ResourceNotFound;
 use Spatie\MailcoachSdk\Facades\Mailcoach;
 use Spatie\MailcoachSdk\Resources\Subscriber;
 
-mutates(SyncSubscriberJob::class, SubscriberProfileDeriver::class, SubscriberProfile::class);
+mutates(SyncSubscriberJob::class, SubscriberProfileDeriver::class, SubscriberProfile::class, TypedMessages::class);
 
 beforeEach(function (): void {
     Queue::fake([SyncSubscriberJob::class]);
