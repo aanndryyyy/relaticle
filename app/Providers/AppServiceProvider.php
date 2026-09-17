@@ -68,8 +68,10 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Request;
+use Illuminate\Log\Context\Repository as ContextRepository;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades;
+use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -324,11 +326,20 @@ final class AppServiceProvider extends ServiceProvider
             }
 
             // The causer stays the impersonated user because the record is theirs.
+            $administratorId = $this->app->make(Impersonator::class)->administratorId(request())
+                ?? Context::getHidden('impersonated_by');
+
+            if (is_string($administratorId)) {
+                $activity->properties = ($activity->properties ?? new Collection)
+                    ->put('impersonated_by', $administratorId);
+            }
+        });
+
+        Context::dehydrating(function (ContextRepository $context): void {
             $administratorId = $this->app->make(Impersonator::class)->administratorId(request());
 
             if ($administratorId !== null) {
-                $activity->properties = ($activity->properties ?? new Collection)
-                    ->put('impersonated_by', $administratorId);
+                $context->addHidden('impersonated_by', $administratorId);
             }
         });
 

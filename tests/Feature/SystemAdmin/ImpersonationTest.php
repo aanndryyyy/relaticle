@@ -12,7 +12,9 @@ use App\Support\Auth\AuthenticationSession;
 use App\Support\Impersonation\Impersonator;
 use Illuminate\Foundation\Application;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\Str;
@@ -222,6 +224,34 @@ it('tags a write made during impersonation with the administrator', function ():
         'workspace_id' => $this->customer->currentWorkspace->getKey(),
         'creator_id' => $this->customer->getKey(),
     ]);
+
+    $activity = Activity::withoutGlobalScope(WorkspaceScope::class)
+        ->where('subject_id', $company->getKey())
+        ->latest('id')
+        ->first();
+
+    expect($activity->properties->get('impersonated_by'))->toBe($this->administrator->getKey());
+});
+
+it('tags a write made by a job queued during impersonation with the administrator', function (): void {
+    $this->get(impersonationLink($this->customer));
+
+    $workspaceId = $this->customer->currentWorkspace->getKey();
+    $customerId = $this->customer->getKey();
+
+    dispatch(fn (): Company => Company::factory()->create([
+        'name' => 'Queued during impersonation',
+        'workspace_id' => $workspaceId,
+        'creator_id' => $customerId,
+    ]))->onConnection('database');
+
+    session()->flush();
+    Auth::guard('web')->forgetUser();
+    Context::flush();
+
+    Artisan::call('queue:work', ['connection' => 'database', '--once' => true, '--stop-when-empty' => true]);
+
+    $company = Company::query()->where('name', 'Queued during impersonation')->sole();
 
     $activity = Activity::withoutGlobalScope(WorkspaceScope::class)
         ->where('subject_id', $company->getKey())
