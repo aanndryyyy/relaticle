@@ -83,7 +83,7 @@ final readonly class StartSetupGreeting
             return false;
         }
 
-        TurnPresence::begin($conversationId, turnId: $turnId, message: '', isContinuation: true);
+        TurnPresence::begin($conversationId, turnId: $turnId, message: '', origin: MessageOrigin::Greeting);
 
         dispatch(new ProcessChatMessage(
             user: $user,

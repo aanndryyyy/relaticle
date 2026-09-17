@@ -85,7 +85,7 @@ final readonly class TurnContinuationService
             return false;
         }
 
-        TurnPresence::begin($conversationId, turnId: $turnId, message: '', isContinuation: true);
+        TurnPresence::begin($conversationId, turnId: $turnId, message: '', origin: MessageOrigin::Resume);
 
         dispatch(new ProcessChatMessage(
             user: $user,

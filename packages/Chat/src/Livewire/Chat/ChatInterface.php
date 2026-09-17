@@ -13,6 +13,7 @@ use Illuminate\Support\Str;
 use Livewire\Attributes\Renderless;
 use Relaticle\Chat\Actions\FindConversation;
 use Relaticle\Chat\Actions\ListConversationMessages;
+use Relaticle\Chat\Enums\MessageOrigin;
 use Relaticle\Chat\Enums\PendingActionStatus;
 use Relaticle\Chat\Models\PendingAction;
 use Relaticle\Chat\Support\DisplayBlocks;
@@ -144,7 +145,7 @@ final class ChatInterface extends BaseLivewireComponent
         if ($presence !== null && ! $this->turnAlreadyPersisted($presence['started_at'])) {
             $this->turnInFlight = true;
 
-            if ($presence['kind'] === 'message') {
+            if ($presence['origin'] === MessageOrigin::Typed->value) {
                 $this->messages[] = $this->inFlightUserMessage($presence);
             }
         }
@@ -198,7 +199,7 @@ final class ChatInterface extends BaseLivewireComponent
      * The in-flight user message, shaped like a ListConversationMessages row so
      * the client renders it exactly as the persisted one will after the turn.
      *
-     * @param  array{kind: string, message: string, document: array<string, mixed>, mentions: list<array{type: string, id: string, label: string}>, page_context: array{type: string, id: string, label: string}|null, started_at: string}  $presence
+     * @param  array{origin: string, message: string, document: array<string, mixed>, mentions: list<array{type: string, id: string, label: string}>, page_context: array{type: string, id: string, label: string}|null, started_at: string}  $presence
      * @return array{role: string, content: string, created_at: string, document: array<string, mixed>, pending_actions: array<int, mixed>, display_blocks: list<array<string, mixed>>, next_steps: list<array{label: string, prompt: string}>, feedback: null, mentions: list<array{type: string, id: string, label: string, url: ?string}>, page_context: array{type: string, id: string, label: string, url: ?string}|null}
      */
     private function inFlightUserMessage(array $presence): array
