@@ -83,7 +83,7 @@ test('turns legacy approval echoes and ordinary continuations into resume rows',
     $conversationId = legacyConversation($user);
 
     legacyMessage($conversationId, $user, 'user', 'Create a company', '[]', 0);
-    $approval = legacyMessage($conversationId, $user, 'user', '[approval] approved create company', '[]', 1);
+    $approval = legacyMessage($conversationId, $user, 'user', "[approval]\nstatus: approved\noperation: create\nentity_type: company\n", '[]', 1);
     $continuation = legacyMessage($conversationId, $user, 'user', 'The proposals from your last turn have just been decided.', '{"kind": "continuation"}', 2);
 
     runMigrateSyntheticChatMessagesMigration();
@@ -113,13 +113,62 @@ test('leaves typed rows and the import handoff assistant row untouched', functio
         ->and(json_decode((string) $rows[$handoff]->meta, true))->toBe(['kind' => 'import_handoff']);
 });
 
-test('is safe to run twice', function (): void {
+test('migrates every payload the retired approval writer produced', function (string $content): void {
     $user = User::factory()->withPersonalWorkspace()->create();
     $conversationId = legacyConversation($user);
-    $continuation = legacyMessage($conversationId, $user, 'user', 'old prompt', '{"kind": "continuation"}', 0);
+    $approval = legacyMessage($conversationId, $user, 'user', $content, '[]', 0);
 
     runMigrateSyntheticChatMessagesMigration();
+
+    $row = DB::table('agent_conversation_messages')->where('id', $approval)->first();
+
+    expect($row->origin)->toBe('resume')
+        ->and($row->content)->toBe('The user decided the proposals above.');
+})->with([
+    'structured' => "[approval]\nstatus: rejected\noperation: update\nentity_type: people\n",
+    'approved prose' => "[approval]\nThe user APPROVED and the system has already EXECUTED this action: create Acme.",
+    'rejected prose' => "[approval]\nThe user REJECTED the proposal to delete Acme.\nDo not silently retry it.",
+]);
+
+test('never rewrites a message a person typed that merely starts with the approval token', function (string $content): void {
+    $user = User::factory()->withPersonalWorkspace()->create();
+    $conversationId = legacyConversation($user);
+    $typed = legacyMessage($conversationId, $user, 'user', $content, '[]', 0);
+
     runMigrateSyntheticChatMessagesMigration();
 
-    expect(DB::table('agent_conversation_messages')->where('id', $continuation)->value('origin'))->toBe('resume');
+    $row = DB::table('agent_conversation_messages')->where('id', $typed)->first();
+
+    expect($row->origin)->toBe('typed')
+        ->and($row->content)->toBe($content);
+})->with([
+    'same line' => '[approval] why does this appear in my chat?',
+    'own line, human text' => "[approval]\nplease approve the Acme deal",
+    'bare token' => '[approval]',
+]);
+
+test('changes nothing on a second run, including rows already in the new shape', function (): void {
+    $user = User::factory()->withPersonalWorkspace()->create();
+    $conversationId = legacyConversation($user);
+
+    legacyMessage($conversationId, $user, 'user', 'Create a company', '[]', 0);
+    legacyMessage($conversationId, $user, 'user', "[approval]\nstatus: approved\n", '[]', 1);
+    legacyMessage($conversationId, $user, 'user', 'old prompt', '{"kind": "continuation"}', 2);
+    $current = legacyMessage($conversationId, $user, 'user', 'The user decided the proposals above.', '[]', 3);
+    DB::table('agent_conversation_messages')->where('id', $current)->update(['origin' => 'resume']);
+
+    $snapshot = fn (): array => DB::table('agent_conversation_messages')
+        ->where('conversation_id', $conversationId)
+        ->orderBy('id')
+        ->get(['id', 'role', 'origin', 'content', 'meta'])
+        ->map(fn (object $row): array => (array) $row)
+        ->all();
+
+    runMigrateSyntheticChatMessagesMigration();
+    $afterFirstRun = $snapshot();
+
+    runMigrateSyntheticChatMessagesMigration();
+
+    expect($snapshot())->toBe($afterFirstRun)
+        ->and(array_column($afterFirstRun, 'origin'))->toBe(['typed', 'resume', 'resume', 'resume']);
 });

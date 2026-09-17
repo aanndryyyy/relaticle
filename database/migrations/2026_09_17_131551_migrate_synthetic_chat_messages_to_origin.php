@@ -15,11 +15,25 @@ return new class extends Migration
 
     private const string MESSAGES = 'agent_conversation_messages';
 
+    // The three payloads the retired approval writer produced. A bare `[approval]`
+    // prefix is not enough: a person can type that, and this rewrite is one-way.
+    private const array LEGACY_APPROVAL_PREFIXES = [
+        "[approval]\nstatus: ",
+        "[approval]\nThe user APPROVED ",
+        "[approval]\nThe user REJECTED the proposal to ",
+    ];
+
     public function up(): void
     {
+        DB::statement("SET LOCAL lock_timeout = '5s'");
+
         DB::table(self::MESSAGES)
             ->where('role', 'user')
-            ->where('content', 'like', '[approval]%')
+            ->where(function (Builder $legacy): void {
+                foreach (self::LEGACY_APPROVAL_PREFIXES as $prefix) {
+                    $legacy->orWhere('content', 'like', $prefix.'%');
+                }
+            })
             ->update(['origin' => 'resume']);
 
         $this->legacyContinuations()
