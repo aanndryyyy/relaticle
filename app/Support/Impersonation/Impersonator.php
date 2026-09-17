@@ -8,8 +8,10 @@ use App\Models\User;
 use App\Support\Auth\AuthenticationSession;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Session\Session;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cache;
 
 final readonly class Impersonator
 {
@@ -44,7 +46,11 @@ final readonly class Impersonator
             return;
         }
 
-        $this->record('impersonation_stopped', Auth::guard('web')->user());
+        $this->record(
+            'impersonation_stopped',
+            $this->administrator($this->administratorId($request)),
+            Auth::guard('web')->user(),
+        );
 
         $session = $request->session();
         $previousUser = User::query()->find($session->get(self::PREVIOUS_USER_ID));
@@ -86,17 +92,47 @@ final readonly class Impersonator
     }
 
     /**
+     * Resolved through the guard's provider: the app host never holds a sysadmin
+     * session, and app code may not name the SystemAdmin model.
+     */
+    public function administrator(mixed $id): (Model&Authenticatable)|null
+    {
+        if (! is_string($id) || $id === '') {
+            return null;
+        }
+
+        $administrator = Auth::createUserProvider(config('auth.guards.sysadmin.provider'))?->retrieveById($id);
+
+        return $administrator instanceof Model ? $administrator : null;
+    }
+
+    public function claim(Request $request): bool
+    {
+        $nonce = $request->query('nonce');
+
+        if (! is_string($nonce) || $nonce === '') {
+            return false;
+        }
+
+        return Cache::add(
+            'impersonation.consumed:'.$nonce,
+            true,
+            max(1, (int) $request->query('expires') - now()->getTimestamp()),
+        );
+    }
+
+    /**
      * Swapping from one customer to another stops the first, so the record has to
      * be written where the state is known rather than in the stop route.
      */
-    public function record(string $event, ?Authenticatable $target): void
+    public function record(string $event, (Model&Authenticatable)|null $administrator, ?Authenticatable $target): void
     {
         if (! $target instanceof User) {
             return;
         }
 
         activity((string) config('activitylog.default_log_name'))
-            ->causedBy(Auth::guard('sysadmin')->user())
+            ->causedBy($administrator)
             ->performedOn($target)
             ->withProperties(['email' => $target->email])
             ->event($event)

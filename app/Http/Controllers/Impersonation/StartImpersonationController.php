@@ -10,7 +10,6 @@ use App\Support\Impersonation\Impersonator;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 
 final readonly class StartImpersonationController
@@ -19,15 +18,17 @@ final readonly class StartImpersonationController
 
     public function __invoke(Request $request, string $user): RedirectResponse
     {
-        $administrator = Auth::guard('sysadmin')->user();
+        $administrator = $this->impersonator->administrator($request->query('administrator'));
 
-        abort_unless($administrator instanceof Authenticatable, 401);
+        abort_unless($administrator instanceof Authenticatable, 403);
         abort_unless(Gate::forUser($administrator)->allows('impersonate'), 403);
 
         $target = User::query()->findOrFail($user);
 
+        abort_unless($this->impersonator->claim($request), 403);
+
         $this->impersonator->stop($request);
-        $this->impersonator->record('impersonation_started', $target);
+        $this->impersonator->record('impersonation_started', $administrator, $target);
         $this->impersonator->start($request, (string) $administrator->getAuthIdentifier(), $target);
 
         return redirect()->to(url()->getAppUrl($this->landingPath($request, $target)));

@@ -161,12 +161,11 @@ Route::middleware([ProvideMarkdownResponse::class, AddVaryAcceptHeader::class])-
 
 Route::get('/dashboard', fn () => redirect()->to(url()->getAppUrl()))->name('dashboard');
 
-// The link is built on the sysadmin host and consumed there, then lands on the app
-// host. Both rely on SESSION_DOMAIN being the shared parent once either panel is
-// served from its own subdomain, or the swapped session never crosses over.
+// Minted on the sysadmin host, consumed on the app host: the two keep separate
+// sessions, so the signed link carries the administrator instead of a guard.
 Route::prefix('impersonate')->group(function (): void {
     Route::get('/{user}', StartImpersonationController::class)
-        ->middleware(['signed', 'auth:sysadmin'])
+        ->middleware('signed:relative')
         ->name('impersonation.start');
 
     Route::delete('/', StopImpersonationController::class)

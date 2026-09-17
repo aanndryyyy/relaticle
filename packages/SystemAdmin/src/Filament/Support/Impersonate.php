@@ -8,18 +8,18 @@ use App\Models\User;
 use App\Models\Workspace;
 use Filament\Actions\Action;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Support\Str;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
 use Relaticle\SystemAdmin\Policies\UserPolicy;
 use Relaticle\SystemAdmin\Policies\WorkspacePolicy;
 
 /**
- * The link is a short-lived signed GET so the panel can redirect straight into it.
- * The app-side controller re-checks the `impersonate` gate; the signature only
- * protects the parameters, it does not stand in for authorization.
+ * Staff and customer sessions are isolated per host, so the link is a single-use
+ * bearer handoff the app host consumes; it re-checks the `impersonate` gate itself.
  */
 final class Impersonate
 {
-    private const int LINK_LIFETIME_MINUTES = 5;
+    private const int LINK_LIFETIME_SECONDS = 60;
 
     public static function user(): Action
     {
@@ -62,11 +62,21 @@ final class Impersonate
      */
     private static function link(User $target, array $parameters = []): string
     {
-        return URL::temporarySignedRoute(
+        $path = URL::temporarySignedRoute(
             'impersonation.start',
-            now()->addMinutes(self::LINK_LIFETIME_MINUTES),
-            ['user' => $target->getKey(), ...$parameters]
+            now()->addSeconds(self::LINK_LIFETIME_SECONDS),
+            [
+                'user' => $target->getKey(),
+                'administrator' => self::administrator()->getKey(),
+                'nonce' => Str::random(40),
+                ...$parameters,
+            ],
+            absolute: false,
         );
+
+        return config('app.app_panel_domain')
+            ? url()->getAppUrl($path)
+            : url()->getPublicUrl($path);
     }
 
     private static function allowed(): bool
