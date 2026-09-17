@@ -46,15 +46,6 @@ mutates(
     StoreEmailJob::class,
 );
 
-function attachHistoryImportBatch(ConnectedAccount $account): string
-{
-    $service = resolve(MailboxHistoryImportService::class);
-    $batch = $service->startBatch($account);
-    $account->update(['history_import_batch_id' => $batch->id]);
-
-    return $batch->id;
-}
-
 it('uses allowFailures on the history import batch', function (): void {
     Notification::fake();
 

@@ -371,7 +371,8 @@ final class ConnectedAccount extends Model
 
     public function showsSyncProgressOnAccountsPage(): bool
     {
-        return $this->showsMailboxHistoryImportProgressOnAccountsPage()
+        return $this->isImportingHistory()
+            || $this->showsMailboxHistoryImportProgressOnAccountsPage()
             || $this->showsCalendarSyncProgress()
             || ($this->isEmailSyncing() && ! $this->isEmailHistoryImportRunning());
     }

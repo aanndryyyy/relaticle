@@ -21,11 +21,14 @@ use Filament\Actions\Testing\TestAction;
 use Illuminate\Contracts\Broadcasting\Broadcaster as BroadcasterContract;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 use Pest\Browser\Api\AwaitableWebpage;
 use Pest\Browser\Playwright\Playwright;
 use Relaticle\EmailIntegration\Controllers\RedirectController;
+use Relaticle\EmailIntegration\Models\ConnectedAccount;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 use Relaticle\EmailIntegration\Support\MailboxOAuthWorkspace;
 use Tests\Helpers\PestTiaRuntime;
 use Tests\TestCase;
@@ -100,6 +103,24 @@ function userChannelAuth(User $user, string $id): bool
     }
 
     return (bool) $callback($user, $id);
+}
+
+function attachHistoryImportBatch(ConnectedAccount $account): string
+{
+    $batch = resolve(MailboxHistoryImportService::class)->startBatch($account);
+    $account->update(['history_import_batch_id' => $batch->id]);
+
+    return $batch->id;
+}
+
+function setHistoryImportBatchProgress(string $batchId, int $totalJobs, int $pendingJobs): void
+{
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => $totalJobs,
+        'pending_jobs' => $pendingJobs,
+        'failed_jobs' => 0,
+        'finished_at' => null,
+    ]);
 }
 
 function bindMailboxOAuthWorkspace(User $user, ?Workspace $team = null): void

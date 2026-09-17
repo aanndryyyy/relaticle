@@ -209,10 +209,57 @@ it('preserves the stored refresh token when a reconnect returns none', function 
             ->firstOrFail();
     };
 
-    $connect('original-refresh');   // first consent issues a refresh token
-    $account = $connect(null);      // re-consent returns none — must NOT clobber the stored token
+    $connect('original-refresh');
+    $account = $connect(null);
 
     expect($account->refresh()->refresh_token)->toBe('original-refresh');
+
+    Bus::assertDispatchedTimes(InitialEmailSyncJob::class, 1);
+});
+
+it('does not restart history import when an active mailbox is reconnected', function (): void {
+    Bus::fake();
+
+    $user = User::factory()->withWorkspace()->create();
+    $this->actingAs($user);
+
+    $connect = function () use ($user): ConnectedAccount {
+        $social = new SocialiteUser;
+        $social->id = 'gmail-live-reconnect';
+        $social->email = 'live-reconnect@example.com';
+        $social->name = 'Demo';
+        $social->token = 'access-token';
+        $social->refreshToken = 'refresh-token';
+        $social->expiresIn = 3600;
+        $social->approvedScopes = [
+            'https://www.googleapis.com/auth/gmail.readonly',
+            'https://www.googleapis.com/auth/gmail.send',
+        ];
+
+        Socialite::fake('gmail', $social);
+        bindMailboxOAuthWorkspace($user);
+
+        $this->get(route('email-accounts.callback', ['provider' => 'gmail']))->assertRedirect();
+
+        return ConnectedAccount::query()
+            ->where('user_id', $user->getKey())
+            ->where('email_address', 'live-reconnect@example.com')
+            ->firstOrFail();
+    };
+
+    $account = $connect();
+    $account->update([
+        'sync_cursor' => 'history-done',
+        'history_import_batch_id' => 'batch-1',
+    ]);
+
+    $account = $connect();
+
+    expect($account->sync_cursor)->toBe('history-done')
+        ->and($account->history_import_batch_id)->toBe('batch-1');
+
+    Bus::assertDispatchedTimes(InitialEmailSyncJob::class, 1);
+    Bus::assertDispatchedTimes(RelinkMailboxHistoryJob::class, 1);
 });
 
 it('dispatches history import when a disconnected account is reconnected', function (): void {

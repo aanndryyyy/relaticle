@@ -16,7 +16,9 @@ final readonly class ConnectAccountAction
 
     public function execute(ConnectAccountData $data): ConnectedAccount
     {
-        $account = DB::transaction(function () use ($data): ConnectedAccount {
+        $needsHistoryImport = false;
+
+        $account = DB::transaction(function () use ($data, &$needsHistoryImport): ConnectedAccount {
             // Match against trashed rows too: the unique index spans soft-deleted
             // records, so a previously disconnected account must be reused and
             // restored rather than inserted again. Uniqueness is per workspace
@@ -54,6 +56,8 @@ final readonly class ConnectAccountAction
                 $values
             );
 
+            $needsHistoryImport = $account->wasRecentlyCreated || $account->trashed();
+
             if ($account->trashed()) {
                 // Disconnect promotes a successor but leaves is_default set while trashed.
                 // Demote before restore so the live-default unique index is not violated.
@@ -90,7 +94,9 @@ final readonly class ConnectAccountAction
             return $account;
         });
 
-        $this->startMailboxHistoryImport->execute($account);
+        if ($needsHistoryImport) {
+            $this->startMailboxHistoryImport->execute($account);
+        }
 
         return $account;
     }

@@ -4,23 +4,24 @@ declare(strict_types=1);
 
 use App\Models\User;
 use Filament\Facades\Filament;
+use Illuminate\Support\Facades\DB;
 use Relaticle\EmailIntegration\Filament\Pages\EmailAccountsPage;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 
-mutates(EmailAccountsPage::class, ConnectedAccount::class);
+mutates(EmailAccountsPage::class, ConnectedAccount::class, MailboxHistoryImportService::class);
 
 it('shows import progress while the mailbox cursor has not been written', function (): void {
     $user = User::factory()->withWorkspace()->create();
     $this->actingAs($user);
     Filament::setTenant($user->currentWorkspace);
 
-    ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
         'workspace_id' => $user->currentWorkspace->getKey(),
         'user_id' => $user->getKey(),
         'sync_cursor' => null,
-        'initial_sync_imported' => 12,
-        'initial_sync_estimated' => 40,
     ]));
+    setHistoryImportBatchProgress(attachHistoryImportBatch($account), 40, 28);
 
     livewire(EmailAccountsPage::class)
         ->assertSee(__('filament/pages/email-accounts.importing'))
@@ -48,7 +49,7 @@ it('shows in sync after the mailbox cursor is written', function (): void {
         ->assertDontSee(__('filament/pages/email-accounts.importing'));
 });
 
-it('picks up a new imported count when the accounts list refreshes', function (): void {
+it('picks up a new batch percent when the accounts list refreshes', function (): void {
     $user = User::factory()->withWorkspace()->create();
     $this->actingAs($user);
     Filament::setTenant($user->currentWorkspace);
@@ -57,32 +58,35 @@ it('picks up a new imported count when the accounts list refreshes', function ()
         'workspace_id' => $user->currentWorkspace->getKey(),
         'user_id' => $user->getKey(),
         'sync_cursor' => null,
-        'initial_sync_imported' => 0,
-        'initial_sync_estimated' => 387,
     ]));
+    $batchId = attachHistoryImportBatch($account);
+    setHistoryImportBatchProgress($batchId, 387, 387);
 
     $page = livewire(EmailAccountsPage::class)
         ->assertSee(__('filament/pages/email-accounts.importing_percent', ['percent' => 0]));
 
-    $account->update(['initial_sync_imported' => 24]);
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'pending_jobs' => 363,
+    ]);
 
     $page->call('refreshAccounts')
         ->assertSee(__('filament/pages/email-accounts.importing_percent', ['percent' => 6]))
         ->assertSee('aria-valuenow="6"', false);
 });
 
-it('shows 0% until the mailbox size estimate is known', function (): void {
+it('shows 0% until store jobs exist on the history import batch', function (): void {
     $user = User::factory()->withWorkspace()->create();
     $this->actingAs($user);
     Filament::setTenant($user->currentWorkspace);
 
-    ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
         'workspace_id' => $user->currentWorkspace->getKey(),
         'user_id' => $user->getKey(),
         'sync_cursor' => null,
         'initial_sync_imported' => 8,
-        'initial_sync_estimated' => null,
+        'initial_sync_estimated' => 100,
     ]));
+    attachHistoryImportBatch($account);
 
     livewire(EmailAccountsPage::class)
         ->assertSee(__('filament/pages/email-accounts.importing'))
