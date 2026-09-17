@@ -105,7 +105,7 @@ it('reads store backoff delays from email integration config', function (): void
     expect($payload['backoff'])->toBe('10,20');
 });
 
-it('reports a message as retrying after a store failure and clears it once stored', function (): void {
+it('stores the message when a retried attempt succeeds after a failure', function (): void {
     $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
         'sync_inbox' => true,
         'sync_sent' => true,
@@ -118,8 +118,7 @@ it('reports a message as retrying after a store failure and clears it once store
     $failingFactory->shouldReceive('make')->once()->andReturn($failing);
 
     expect(fn () => runStoreEmailJobWithQueue($account, 'msg-retry', $failingFactory, Mockery::mock(QueueJob::class)))
-        ->toThrow(GoogleServiceException::class)
-        ->and($account->retryingMessageCount())->toBe(1);
+        ->toThrow(GoogleServiceException::class);
 
     $succeeding = Mockery::mock(MailServiceInterface::class);
     $succeeding->shouldReceive('fetchMessage')->once()->andReturn(inboundFetchedEmail('msg-retry'));
@@ -129,8 +128,7 @@ it('reports a message as retrying after a store failure and clears it once store
 
     runStoreEmailJobWithQueue($account, 'msg-retry', $succeedingFactory, Mockery::mock(QueueJob::class));
 
-    expect($account->retryingMessageCount())->toBe(0)
-        ->and(Email::query()->where('connected_account_id', $account->id)->count())->toBe(1);
+    expect(Email::query()->where('connected_account_id', $account->id)->count())->toBe(1);
 });
 
 it('throws on a 429 for history import batch jobs so tries and backoff apply', function (): void {

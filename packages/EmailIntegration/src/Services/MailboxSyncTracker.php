@@ -11,8 +11,6 @@ final readonly class MailboxSyncTracker
 {
     private const int TTL_MINUTES = 30;
 
-    private const int RETRY_TTL_HOURS = 12;
-
     public static function markCalendarStarted(ConnectedAccount $account): void
     {
         Cache::put(self::calendarKey($account), true, now()->addMinutes(self::TTL_MINUTES));
@@ -106,41 +104,6 @@ final readonly class MailboxSyncTracker
         return Cache::has(self::emailKey($account));
     }
 
-    /**
-     * A message whose store threw is retried on a spaced backoff, so an import can sit
-     * at the same percentage for a long time. Counting those messages is what lets the
-     * progress UI say why. The per-message flag keeps the counter balanced when several
-     * workers retry the same mailbox, and expires with the job's own retry window.
-     */
-    public static function markMessageRetrying(ConnectedAccount $account, string $messageId): void
-    {
-        if (! Cache::add(self::retryFlagKey($account, $messageId), true, now()->addHours(self::RETRY_TTL_HOURS))) {
-            return;
-        }
-
-        Cache::add(self::retryingCountKey($account), 0, now()->addHours(self::RETRY_TTL_HOURS));
-        Cache::increment(self::retryingCountKey($account));
-    }
-
-    public static function clearMessageRetry(ConnectedAccount $account, string $messageId): void
-    {
-        if (Cache::pull(self::retryFlagKey($account, $messageId)) === null) {
-            return;
-        }
-
-        Cache::decrement(self::retryingCountKey($account));
-    }
-
-    public static function retryingMessageCount(ConnectedAccount $account): int
-    {
-        return max(0, (int) Cache::get(self::retryingCountKey($account), 0));
-    }
-
-    public static function clearMessageRetries(ConnectedAccount $account): void
-    {
-        Cache::forget(self::retryingCountKey($account));
-    }
-
     private static function calendarKey(ConnectedAccount $account): string
     {
         return 'mailbox-sync:calendar:'.$account->getKey();
@@ -159,16 +122,6 @@ final readonly class MailboxSyncTracker
     private static function emailTotalKey(ConnectedAccount $account): string
     {
         return 'mailbox-sync:email:'.$account->getKey().':total';
-    }
-
-    private static function retryingCountKey(ConnectedAccount $account): string
-    {
-        return 'mailbox-sync:email:'.$account->getKey().':retrying';
-    }
-
-    private static function retryFlagKey(ConnectedAccount $account, string $messageId): string
-    {
-        return 'mailbox-sync:email:'.$account->getKey().':retrying:'.hash('xxh3', $messageId);
     }
 
     private static function calendarProcessedKey(ConnectedAccount $account): string

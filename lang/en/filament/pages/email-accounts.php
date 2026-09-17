@@ -119,7 +119,6 @@ return [
         'title_complete' => 'Import complete',
         'meetings_processed' => '{1}:count meeting processed|[2,*]:count meetings processed',
         'emails_processed' => '{1}:count email processed|[2,*]:count emails processed',
-        'retrying_messages' => '{1}Retrying :count message|[2,*]Retrying :count messages',
         'close' => 'Dismiss',
         'open_settings' => 'Open account settings',
     ],

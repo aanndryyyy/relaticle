@@ -20,7 +20,6 @@ use Relaticle\EmailIntegration\Jobs\Concerns\ReleasesOnProviderRateLimit;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Email;
 use Relaticle\EmailIntegration\Services\Contracts\MailServiceFactoryInterface;
-use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 use Throwable;
 
 #[DeleteWhenMissingModels]
@@ -116,12 +115,8 @@ final class StoreEmailJob implements ShouldBeUnique, ShouldQueue
             // Permanently deleted between list and fetch. Retrying a 404 fails
             // the batch and parks the mailbox as ERROR, stopping later imports.
             if ($this->isMissingProviderMessage($exception)) {
-                MailboxSyncTracker::clearMessageRetry($this->connectedAccount, $this->messageId);
-
                 return;
             }
-
-            MailboxSyncTracker::markMessageRetrying($this->connectedAccount, $this->messageId);
 
             throw $exception;
         }
@@ -135,8 +130,6 @@ final class StoreEmailJob implements ShouldBeUnique, ShouldQueue
          * through linked CRM records.
          **/
         if ($fetched->folder === EmailFolder::Drafts) {
-            MailboxSyncTracker::clearMessageRetry($this->connectedAccount, $this->messageId);
-
             return;
         }
 
@@ -146,26 +139,14 @@ final class StoreEmailJob implements ShouldBeUnique, ShouldQueue
         // unserialize (SerializesModels), so a toggle change before this job runs
         // takes effect.
         if (! $this->connectedAccount->syncsDirection($fetched->direction)) {
-            MailboxSyncTracker::clearMessageRetry($this->connectedAccount, $this->messageId);
-
             return;
         }
 
-        try {
-            $action->execute($this->connectedAccount, $fetched);
-        } catch (Throwable $exception) {
-            MailboxSyncTracker::markMessageRetrying($this->connectedAccount, $this->messageId);
-
-            throw $exception;
-        }
-
-        MailboxSyncTracker::clearMessageRetry($this->connectedAccount, $this->messageId);
+        $action->execute($this->connectedAccount, $fetched);
     }
 
     public function failed(Throwable $exception): void
     {
-        MailboxSyncTracker::clearMessageRetry($this->connectedAccount, $this->messageId);
-
         $batch = $this->batch();
         $batchId = $batch?->id;
         $historyBatchId = $this->connectedAccount->history_import_batch_id;

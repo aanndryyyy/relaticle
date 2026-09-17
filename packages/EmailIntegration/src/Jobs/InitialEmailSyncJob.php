@@ -17,7 +17,6 @@ use Relaticle\EmailIntegration\Models\Email;
 use Relaticle\EmailIntegration\Notifications\MailboxHistoryImportCompletedNotification;
 use Relaticle\EmailIntegration\Services\Contracts\MailServiceFactoryInterface;
 use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
-use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 use Throwable;
 
 #[DeleteWhenMissingModels]
@@ -162,8 +161,6 @@ final class InitialEmailSyncJob implements ShouldBeUnique, ShouldQueue
             'status' => EmailAccountStatus::ACTIVE,
             'last_error' => null,
         ]);
-
-        MailboxSyncTracker::clearMessageRetries($account);
 
         if ($historyImportBatchId !== null) {
             resolve(CompleteMailboxHistoryImportAction::class)->execute((string) $account->getKey(), $historyImportBatchId);

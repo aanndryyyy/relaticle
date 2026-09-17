@@ -347,15 +347,6 @@ final class ConnectedAccount extends Model
             && $this->calendar_sync_cursor === null;
     }
 
-    /**
-     * Messages whose store threw and are waiting on a spaced retry. A stalled import
-     * percentage is otherwise unexplained, and reads as stuck.
-     */
-    public function retryingMessageCount(): int
-    {
-        return MailboxSyncTracker::retryingMessageCount($this);
-    }
-
     public function isCalendarSyncing(): bool
     {
         return MailboxSyncTracker::isCalendarSyncing($this);
@@ -406,7 +397,7 @@ final class ConnectedAccount extends Model
 
         $generation = resolve(MailboxHistoryImportService::class)->failureGeneration((string) $batchId);
 
-        return (string) $batchId.':'.$generation;
+        return $batchId.':'.$generation;
     }
 
     public function isIncrementalSyncing(): bool
