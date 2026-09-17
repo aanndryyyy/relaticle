@@ -67,7 +67,7 @@ final class MailboxImportStatus extends Component
     public function shouldPoll(): bool
     {
         return $this->ownedAccounts()->contains(
-            fn (ConnectedAccount $account): bool => $this->isMailboxImporting($account),
+            fn (ConnectedAccount $account): bool => $account->showsHomeMailboxImportProgress(),
         );
     }
 
@@ -89,11 +89,11 @@ final class MailboxImportStatus extends Component
                 continue;
             }
 
-            if (! $this->isMailboxImporting($account) && ! in_array($id, $this->seenImportingIds, true)) {
+            if (! $account->showsHomeMailboxImportProgress() && ! in_array($id, $this->seenImportingIds, true)) {
                 continue;
             }
 
-            $importing = $this->isMailboxImporting($account);
+            $importing = $account->showsHomeMailboxImportProgress();
             $incrementalOnly = $importing && $account->isIncrementalSyncing();
 
             $rows[] = [
@@ -122,11 +122,6 @@ final class MailboxImportStatus extends Component
             'anyImporting' => array_any($mailboxes, fn (array $row): bool => $row['importing']),
             'shouldPoll' => $this->shouldPoll(),
         ]);
-    }
-
-    private function isMailboxImporting(ConnectedAccount $account): bool
-    {
-        return $account->showsHomeMailboxImportProgress();
     }
 
     /**

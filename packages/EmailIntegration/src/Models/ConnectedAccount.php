@@ -274,21 +274,8 @@ final class ConnectedAccount extends Model
      */
     public function hasSyncError(): bool
     {
-        if (! filled($this->last_error) || $this->showsMailboxHistoryImportFailureSummary()) {
-            return false;
-        }
-
-        if (filled($this->history_import_batch_id)) {
-            $summary = $this->mailboxHistoryImportSummary();
-
-            if ($summary instanceof MailboxHistoryImportSummary
-                && $summary->finished
-                && $summary->failedJobs > 0) {
-                return false;
-            }
-        }
-
-        return true;
+        return filled($this->last_error)
+            && ! $this->showsMailboxHistoryImportFailureSummary();
     }
 
     /**
