@@ -10,6 +10,10 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
+use Illuminate\Queue\Attributes\MaxExceptions;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
+use Illuminate\Support\Facades\Config;
+use Relaticle\EmailIntegration\Actions\RecordMailboxHistoryImportStoreFailureAction;
 use Relaticle\EmailIntegration\Actions\StoreEmailAction;
 use Relaticle\EmailIntegration\Enums\EmailFolder;
 use Relaticle\EmailIntegration\Jobs\Concerns\ReleasesOnProviderRateLimit;
@@ -19,17 +23,39 @@ use Relaticle\EmailIntegration\Services\Contracts\MailServiceFactoryInterface;
 use Throwable;
 
 #[DeleteWhenMissingModels]
+#[MaxExceptions(3)]
 final class StoreEmailJob implements ShouldBeUnique, ShouldQueue
 {
     use Batchable, Queueable, ReleasesOnProviderRateLimit;
 
-    public int $tries = 5;
+    public int $tries = 3;
+
+    /** @var array<int, int> Spaced retry delays so transient 429/5xx don't hammer the provider. */
+    public array $backoff;
 
     public function __construct(
         public readonly ConnectedAccount $connectedAccount,
         public readonly string $messageId,
     ) {
         $this->onQueue('emails-sync');
+        $this->backoff = $this->resolveStoreBackoff();
+    }
+
+    /**
+     * @return list<int>
+     */
+    private function resolveStoreBackoff(): array
+    {
+        $configured = Config::array('email-integration.sync.store_backoff');
+
+        if ($configured === []) {
+            return [60, 300, 900];
+        }
+
+        return array_values(array_map(
+            static fn (mixed $seconds): int => (int) $seconds,
+            $configured,
+        ));
     }
 
     /**
@@ -42,10 +68,24 @@ final class StoreEmailJob implements ShouldBeUnique, ShouldQueue
     }
 
     /**
+     * @return list<WithoutOverlapping>
+     */
+    public function middleware(): array
+    {
+        return [
+            new WithoutOverlapping($this->uniqueId())
+                ->releaseAfter(15)
+                ->expireAfter(300),
+        ];
+    }
+
+    /**
      * @throws Throwable
      */
-    public function handle(MailServiceFactoryInterface $mailFactory, StoreEmailAction $action): void
-    {
+    public function handle(
+        MailServiceFactoryInterface $mailFactory,
+        StoreEmailAction $action,
+    ): void {
         if ($this->batch()?->cancelled()) {
             return;
         }
@@ -81,12 +121,14 @@ final class StoreEmailJob implements ShouldBeUnique, ShouldQueue
             throw $exception;
         }
 
-        // Provider drafts are unsent. Gmail drafts carry DRAFT and not SENT, so
-        // fetchMessage() classifies them as inbound. Skip them here rather than
-        // in a provider service so it covers Gmail and Microsoft, and both the
-        // initial backfill and incremental syncs. Otherwise they store as SYNCED
-        // with the account's sharing default, and teammates can read them
-        // through linked CRM records.
+        /**
+         * Provider drafts are unsent. Gmail drafts carry DRAFT and not SENT, so
+         * fetchMessage() classifies them as inbound. Skip them here rather than
+         * in a provider service so it covers Gmail and Microsoft, and both the
+         * initial backfill and incremental syncs. Otherwise they store as SYNCED
+         * with the account's sharing default, and teammates can read them
+         * through linked CRM records.
+         **/
         if ($fetched->folder === EmailFolder::Drafts) {
             return;
         }
@@ -101,6 +143,20 @@ final class StoreEmailJob implements ShouldBeUnique, ShouldQueue
         }
 
         $action->execute($this->connectedAccount, $fetched);
+    }
+
+    public function failed(Throwable $exception): void
+    {
+        $batch = $this->batch();
+        $batchId = $batch?->id;
+        $historyBatchId = $this->connectedAccount->history_import_batch_id;
+
+        if (is_string($batchId) && is_string($historyBatchId) && $batchId === $historyBatchId) {
+            resolve(RecordMailboxHistoryImportStoreFailureAction::class)->execute(
+                $this->connectedAccount,
+                $historyBatchId,
+            );
+        }
     }
 
     private function doesItAlreadyExists(): bool

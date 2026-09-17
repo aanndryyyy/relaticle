@@ -157,7 +157,7 @@ final class ActivationChecklist extends Component
         $syncingAccounts = ConnectedAccount::query()
             ->ownedBy($this->user(), $workspace)
             ->get()
-            ->filter(fn (ConnectedAccount $account): bool => $account->isImportingHistory());
+            ->filter(fn (ConnectedAccount $account): bool => $account->showsHomeMailboxImportProgress());
 
         if ($syncingAccounts->isEmpty()) {
             return null;
@@ -252,17 +252,15 @@ final class ActivationChecklist extends Component
      */
     private function buildEmailSyncProgress(Collection $syncingAccounts): array
     {
-        $isInitialImport = $syncingAccounts->contains(
-            fn (ConnectedAccount $account): bool => $account->isImportingHistory(),
-        );
-
         $percent = (int) $syncingAccounts
             ->map(fn (ConnectedAccount $account): int => $account->syncDisplayPercent())
             ->max();
 
         return [
             'percent' => $percent,
-            'showsPercent' => $isInitialImport || $percent > 0,
+            'showsPercent' => $syncingAccounts->contains(
+                fn (ConnectedAccount $account): bool => $account->isImportingHistory(),
+            ) || $percent > 0,
         ];
     }
 }

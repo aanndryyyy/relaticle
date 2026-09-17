@@ -10,6 +10,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
 use Illuminate\Support\Facades\Bus;
+use Relaticle\EmailIntegration\Actions\CompleteMailboxHistoryImportAction;
 use Relaticle\EmailIntegration\Actions\ReconcileCalendarMeetingsAction;
 use Relaticle\EmailIntegration\Data\CalendarEventData;
 use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
@@ -18,6 +19,7 @@ use Relaticle\EmailIntegration\Exceptions\ReconcileCalendarMeetingsFailed;
 use Relaticle\EmailIntegration\Jobs\Concerns\DetectsAuthErrors;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Services\Contracts\CalendarServiceFactoryInterface;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 use Throwable;
 
@@ -40,9 +42,16 @@ final class IncrementalCalendarSyncJob implements ShouldBeUnique, ShouldQueue
 
     public function handle(CalendarServiceFactoryInterface $serviceFactory): void
     {
-        $account = $this->connectedAccount;
+        $account = $this->connectedAccount->fresh() ?? $this->connectedAccount;
+
+        if (self::shouldDeferToHistoryImportRelist($account)) {
+            return;
+        }
 
         if (! $account->hasCalendar() || $account->status !== EmailAccountStatus::ACTIVE) {
+            resolve(MailboxHistoryImportService::class)->completeCalendarImport($account, succeeded: false);
+            resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
+
             return;
         }
 
@@ -52,13 +61,13 @@ final class IncrementalCalendarSyncJob implements ShouldBeUnique, ShouldQueue
             return;
         }
 
-        if (MailboxSyncTracker::isCalendarSyncing($account)) {
+        if (MailboxSyncTracker::isCalendarSyncing($account) && MailboxSyncTracker::hasCalendarRunTotal($account)) {
             $this->release(30);
 
             return;
         }
 
-        MailboxSyncTracker::markCalendarStarted($account);
+        resolve(MailboxHistoryImportService::class)->touchCalendarImport($account);
         $calendarSyncGeneration = MailboxSyncTracker::currentCalendarSyncGeneration($account);
 
         $service = $serviceFactory->make($account);
@@ -66,8 +75,8 @@ final class IncrementalCalendarSyncJob implements ShouldBeUnique, ShouldQueue
         try {
             $result = $service->fetchDelta($account->calendar_sync_cursor);
         } catch (CalendarSyncTokenExpired) {
-            MailboxSyncTracker::markCalendarFinished($account);
             $account->update(['calendar_sync_cursor' => null]);
+            resolve(MailboxHistoryImportService::class)->touchCalendarImport($account);
             // Expired deltas omit cancelled events. Rebuild from a full list, then
             // delete local meetings the provider no longer returns.
             dispatch(new InitialCalendarSyncJob($account, reconcileAfter: true));
@@ -80,7 +89,7 @@ final class IncrementalCalendarSyncJob implements ShouldBeUnique, ShouldQueue
         // it is never retried. So advance the cursor only once the batch has fully stored.
         // With no events the delta is a read-only window, so advance inline.
         if ($result->events === []) {
-            self::finish($account, $result->nextSyncToken, $this->reconcileAfter);
+            self::finish($account, $result->nextSyncToken, $this->reconcileAfter, storedEvents: false);
 
             return;
         }
@@ -113,21 +122,30 @@ final class IncrementalCalendarSyncJob implements ShouldBeUnique, ShouldQueue
                     return;
                 }
 
-                self::finish($account, $nextSyncToken, $reconcileAfter);
+                self::finish($account, $nextSyncToken, $reconcileAfter, storedEvents: true);
             })
             ->dispatch();
     }
 
-    private static function finish(ConnectedAccount $account, ?string $nextSyncToken, bool $reconcileAfter): void
+    private static function finish(ConnectedAccount $account, ?string $nextSyncToken, bool $reconcileAfter, bool $storedEvents): void
     {
+        $account = $account->fresh() ?? $account;
+
+        if (self::shouldDeferToHistoryImportRelist($account)) {
+            return;
+        }
+
         $update = [
             'last_calendar_synced_at' => now(),
             'status' => EmailAccountStatus::ACTIVE,
-            'last_error' => null,
         ];
 
         if ($nextSyncToken !== null) {
             $update['calendar_sync_cursor'] = $nextSyncToken;
+        }
+
+        if (! resolve(MailboxHistoryImportService::class)->historyImportHasUnresolvedEmailFailures($account)) {
+            $update['last_error'] = null;
         }
 
         $account->update($update);
@@ -143,34 +161,76 @@ final class IncrementalCalendarSyncJob implements ShouldBeUnique, ShouldQueue
             }
         }
 
-        MailboxSyncTracker::markCalendarFinished($account);
+        $import = resolve(MailboxHistoryImportService::class);
+        $batchId = $account->history_import_batch_id;
+        $keepStoreFailures = is_string($batchId) && $batchId !== '' && $import->calendarFailureCount($batchId) > 0 && ! $storedEvents;
+
+        $import->completeCalendarImport($account, succeeded: ! $keepStoreFailures);
+
+        resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
 
         dispatch(new EnsureCalendarPushChannelJob($account));
     }
 
+    /**
+     * Keep the mailbox ACTIVE: calendar:incremental-sync dispatches for active accounts
+     * only, and the sync token stays put here, so the next run refetches exactly what
+     * failed. Parking it would end all future calendar sync for this mailbox.
+     */
     private static function recordBatchFailure(ConnectedAccount $account, int $failedJobs): void
     {
+        $account = $account->fresh() ?? $account;
+
+        if (self::shouldDeferToHistoryImportRelist($account)) {
+            return;
+        }
+
         $account->update([
             'last_calendar_synced_at' => now(),
-            'status' => EmailAccountStatus::ERROR,
             'last_error' => "{$failedJobs} calendar event(s) could not be stored during sync.",
         ]);
 
-        MailboxSyncTracker::markCalendarFinished($account);
+        resolve(MailboxHistoryImportService::class)->failCalendarImport($account, $failedJobs);
+
+        resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
     }
 
     public function failed(Throwable $exception): void
     {
-        MailboxSyncTracker::markCalendarFinished($this->connectedAccount);
+        $account = $this->connectedAccount->fresh() ?? $this->connectedAccount;
 
-        $this->connectedAccount->update([
-            'status' => $this->isAuthError($exception) ? EmailAccountStatus::REAUTH_REQUIRED : EmailAccountStatus::ERROR,
+        if (self::shouldDeferToHistoryImportRelist($account)) {
+            return;
+        }
+
+        resolve(MailboxHistoryImportService::class)->failCalendarImport($account);
+
+        $hasHistoryImport = is_string($account->history_import_batch_id)
+            && $account->history_import_batch_id !== '';
+
+        $account->update([
+            'status' => $this->isAuthError($exception)
+                ? EmailAccountStatus::REAUTH_REQUIRED
+                : ($hasHistoryImport ? EmailAccountStatus::ACTIVE : EmailAccountStatus::ERROR),
             'last_error' => $exception->getMessage(),
         ]);
+
+        resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
     }
 
     public function uniqueId(): string
     {
         return "incremental-calendar-sync-{$this->connectedAccount->getKey()}";
+    }
+
+    private static function shouldDeferToHistoryImportRelist(ConnectedAccount $account): bool
+    {
+        $batchId = $account->history_import_batch_id;
+
+        if (! is_string($batchId) || $batchId === '' || $account->calendar_sync_cursor !== null) {
+            return false;
+        }
+
+        return resolve(MailboxHistoryImportService::class)->isCalendarImportPending($batchId);
     }
 }

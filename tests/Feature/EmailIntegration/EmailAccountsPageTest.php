@@ -7,6 +7,7 @@ use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
 use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
 use Relaticle\EmailIntegration\Enums\EmailProvider;
 use Relaticle\EmailIntegration\Filament\Concerns\HasConnectedAccountActions;
@@ -21,6 +22,8 @@ use Relaticle\EmailIntegration\Jobs\InitialEmailSyncJob;
 use Relaticle\EmailIntegration\Jobs\RelinkMailboxHistoryJob;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\EmailSignature;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
+use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 
 mutates(EmailAccountsPage::class, ConnectedAccount::class, HasConnectedAccountActions::class);
 
@@ -285,6 +288,99 @@ it('warns when a connected mailbox cannot send', function (): void {
 
     livewire(EmailAccountsPage::class)
         ->assertSee(__('filament/pages/email-accounts.send_missing_tooltip'))
+        ->assertSee(__('filament/pages/email-accounts.in_sync'));
+});
+
+it('does not show the syncing badge during background incremental email sync', function (): void {
+    $this->account->update([
+        'sync_cursor' => 'done',
+        'last_synced_at' => now(),
+    ]);
+
+    MailboxSyncTracker::markEmailStarted($this->account);
+
+    livewire(EmailAccountsPage::class)
+        ->assertDontSee(__('filament/pages/email-accounts.importing'));
+});
+
+it('does not show the syncing badge during background incremental calendar sync', function (): void {
+    $this->account->update([
+        'sync_cursor' => 'done',
+        'calendar_sync_cursor' => 'done',
+        'last_synced_at' => now(),
+        'capabilities' => ['email' => true, 'calendar' => true],
+    ]);
+
+    MailboxSyncTracker::markCalendarStarted($this->account);
+
+    livewire(EmailAccountsPage::class)
+        ->assertSee(__('filament/pages/email-accounts.in_sync'))
+        ->assertDontSee(__('filament/pages/email-accounts.importing'));
+});
+
+it('shows a sync issue badge when incremental sync could not store mail', function (): void {
+    $this->account->update([
+        'sync_cursor' => 'mail-cursor',
+        'last_error' => '3 email(s) could not be stored during sync.',
+    ]);
+
+    livewire(EmailAccountsPage::class)
+        ->assertSee(__('filament/pages/email-accounts.sync_error.badge'))
+        ->assertDontSee(__('filament/pages/email-accounts.sync_error.heading'))
+        ->assertDontSee(__('filament/pages/email-accounts.in_sync'));
+});
+
+it('stays in sync after history import store failures', function (): void {
+    $batch = resolve(MailboxHistoryImportService::class)->startBatch($this->account);
+
+    $this->account->update([
+        'sync_cursor' => 'history-done',
+        'history_import_batch_id' => $batch->id,
+    ]);
+
+    DB::table('job_batches')->where('id', $batch->id)->update([
+        'total_jobs' => 5,
+        'pending_jobs' => 0,
+        'failed_jobs' => 2,
+        'failed_job_ids' => json_encode(['failed-1', 'failed-2']),
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    livewire(EmailAccountsPage::class)
+        ->assertDontSee(__('filament/pages/email-accounts.history_import_failure.badge'))
+        ->assertDontSee(__('filament/pages/email-accounts.actions.retry_failed_import.label'))
+        ->assertDontSee(__('filament/pages/email-accounts.sync_error.heading'))
+        ->assertSee(__('filament/pages/email-accounts.in_sync'));
+});
+
+it('does not show a retry control after history import store failures', function (): void {
+    $batch = resolve(MailboxHistoryImportService::class)->startBatch($this->account);
+
+    $this->account->update([
+        'sync_cursor' => 'history-done',
+        'history_import_batch_id' => $batch->id,
+        'last_error' => 'This message could not be stored after several tries.',
+    ]);
+
+    DB::table('job_batches')->where('id', $batch->id)->update([
+        'total_jobs' => 5,
+        'pending_jobs' => 0,
+        'failed_jobs' => 1,
+        'failed_job_ids' => json_encode(['failed-1']),
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    livewire(EmailAccountsPage::class)
+        ->assertDontSee(__('filament/pages/email-accounts.history_import_failure.badge'))
+        ->assertDontSee(__('filament/pages/email-accounts.actions.retry_failed_import.label'))
+        ->assertSee(__('filament/pages/email-accounts.in_sync'));
+});
+
+it('shows in sync when the mailbox has no recorded error', function (): void {
+    $this->account->update(['sync_cursor' => 'mail-cursor']);
+
+    livewire(EmailAccountsPage::class)
+        ->assertDontSee(__('filament/pages/email-accounts.sync_error.heading'))
         ->assertSee(__('filament/pages/email-accounts.in_sync'));
 });
 

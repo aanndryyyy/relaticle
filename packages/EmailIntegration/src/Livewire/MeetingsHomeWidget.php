@@ -216,7 +216,7 @@ final class MeetingsHomeWidget extends Component implements HasActions, HasSchem
         $rows = [];
 
         foreach ($this->ownedAccounts() as $account) {
-            if (! $account->isImportingHistory()) {
+            if (! $account->showsHomeMailboxImportProgress()) {
                 continue;
             }
 
@@ -227,7 +227,8 @@ final class MeetingsHomeWidget extends Component implements HasActions, HasSchem
                 'meetingsImported' => $account->syncMeetingsProcessedCount(),
                 'percent' => $account->syncDisplayPercent(),
                 'hasCalendar' => $account->hasCalendar(),
-                'isInitialImport' => true,
+                'isInitialImport' => $account->isImportingHistory()
+                    || $account->showsMailboxHistoryImportProgressOnAccountsPage(),
             ];
         }
 

@@ -70,6 +70,14 @@ return [
             : (int) $days,
         'batch_size' => (int) env('EMAIL_SYNC_BATCH_SIZE', 50),
         'initial_store_attempts' => (int) env('EMAIL_SYNC_INITIAL_STORE_ATTEMPTS', 3),
+
+        'store_backoff' => array_values(array_map(
+            static fn (string $seconds): int => (int) trim($seconds),
+            array_filter(
+                explode(',', (string) env('EMAIL_SYNC_STORE_BACKOFF', '60,300,900')),
+                static fn (string $seconds): bool => trim($seconds) !== '',
+            ),
+        )),
     ],
 
     /*

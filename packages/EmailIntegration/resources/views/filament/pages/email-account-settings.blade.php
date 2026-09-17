@@ -6,7 +6,7 @@
     <x-filament::breadcrumbs :breadcrumbs="$this->getBreadcrumbs()" />
 
     <div
-        @if ($this->isImportingHistory())
+        @if ($this->shouldPollAccountStatus())
             wire:poll.5s="refreshAccount"
         @endif
     >
@@ -36,8 +36,8 @@
             </x-slot>
 
             <x-slot name="afterHeader">
-                <div class="flex shrink-0 items-center gap-3">
-                    @if ($this->isImportingHistory())
+                <div class="flex shrink-0 flex-wrap items-center justify-end gap-3">
+                    @if ($account->showsSyncProgressOnAccountsPage())
                         <x-email-integration::importing-badge :account="$account" :icon="$this->syncingIcon()" />
                     @endif
 

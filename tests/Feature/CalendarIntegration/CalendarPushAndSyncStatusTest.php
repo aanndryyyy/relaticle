@@ -2,11 +2,8 @@
 
 declare(strict_types=1);
 
-use App\Models\User;
-use Filament\Facades\Filament;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
-use Livewire\Livewire;
 use Relaticle\EmailIntegration\Console\Commands\IncrementalEmailSyncCommand;
 use Relaticle\EmailIntegration\Controllers\CalendarPushWebhookController;
 use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
@@ -15,7 +12,6 @@ use Relaticle\EmailIntegration\Exceptions\CalendarPushChannelFailed;
 use Relaticle\EmailIntegration\Jobs\EnsureCalendarPushChannelJob;
 use Relaticle\EmailIntegration\Jobs\IncrementalCalendarSyncJob;
 use Relaticle\EmailIntegration\Jobs\IncrementalEmailSyncJob;
-use Relaticle\EmailIntegration\Livewire\MailboxImportStatus;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Services\Contracts\CalendarServiceFactoryInterface;
 use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
@@ -24,7 +20,6 @@ mutates(
     CalendarPushWebhookController::class,
     EnsureCalendarPushChannelJob::class,
     IncrementalEmailSyncCommand::class,
-    MailboxImportStatus::class,
 );
 
 it('accepts microsoft subscription validation tokens', function (): void {
@@ -67,27 +62,6 @@ it('rejects google notifications with the wrong verification token', function ()
     ])->assertForbidden();
 
     Bus::assertNothingDispatched();
-});
-
-it('shows calendar-only sync progress on the dashboard', function (): void {
-    $user = User::factory()->withWorkspace()->create();
-    $this->actingAs($user);
-    Filament::setCurrentPanel(Filament::getPanel('app'));
-    Filament::setTenant($user->currentWorkspace);
-
-    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
-        'workspace_id' => $user->currentWorkspace->getKey(),
-        'user_id' => $user->getKey(),
-        'sync_cursor' => 'done',
-        'calendar_sync_cursor' => 'done',
-        'capabilities' => ['email' => true, 'calendar' => true],
-    ]));
-
-    MailboxSyncTracker::markCalendarStarted($account);
-
-    Livewire::test(MailboxImportStatus::class, ['placement' => 'home'])
-        ->assertSee(__('filament/pages/email-accounts.importing_percent', ['percent' => 0]))
-        ->assertSee(__('filament/pages/email-accounts.sync_status.title_syncing'));
 });
 
 it('dispatches calendar sync when microsoft sends a valid notification', function (): void {

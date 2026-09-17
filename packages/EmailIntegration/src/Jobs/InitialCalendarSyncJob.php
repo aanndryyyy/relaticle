@@ -8,6 +8,7 @@ use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Attributes\DeleteWhenMissingModels;
+use Relaticle\EmailIntegration\Actions\CompleteMailboxHistoryImportAction;
 use Relaticle\EmailIntegration\Actions\ReconcileCalendarMeetingsAction;
 use Relaticle\EmailIntegration\Data\CalendarEventData;
 use Relaticle\EmailIntegration\Enums\CalendarEventStatus;
@@ -18,7 +19,7 @@ use Relaticle\EmailIntegration\Jobs\Concerns\DetectsAuthErrors;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Meeting;
 use Relaticle\EmailIntegration\Services\Contracts\CalendarServiceFactoryInterface;
-use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 use Throwable;
 
 #[DeleteWhenMissingModels]
@@ -44,13 +45,22 @@ final class InitialCalendarSyncJob implements ShouldBeUnique, ShouldQueue
         $account = $this->connectedAccount;
 
         if (! $account->hasCalendar() || $account->status !== EmailAccountStatus::ACTIVE) {
-            MailboxSyncTracker::markCalendarFinished($account);
+            resolve(MailboxHistoryImportService::class)->completeCalendarImport($account, succeeded: false);
+            resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
 
             return;
         }
 
-        if ($account->calendar_sync_cursor === null) {
-            MailboxSyncTracker::markCalendarStarted($account);
+        $import = resolve(MailboxHistoryImportService::class);
+
+        if ($this->pageToken === null) {
+            $batchId = $account->history_import_batch_id;
+
+            if (is_string($batchId) && $batchId !== '') {
+                $import->clearCalendarFailures($batchId);
+            }
+
+            $import->touchCalendarImport($account);
         }
 
         $service = $serviceFactory->make($account);
@@ -87,12 +97,24 @@ final class InitialCalendarSyncJob implements ShouldBeUnique, ShouldQueue
 
     public function failed(Throwable $exception): void
     {
-        MailboxSyncTracker::markCalendarFinished($this->connectedAccount);
+        $account = $this->connectedAccount;
+        $hasHistoryImport = is_string($account->history_import_batch_id) && $account->history_import_batch_id !== '';
+        $import = resolve(MailboxHistoryImportService::class);
 
-        $this->connectedAccount->update([
-            'status' => $this->isAuthError($exception) ? EmailAccountStatus::REAUTH_REQUIRED : EmailAccountStatus::ERROR,
+        if ($hasHistoryImport && $account->calendar_sync_cursor !== null) {
+            $import->failCalendarImport($account);
+        } else {
+            $import->completeCalendarImport($account, succeeded: false);
+        }
+
+        $account->update([
+            'status' => $this->isAuthError($exception)
+                ? EmailAccountStatus::REAUTH_REQUIRED
+                : ($hasHistoryImport ? EmailAccountStatus::ACTIVE : EmailAccountStatus::ERROR),
             'last_error' => $exception->getMessage(),
         ]);
+
+        resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
     }
 
     public function uniqueId(): string
@@ -120,11 +142,19 @@ final class InitialCalendarSyncJob implements ShouldBeUnique, ShouldQueue
         $update = [
             'last_calendar_synced_at' => now(),
             'status' => EmailAccountStatus::ACTIVE,
-            'last_error' => null,
             'initial_calendar_sync_imported' => $imported,
         ];
 
-        if ($nextSyncToken !== null && $nextSyncToken !== '') {
+        $import = resolve(MailboxHistoryImportService::class);
+
+        if (! $import->historyImportHasUnresolvedEmailFailures($account)) {
+            $update['last_error'] = null;
+        }
+
+        $batchId = $account->history_import_batch_id;
+        $keepStoreFailures = is_string($batchId) && $batchId !== '' && $import->calendarFailureCount($batchId) > 0;
+
+        if ($nextSyncToken !== null && $nextSyncToken !== '' && ! $keepStoreFailures) {
             $update['calendar_sync_cursor'] = $nextSyncToken;
         }
 
@@ -141,7 +171,12 @@ final class InitialCalendarSyncJob implements ShouldBeUnique, ShouldQueue
             }
         }
 
-        MailboxSyncTracker::markCalendarFinished($account);
+        $import->completeCalendarImport(
+            $account,
+            succeeded: $account->calendar_sync_cursor !== null && ! $keepStoreFailures,
+        );
+
+        resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
 
         dispatch(new EnsureCalendarPushChannelJob($account));
     }

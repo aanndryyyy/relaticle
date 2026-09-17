@@ -9,6 +9,7 @@ use App\Models\User;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Support\Facades\Date;
+use Illuminate\Support\Facades\DB;
 use Laravel\Pennant\Feature;
 use Relaticle\EmailIntegration\Enums\AttendeeResponseStatus;
 use Relaticle\EmailIntegration\Filament\Concerns\HasConnectMailboxActions;
@@ -22,6 +23,7 @@ use Relaticle\EmailIntegration\Models\MeetingAttendee;
 use Relaticle\EmailIntegration\Models\Scopes\VisibleMeetingScope;
 use Relaticle\EmailIntegration\Services\ListMeetingsForDay;
 use Relaticle\EmailIntegration\Services\MailboxDisplayNameDirectory;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 use Relaticle\EmailIntegration\Services\MeetingAttendeePresenter;
 use Relaticle\EmailIntegration\Services\MeetingTemporalState;
@@ -100,6 +102,177 @@ it('hides date navigation while mailbox sync is in progress', function (): void 
         ->assertDontSee(__('filament/pages/dashboard.meetings.more_actions'))
         ->assertDontSee(__('filament/pages/dashboard.meetings.go_to_today'))
         ->assertDontSee(__('filament/pages/dashboard.meetings.calendar_settings'));
+});
+
+it('does not show an import issue callout on home when store jobs failed', function (): void {
+    $batchId = attachHistoryImportBatch($this->account);
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 10,
+        'pending_jobs' => 0,
+        'failed_jobs' => 2,
+        'failed_job_ids' => json_encode(['failed-1', 'failed-2']),
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    livewire(MeetingsHomeWidget::class)
+        ->assertDontSee('data-testid="meetings-import-issue"', escape: false)
+        ->assertDontSee(__('filament/pages/email-accounts.history_import_failure.badge'));
+});
+
+it('does not name failing mailboxes on home when more than one import failed', function (): void {
+    $second = ConnectedAccount::withoutEvents(
+        fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+            'workspace_id' => $this->workspace->id,
+            'user_id' => $this->user->id,
+            'email_address' => 'alex@example.com',
+            'sync_cursor' => 'done',
+            'calendar_sync_cursor' => 'done',
+        ])
+    );
+
+    foreach ([$this->account, $second] as $account) {
+        $batchId = attachHistoryImportBatch($account);
+
+        DB::table('job_batches')->where('id', $batchId)->update([
+            'total_jobs' => 10,
+            'pending_jobs' => 0,
+            'failed_jobs' => 1,
+            'failed_job_ids' => json_encode(['failed-'.$account->getKey()]),
+            'finished_at' => now()->getTimestamp(),
+        ]);
+    }
+
+    livewire(MeetingsHomeWidget::class)
+        ->assertDontSee('data-testid="meetings-import-issue"', escape: false)
+        ->assertDontSee(__('filament/pages/email-accounts.history_import_failure.badge'));
+});
+
+it('does not show an import issue callout on home when no store job failed', function (): void {
+    $batchId = attachHistoryImportBatch($this->account);
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 10,
+        'pending_jobs' => 0,
+        'failed_jobs' => 0,
+        'failed_job_ids' => json_encode([]),
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    livewire(MeetingsHomeWidget::class)
+        ->assertDontSee('data-testid="meetings-import-issue"', escape: false)
+        ->assertDontSee(__('filament/pages/email-accounts.history_import_failure.badge'));
+});
+
+it('does not offer a retry control on home after import store failures', function (): void {
+    $batchId = attachHistoryImportBatch($this->account);
+
+    $this->account->update(['last_error' => 'This message could not be stored after several tries.']);
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 5,
+        'pending_jobs' => 0,
+        'failed_jobs' => 1,
+        'failed_job_ids' => json_encode(['failed-1']),
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    livewire(MeetingsHomeWidget::class)
+        ->assertDontSee('data-testid="meetings-import-issue"', escape: false)
+        ->assertDontSee(__('filament/pages/email-accounts.actions.retry_failed_import.label'));
+});
+
+it('does not retry an import issue for another user mailbox from home', function (): void {
+    $otherUser = User::factory()->withWorkspace()->create();
+    $otherAccount = ConnectedAccount::withoutEvents(
+        fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+            'workspace_id' => $otherUser->currentWorkspace->getKey(),
+            'user_id' => $otherUser->getKey(),
+            'sync_cursor' => 'done',
+        ])
+    );
+
+    $batchId = attachHistoryImportBatch($otherAccount);
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 5,
+        'pending_jobs' => 0,
+        'failed_jobs' => 1,
+        'failed_job_ids' => json_encode(['failed-1']),
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    livewire(MeetingsHomeWidget::class)
+        ->assertDontSee('data-testid="meetings-import-issue"', escape: false);
+});
+
+it('shows calendar meetings count from initial import during active calendar sync tracker', function (): void {
+    MailboxSyncTracker::markCalendarStarted($this->account);
+
+    $this->account->update([
+        'capabilities' => ['email' => true, 'calendar' => true],
+        'sync_cursor' => 'history-done',
+        'calendar_sync_cursor' => null,
+        'initial_calendar_sync_imported' => 42,
+        'initial_sync_imported' => 100,
+        'initial_sync_estimated' => 100,
+    ]);
+
+    livewire(MeetingsHomeWidget::class)
+        ->assertSee('data-testid="meetings-mailbox-sync"', escape: false)
+        ->assertSee(trans_choice('filament/pages/dashboard.meetings.syncing.meetings_processed', 42, ['count' => 42]));
+});
+
+it('shows calendar meetings processed while email store jobs run after listing finishes', function (): void {
+    $batch = resolve(MailboxHistoryImportService::class)->startBatch($this->account);
+
+    $this->account->update([
+        'capabilities' => ['email' => true, 'calendar' => true],
+        'sync_cursor' => 'history-done',
+        'calendar_sync_cursor' => null,
+        'history_import_batch_id' => $batch->id,
+        'initial_calendar_sync_imported' => 12,
+        'initial_sync_imported' => 57,
+    ]);
+
+    DB::table('job_batches')->where('id', $batch->id)->update([
+        'total_jobs' => 100,
+        'pending_jobs' => 25,
+        'failed_jobs' => 0,
+        'finished_at' => null,
+    ]);
+
+    livewire(MeetingsHomeWidget::class)
+        ->assertSee('data-testid="meetings-mailbox-sync"', escape: false)
+        ->assertSee(trans_choice('filament/pages/dashboard.meetings.syncing.meetings_processed', 12, ['count' => 12]))
+        ->assertSee(trans_choice('filament/pages/dashboard.meetings.syncing.emails_processed', 75, ['count' => 75]));
+});
+
+it('keeps mailbox sync at 100% while calendar history continues after email listing finishes', function (): void {
+    $batch = resolve(MailboxHistoryImportService::class)->startBatch($this->account);
+
+    $this->account->update([
+        'capabilities' => ['email' => true, 'calendar' => true],
+        'sync_cursor' => 'history-done',
+        'calendar_sync_cursor' => null,
+        'history_import_batch_id' => $batch->id,
+        'initial_calendar_sync_imported' => 12,
+        'initial_sync_imported' => 100,
+    ]);
+
+    DB::table('job_batches')->where('id', $batch->id)->update([
+        'total_jobs' => 100,
+        'pending_jobs' => 0,
+        'failed_jobs' => 0,
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    MailboxSyncTracker::markCalendarStarted($this->account);
+
+    livewire(MeetingsHomeWidget::class)
+        ->assertSee('data-testid="meetings-mailbox-sync"', escape: false)
+        ->assertSee(__('filament/pages/dashboard.meetings.syncing.title_with_percent', ['percent' => 100]))
+        ->assertDontSee(__('filament/pages/dashboard.meetings.syncing.title_with_percent', ['percent' => 0]));
 });
 
 it('shows mailbox sync progress during email-only history import', function (): void {

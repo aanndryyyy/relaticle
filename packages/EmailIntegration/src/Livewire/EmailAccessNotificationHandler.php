@@ -17,8 +17,10 @@ use Livewire\Attributes\Computed;
 use Livewire\Attributes\On;
 use Livewire\Component;
 use Relaticle\EmailIntegration\Actions\CancelQueuedEmailAction;
+use Relaticle\EmailIntegration\Actions\RetryMailboxHistoryImportFailuresAction;
 use Relaticle\EmailIntegration\Enums\EmailAccessRequestStatus;
 use Relaticle\EmailIntegration\Filament\Concerns\HasEmailReaderActions;
+use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Email;
 use Relaticle\EmailIntegration\Models\EmailAccessRequest;
 use RuntimeException;
@@ -112,6 +114,43 @@ final class EmailAccessNotificationHandler extends Component implements HasActio
     public function denyFromNotification(string $requestId): void
     {
         $this->decideOwnedReaderAccessRequest($requestId, approve: false);
+    }
+
+    #[On('retry-mailbox-history-import')]
+    public function retryMailboxHistoryImport(string $accountId, string $batchId): void
+    {
+        $user = $this->authUser();
+
+        $account = ConnectedAccount::query()
+            ->whereKey($accountId)
+            ->where('user_id', $user->getKey())
+            ->where('workspace_id', $user->current_workspace_id)
+            ->first();
+
+        if (! $account instanceof ConnectedAccount) {
+            return;
+        }
+
+        $queued = resolve(RetryMailboxHistoryImportFailuresAction::class)->execute($user, $account, $batchId);
+
+        $this->closeNotificationsPanel();
+        $this->refreshDatabaseNotifications();
+
+        if ($queued) {
+            Notification::make()
+                ->title(__('filament/notifications/mailbox-import-complete.retry.queued.title'))
+                ->body(__('filament/notifications/mailbox-import-complete.retry.queued.body'))
+                ->success()
+                ->send();
+
+            return;
+        }
+
+        Notification::make()
+            ->title(__('filament/notifications/mailbox-import-complete.retry.unavailable.title'))
+            ->body(__('filament/notifications/mailbox-import-complete.retry.unavailable.body'))
+            ->danger()
+            ->send();
     }
 
     #[On('undo-queued-send')]

@@ -6,26 +6,34 @@ use App\Models\User;
 use App\Models\Workspace;
 use App\Providers\AppServiceProvider;
 use Illuminate\Support\Facades\Bus;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Laravel\Socialite\Facades\Socialite;
 use Laravel\Socialite\Two\User as SocialiteUser;
 use Relaticle\EmailIntegration\Actions\ConnectAccountAction;
 use Relaticle\EmailIntegration\Actions\DisconnectConnectedAccountAction;
+use Relaticle\EmailIntegration\Actions\StartMailboxHistoryImportAction;
 use Relaticle\EmailIntegration\Controllers\CallbackController;
 use Relaticle\EmailIntegration\Controllers\RedirectController;
 use Relaticle\EmailIntegration\Enums\ContactCreationMode;
+use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
 use Relaticle\EmailIntegration\Enums\EmailProvider;
 use Relaticle\EmailIntegration\Filament\Pages\EmailAccountsPage;
 use Relaticle\EmailIntegration\Jobs\InitialCalendarSyncJob;
 use Relaticle\EmailIntegration\Jobs\InitialEmailSyncJob;
 use Relaticle\EmailIntegration\Jobs\RelinkMailboxHistoryJob;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 use Relaticle\EmailIntegration\Support\MailboxOAuthWorkspace;
 
 mutates(AppServiceProvider::class);
 mutates(CallbackController::class);
 mutates(ConnectAccountAction::class);
 mutates(DisconnectConnectedAccountAction::class);
+mutates(InitialEmailSyncJob::class);
 mutates(RedirectController::class);
+mutates(StartMailboxHistoryImportAction::class);
+mutates(MailboxHistoryImportService::class);
 
 it('resolves the azure socialite driver', function (): void {
     expect(fn () => Socialite::driver('azure'))->not->toThrow(Throwable::class);
@@ -209,10 +217,57 @@ it('preserves the stored refresh token when a reconnect returns none', function 
             ->firstOrFail();
     };
 
-    $connect('original-refresh');   // first consent issues a refresh token
-    $account = $connect(null);      // re-consent returns none — must NOT clobber the stored token
+    $connect('original-refresh');
+    $account = $connect(null);
 
     expect($account->refresh()->refresh_token)->toBe('original-refresh');
+
+    Bus::assertDispatchedTimes(InitialEmailSyncJob::class, 1);
+});
+
+it('does not restart history import when an active mailbox is reconnected', function (): void {
+    Bus::fake();
+
+    $user = User::factory()->withWorkspace()->create();
+    $this->actingAs($user);
+
+    $connect = function () use ($user): ConnectedAccount {
+        $social = new SocialiteUser;
+        $social->id = 'gmail-live-reconnect';
+        $social->email = 'live-reconnect@example.com';
+        $social->name = 'Demo';
+        $social->token = 'access-token';
+        $social->refreshToken = 'refresh-token';
+        $social->expiresIn = 3600;
+        $social->approvedScopes = [
+            'https://www.googleapis.com/auth/gmail.readonly',
+            'https://www.googleapis.com/auth/gmail.send',
+        ];
+
+        Socialite::fake('gmail', $social);
+        bindMailboxOAuthWorkspace($user);
+
+        $this->get(route('email-accounts.callback', ['provider' => 'gmail']))->assertRedirect();
+
+        return ConnectedAccount::query()
+            ->where('user_id', $user->getKey())
+            ->where('email_address', 'live-reconnect@example.com')
+            ->firstOrFail();
+    };
+
+    $account = $connect();
+    $account->update([
+        'sync_cursor' => 'history-done',
+        'history_import_batch_id' => 'batch-1',
+    ]);
+
+    $account = $connect();
+
+    expect($account->sync_cursor)->toBe('history-done')
+        ->and($account->history_import_batch_id)->toBe('batch-1');
+
+    Bus::assertDispatchedTimes(InitialEmailSyncJob::class, 1);
+    Bus::assertDispatchedTimes(RelinkMailboxHistoryJob::class, 1);
 });
 
 it('dispatches history import when a disconnected account is reconnected', function (): void {
@@ -249,6 +304,213 @@ it('dispatches history import when a disconnected account is reconnected', funct
 
     Bus::assertDispatched(InitialEmailSyncJob::class, fn (InitialEmailSyncJob $job): bool => $job->connectedAccount->is($account));
     Bus::assertDispatched(RelinkMailboxHistoryJob::class, fn (RelinkMailboxHistoryJob $job): bool => $job->connectedAccount->is($account));
+});
+
+it('dispatches history import when reconnecting a mailbox whose listing stopped', function (): void {
+    $user = User::factory()->withWorkspace()->create();
+    $this->actingAs($user);
+
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'user_id' => $user->getKey(),
+        'workspace_id' => $user->current_workspace_id,
+        'email_address' => 'stopped-listing@example.com',
+        'provider' => EmailProvider::GMAIL,
+        'provider_account_id' => 'gmail-reconnect-stopped-listing',
+        'sync_cursor' => null,
+    ]));
+    $staleBatchId = attachHistoryImportBatch($account);
+
+    (new InitialEmailSyncJob($account, historyImportBatchId: $staleBatchId))
+        ->failed(new RuntimeException('Provider 500'));
+
+    resolve(DisconnectConnectedAccountAction::class)->execute($account->fresh());
+
+    Bus::fake();
+
+    $social = new SocialiteUser;
+    $social->id = 'gmail-reconnect-stopped-listing';
+    $social->email = 'stopped-listing@example.com';
+    $social->name = 'Demo';
+    $social->token = 'access-token';
+    $social->refreshToken = 'refresh-token';
+    $social->expiresIn = 3600;
+    $social->approvedScopes = [
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.send',
+    ];
+
+    Socialite::fake('gmail', $social);
+    bindMailboxOAuthWorkspace($user);
+    $this->get(route('email-accounts.callback', ['provider' => 'gmail']))->assertRedirect();
+
+    $account->refresh();
+
+    expect($account->trashed())->toBeFalse()
+        ->and($account->history_import_batch_id)->not->toBe($staleBatchId)
+        ->and($account->history_import_batch_id)->not->toBeNull();
+
+    Bus::assertDispatched(InitialEmailSyncJob::class, fn (InitialEmailSyncJob $job): bool => $job->connectedAccount->is($account));
+});
+
+it('dispatches history import when reauthenticating a live mailbox whose listing stopped', function (): void {
+    $user = User::factory()->withWorkspace()->create();
+    $this->actingAs($user);
+
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'user_id' => $user->getKey(),
+        'workspace_id' => $user->current_workspace_id,
+        'email_address' => 'live-stopped-listing@example.com',
+        'provider' => EmailProvider::GMAIL,
+        'provider_account_id' => 'gmail-live-stopped-listing',
+        'sync_cursor' => null,
+    ]));
+    $staleBatchId = attachHistoryImportBatch($account);
+
+    (new InitialEmailSyncJob($account, historyImportBatchId: $staleBatchId))
+        ->failed(new RuntimeException('Provider 500'));
+
+    expect($account->fresh()->status)->toBe(EmailAccountStatus::ERROR)
+        ->and($account->fresh()->trashed())->toBeFalse();
+
+    Bus::fake();
+
+    $social = new SocialiteUser;
+    $social->id = 'gmail-live-stopped-listing';
+    $social->email = 'live-stopped-listing@example.com';
+    $social->name = 'Demo';
+    $social->token = 'access-token';
+    $social->refreshToken = 'refresh-token';
+    $social->expiresIn = 3600;
+    $social->approvedScopes = [
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.send',
+    ];
+
+    Socialite::fake('gmail', $social);
+    bindMailboxOAuthWorkspace($user);
+    $this->get(route('email-accounts.callback', ['provider' => 'gmail']))->assertRedirect();
+
+    $account->refresh();
+
+    expect($account->trashed())->toBeFalse()
+        ->and($account->status)->toBe(EmailAccountStatus::ACTIVE)
+        ->and($account->history_import_batch_id)->not->toBe($staleBatchId)
+        ->and($account->history_import_batch_id)->not->toBeNull();
+
+    Bus::assertDispatched(InitialEmailSyncJob::class, fn (InitialEmailSyncJob $job): bool => $job->connectedAccount->is($account));
+});
+
+it('does not start a second history import when reauthenticating during listing', function (): void {
+    $user = User::factory()->withWorkspace()->create();
+    $this->actingAs($user);
+
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'user_id' => $user->getKey(),
+        'workspace_id' => $user->current_workspace_id,
+        'email_address' => 'listing-in-progress@example.com',
+        'provider' => EmailProvider::GMAIL,
+        'provider_account_id' => 'gmail-listing-in-progress',
+        'sync_cursor' => null,
+    ]));
+    $batchId = attachHistoryImportBatch($account);
+
+    expect(resolve(MailboxHistoryImportService::class)->isRunning($account->fresh()))->toBeTrue();
+
+    Queue::fake();
+
+    $social = new SocialiteUser;
+    $social->id = 'gmail-listing-in-progress';
+    $social->email = 'listing-in-progress@example.com';
+    $social->name = 'Demo';
+    $social->token = 'access-token';
+    $social->refreshToken = 'refresh-token';
+    $social->expiresIn = 3600;
+    $social->approvedScopes = [
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.send',
+    ];
+
+    Socialite::fake('gmail', $social);
+    bindMailboxOAuthWorkspace($user);
+    $this->get(route('email-accounts.callback', ['provider' => 'gmail']))->assertRedirect();
+
+    expect($account->fresh()->history_import_batch_id)->toBe($batchId);
+
+    Queue::assertNotPushed(InitialEmailSyncJob::class);
+    Queue::assertNotPushed(RelinkMailboxHistoryJob::class);
+});
+
+it('keeps a failed listing failed while store jobs drain and recovers after they finish', function (): void {
+    $user = User::factory()->withWorkspace()->create();
+    $this->actingAs($user);
+
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'user_id' => $user->getKey(),
+        'workspace_id' => $user->current_workspace_id,
+        'email_address' => 'drain-then-recover@example.com',
+        'provider' => EmailProvider::GMAIL,
+        'provider_account_id' => 'gmail-drain-then-recover',
+        'sync_cursor' => null,
+    ]));
+    $batchId = attachHistoryImportBatch($account);
+
+    (new InitialEmailSyncJob($account, historyImportBatchId: $batchId))
+        ->failed(new RuntimeException('Provider 500'));
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 4,
+        'pending_jobs' => 2,
+        'failed_jobs' => 0,
+        'finished_at' => null,
+    ]);
+
+    expect($account->fresh()->status)->toBe(EmailAccountStatus::ERROR)
+        ->and(resolve(MailboxHistoryImportService::class)->isRunning($account->fresh()))->toBeTrue();
+
+    Queue::fake();
+
+    $social = new SocialiteUser;
+    $social->id = 'gmail-drain-then-recover';
+    $social->email = 'drain-then-recover@example.com';
+    $social->name = 'Demo';
+    $social->token = 'access-token';
+    $social->refreshToken = 'refresh-token';
+    $social->expiresIn = 3600;
+    $social->approvedScopes = [
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.send',
+    ];
+
+    Socialite::fake('gmail', $social);
+    bindMailboxOAuthWorkspace($user);
+    $this->get(route('email-accounts.callback', ['provider' => 'gmail']))->assertRedirect();
+
+    $account->refresh();
+
+    expect($account->status)->toBe(EmailAccountStatus::ERROR)
+        ->and($account->last_error)->toBe('Provider 500')
+        ->and($account->history_import_batch_id)->toBe($batchId);
+
+    Queue::assertNotPushed(InitialEmailSyncJob::class);
+    Queue::assertNotPushed(RelinkMailboxHistoryJob::class);
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'pending_jobs' => 0,
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    expect(resolve(MailboxHistoryImportService::class)->isRunning($account->fresh()))->toBeFalse();
+
+    bindMailboxOAuthWorkspace($user);
+    $this->get(route('email-accounts.callback', ['provider' => 'gmail']))->assertRedirect();
+
+    $account->refresh();
+
+    expect($account->status)->toBe(EmailAccountStatus::ACTIVE)
+        ->and($account->history_import_batch_id)->not->toBe($batchId)
+        ->and($account->history_import_batch_id)->not->toBeNull();
+
+    Queue::assertPushed(InitialEmailSyncJob::class, fn (InitialEmailSyncJob $job): bool => $job->connectedAccount->is($account));
 });
 
 it('connects the mailbox to the workspace where authorization started after the current workspace changes', function (): void {

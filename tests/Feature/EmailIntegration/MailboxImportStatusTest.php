@@ -7,6 +7,7 @@ use App\Filament\Resources\CompanyResource;
 use App\Filament\Resources\PeopleResource;
 use App\Models\User;
 use Filament\Facades\Filament;
+use Illuminate\Support\Facades\DB;
 use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
 use Relaticle\EmailIntegration\Filament\Pages\EmailAccountsPage;
 use Relaticle\EmailIntegration\Livewire\MailboxImportStatus;
@@ -75,6 +76,34 @@ it('hides a failed mailbox from the section', function (): void {
         ->assertDontSee(__('filament/pages/email-accounts.sync_status.title_syncing'));
 });
 
+it('marks import complete on home when store jobs failed but listing finished', function (): void {
+    $account = importingAccount([
+        'capabilities' => ['email' => true, 'calendar' => false],
+    ]);
+
+    $component = livewire(MailboxImportStatus::class, ['placement' => 'home'])
+        ->assertSee(__('filament/pages/email-accounts.sync_status.title_syncing'));
+
+    $batchId = attachHistoryImportBatch($account);
+
+    $account->update(['sync_cursor' => 'history-done', 'last_synced_at' => now()]);
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 10,
+        'pending_jobs' => 0,
+        'failed_jobs' => 2,
+        'failed_job_ids' => json_encode(['failed-1', 'failed-2']),
+        'finished_at' => now()->getTimestamp(),
+    ]);
+
+    expect($account->fresh()?->showsMailboxHistoryImportFailureSummary())->toBeTrue()
+        ->and($account->fresh()?->showsHomeMailboxImportProgress())->toBeFalse();
+
+    $component->call('refreshStatus')
+        ->assertSee(__('filament/pages/email-accounts.sync_status.title_complete'))
+        ->assertDontSee(__('filament/pages/email-accounts.sync_status.title_syncing'));
+});
+
 it('keeps a completed import visible until dismiss on this instance', function (): void {
     $account = importingAccount();
 
@@ -90,7 +119,7 @@ it('keeps a completed import visible until dismiss on this instance', function (
         ->assertSee(trans_choice('filament/pages/email-accounts.sync_status.emails_processed', 643, ['count' => 643]));
 });
 
-it('shows calendar-only sync progress on the home import section', function (): void {
+it('does not show the home import section during calendar-only incremental sync', function (): void {
     $user = User::factory()->withWorkspace()->create();
     $this->actingAs($user);
     Filament::setCurrentPanel(Filament::getPanel('app'));
@@ -106,9 +135,7 @@ it('shows calendar-only sync progress on the home import section', function (): 
 
     MailboxSyncTracker::markCalendarStarted($account);
 
-    livewire(MailboxImportStatus::class, ['placement' => 'home'])
-        ->assertSee(__('filament/pages/email-accounts.importing_percent', ['percent' => 0]))
-        ->assertSee(__('filament/pages/email-accounts.sync_status.title_syncing'));
+    expect(livewire(MailboxImportStatus::class, ['placement' => 'home'])->instance()->shouldRender())->toBeFalse();
 });
 
 it('shows import complete while incremental sync runs after history finishes', function (): void {
