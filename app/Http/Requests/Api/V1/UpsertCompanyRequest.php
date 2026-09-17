@@ -5,11 +5,11 @@ declare(strict_types=1);
 namespace App\Http\Requests\Api\V1;
 
 use App\Concerns\ResolvesUpsertMatch;
+use App\Enums\CrmEntity;
 use App\Models\Company;
-use App\Rules\ValidCustomFields;
-use Illuminate\Foundation\Http\FormRequest;
+use App\Models\User;
 
-final class UpsertCompanyRequest extends FormRequest
+final class UpsertCompanyRequest extends BaseCrmEntityRequest
 {
     use ResolvesUpsertMatch;
 
@@ -23,33 +23,33 @@ final class UpsertCompanyRequest extends FormRequest
      */
     private const array NATIVE_MATCH_COLUMNS = ['name'];
 
-    /**
-     * @return array<string, array<int, mixed>>
-     */
-    public function rules(): array
-    {
-        $workspaceId = $this->workspaceId();
-        $company = $this->matchedCompany();
-
-        // On the update branch a required custom field the caller omitted is
-        // already answered by the matched record, and UpdateCompany merges it
-        // back in — demanding it again would reject a legitimate partial upsert.
-        return array_merge(
-            $this->matchRules('company', self::NATIVE_MATCH_COLUMNS),
-            ['name' => ['required', 'string', 'max:255']],
-            new ValidCustomFields(
-                $workspaceId,
-                'company',
-                isUpdate: $company instanceof Company,
-                ignoreEntityId: $company?->getKey(),
-            )->toRules($this->input('custom_fields')),
-        );
-    }
-
     public function matchedCompany(): ?Company
     {
         $matched = $this->resolveMatch(Company::class, self::NATIVE_MATCH_COLUMNS);
 
         return $matched instanceof Company ? $matched : null;
+    }
+
+    protected function entity(): CrmEntity
+    {
+        return CrmEntity::Company;
+    }
+
+    /**
+     * @return array<string, array<int, mixed>>
+     */
+    protected function entityRules(User $user): array
+    {
+        return [
+            ...$this->matchRules('company', self::NATIVE_MATCH_COLUMNS),
+            'name' => ['required', 'string', 'max:255'],
+        ];
+    }
+
+    // A required custom field the caller omitted is already answered by the matched
+    // record, which UpdateCompany merges back in, so validation runs as an update.
+    protected function existingRecord(): ?Company
+    {
+        return $this->matchedCompany();
     }
 }

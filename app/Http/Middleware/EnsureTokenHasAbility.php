@@ -30,9 +30,8 @@ final readonly class EnsureTokenHasAbility
             return $next($request);
         }
 
-        // A route that mutates in more than one way — the upsert endpoints create
-        // OR update — declares every ability it may exercise, and must hold all of
-        // them regardless of which branch this particular request takes. Deciding
+        // An upsert route may create or update, so it declares every ability it may
+        // exercise and the token must hold all of them whichever branch runs. Deciding
         // after the match would turn the 403 into an existence oracle.
         $required = $abilities === [] ? [$this->resolveAbility($request->method())] : $abilities;
 
