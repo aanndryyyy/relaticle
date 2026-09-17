@@ -45,6 +45,28 @@ it('resets cursor and dispatches initial sync on 410', function (): void {
     );
 });
 
+it('does not fetch delta while a calendar store batch is still in progress', function (): void {
+    Bus::fake();
+
+    $account = ConnectedAccount::withoutEvents(fn () => ConnectedAccount::factory()->create([
+        'capabilities' => ['email' => true, 'calendar' => true],
+        'calendar_sync_cursor' => 'valid-token',
+    ]));
+
+    MailboxSyncTracker::markCalendarStarted($account);
+    MailboxSyncTracker::setCalendarRunTotal($account, 2);
+
+    $service = Mockery::mock(CalendarServiceInterface::class);
+    $service->shouldNotReceive('fetchDelta');
+
+    $factory = Mockery::mock(CalendarServiceFactoryInterface::class);
+    $factory->shouldNotReceive('make');
+
+    (new IncrementalCalendarSyncJob($account))->handle($factory);
+
+    Bus::assertNothingBatched();
+});
+
 it('forwards requested reconciliation when delegating to initial sync without a cursor', function (): void {
     Bus::fake([InitialCalendarSyncJob::class]);
 

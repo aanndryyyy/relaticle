@@ -14,12 +14,26 @@ final readonly class MailboxSyncTracker
     public static function markCalendarStarted(ConnectedAccount $account): void
     {
         Cache::put(self::calendarKey($account), true, now()->addMinutes(self::TTL_MINUTES));
-
-        if (! Cache::has(self::calendarProcessedKey($account))) {
-            Cache::put(self::calendarProcessedKey($account), 0, now()->addMinutes(self::TTL_MINUTES));
-        }
-
+        Cache::put(self::calendarProcessedKey($account), 0, now()->addMinutes(self::TTL_MINUTES));
         Cache::forget(self::calendarTotalKey($account));
+        Cache::increment(self::calendarGenerationKey($account));
+    }
+
+    public static function currentCalendarSyncGeneration(ConnectedAccount $account): int
+    {
+        return (int) Cache::get(self::calendarGenerationKey($account), 0);
+    }
+
+    public static function isCalendarSyncGenerationCurrent(ConnectedAccount $account, int $generation): bool
+    {
+        return $generation === self::currentCalendarSyncGeneration($account);
+    }
+
+    public static function hasCalendarRunTotal(ConnectedAccount $account): bool
+    {
+        $total = Cache::get(self::calendarTotalKey($account));
+
+        return is_int($total) && $total > 0;
     }
 
     public static function markCalendarFinished(ConnectedAccount $account): void
@@ -132,6 +146,11 @@ final readonly class MailboxSyncTracker
     private static function calendarTotalKey(ConnectedAccount $account): string
     {
         return 'mailbox-sync:calendar:'.$account->getKey().':total';
+    }
+
+    private static function calendarGenerationKey(ConnectedAccount $account): string
+    {
+        return 'mailbox-sync:calendar:'.$account->getKey().':generation';
     }
 
     private static function channelProgressPercent(int $processed, mixed $total): int

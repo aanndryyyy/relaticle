@@ -148,6 +148,30 @@ final readonly class MailboxHistoryImportService
         }
     }
 
+    public function failCalendarImport(ConnectedAccount $account, int $failedCount = 1): void
+    {
+        $batchId = $account->history_import_batch_id;
+
+        if (is_string($batchId) && $batchId !== '') {
+            $this->recordCalendarFailures($batchId, max(1, $failedCount));
+        }
+
+        $this->completeCalendarImport($account, succeeded: false);
+    }
+
+    public function historyImportHasUnresolvedEmailFailures(ConnectedAccount $account): bool
+    {
+        $batchId = $account->history_import_batch_id;
+
+        if (! is_string($batchId) || $batchId === '') {
+            return false;
+        }
+
+        $batch = Bus::findBatch($batchId);
+
+        return $batch instanceof Batch && $this->batchFailedJobCount($batch) > 0;
+    }
+
     public function lockKey(ConnectedAccount $account): string
     {
         return 'email-history-import:'.$account->getKey();

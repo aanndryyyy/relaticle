@@ -10,6 +10,7 @@ use Relaticle\EmailIntegration\Jobs\StoreMeetingJob;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Meeting;
 use Relaticle\EmailIntegration\Services\Factories\NormalizedMeetingPayloadFactory;
+use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 
 mutates(StoreMeetingJob::class, NormalizedMeetingPayloadFactory::class);
 
@@ -114,4 +115,50 @@ it('does not duplicate a host who is already in attendees without the organizer 
     $meeting = Meeting::query()->where('provider_event_id', 'evt-listed-host')->firstOrFail();
 
     expect($meeting->attendees()->where('email_address', 'host@example.com')->count())->toBe(1);
+});
+
+it('does not restore a cancelled meeting when the store job belongs to a superseded sync run', function (): void {
+    $account = ConnectedAccount::withoutEvents(fn () => ConnectedAccount::factory()->create([
+        'email_address' => 'me@example.com',
+        'capabilities' => ['email' => true, 'calendar' => true],
+        'calendar_sync_cursor' => 'valid-token',
+    ]));
+
+    $meeting = Meeting::factory()->create([
+        'connected_account_id' => $account->getKey(),
+        'workspace_id' => $account->workspace_id,
+        'provider_event_id' => 'evt-cancelled',
+    ]);
+    $meeting->delete();
+
+    MailboxSyncTracker::markCalendarStarted($account);
+    $staleGeneration = MailboxSyncTracker::currentCalendarSyncGeneration($account);
+
+    MailboxSyncTracker::markCalendarFinished($account);
+    MailboxSyncTracker::markCalendarStarted($account);
+
+    $event = new CalendarEventData(
+        providerEventId: 'evt-cancelled',
+        providerRecurringEventId: null,
+        iCalUid: null,
+        title: 'Was cancelled',
+        description: null,
+        startsAt: Date::now()->addDay(),
+        endsAt: Date::now()->addDay()->addHour(),
+        isAllDay: false,
+        location: null,
+        htmlLink: null,
+        status: 'confirmed',
+        visibility: 'default',
+        organizerEmail: null,
+        organizerName: null,
+        attendees: [],
+    );
+
+    (new StoreMeetingJob($account, $event, $staleGeneration))->handle(
+        app(StoreMeetingAction::class),
+        app(NormalizedMeetingPayloadFactory::class),
+    );
+
+    expect($meeting->fresh()?->trashed())->toBeTrue();
 });

@@ -57,7 +57,14 @@ final class IncrementalCalendarSyncJob implements ShouldBeUnique, ShouldQueue
             return;
         }
 
+        if (MailboxSyncTracker::isCalendarSyncing($account) && MailboxSyncTracker::hasCalendarRunTotal($account)) {
+            $this->release(30);
+
+            return;
+        }
+
         resolve(MailboxHistoryImportService::class)->touchCalendarImport($account);
+        $calendarSyncGeneration = MailboxSyncTracker::currentCalendarSyncGeneration($account);
 
         $service = $serviceFactory->make($account);
 
@@ -88,7 +95,7 @@ final class IncrementalCalendarSyncJob implements ShouldBeUnique, ShouldQueue
         $reconcileAfter = $this->reconcileAfter;
 
         $jobs = array_map(
-            fn (CalendarEventData $event): StoreMeetingJob => new StoreMeetingJob($account, $event),
+            fn (CalendarEventData $event): StoreMeetingJob => new StoreMeetingJob($account, $event, $calendarSyncGeneration),
             $result->events,
         );
 
@@ -121,11 +128,14 @@ final class IncrementalCalendarSyncJob implements ShouldBeUnique, ShouldQueue
         $update = [
             'last_calendar_synced_at' => now(),
             'status' => EmailAccountStatus::ACTIVE,
-            'last_error' => null,
         ];
 
         if ($nextSyncToken !== null) {
             $update['calendar_sync_cursor'] = $nextSyncToken;
+        }
+
+        if (! resolve(MailboxHistoryImportService::class)->historyImportHasUnresolvedEmailFailures($account)) {
+            $update['last_error'] = null;
         }
 
         $account->update($update);
@@ -160,20 +170,14 @@ final class IncrementalCalendarSyncJob implements ShouldBeUnique, ShouldQueue
             'last_error' => "{$failedJobs} calendar event(s) could not be stored during sync.",
         ]);
 
-        $batchId = $account->history_import_batch_id;
-
-        if (is_string($batchId) && $batchId !== '') {
-            resolve(MailboxHistoryImportService::class)->recordCalendarFailures($batchId, $failedJobs);
-        }
-
-        resolve(MailboxHistoryImportService::class)->completeCalendarImport($account, succeeded: false);
+        resolve(MailboxHistoryImportService::class)->failCalendarImport($account, $failedJobs);
 
         resolve(CompleteMailboxHistoryImportAction::class)->executeForAccount($account);
     }
 
     public function failed(Throwable $exception): void
     {
-        resolve(MailboxHistoryImportService::class)->completeCalendarImport($this->connectedAccount, succeeded: false);
+        resolve(MailboxHistoryImportService::class)->failCalendarImport($this->connectedAccount);
 
         $this->connectedAccount->update([
             'status' => $this->isAuthError($exception) ? EmailAccountStatus::REAUTH_REQUIRED : EmailAccountStatus::ERROR,

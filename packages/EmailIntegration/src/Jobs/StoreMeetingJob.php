@@ -12,6 +12,7 @@ use Relaticle\EmailIntegration\Actions\StoreMeetingAction;
 use Relaticle\EmailIntegration\Data\CalendarEventData;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Services\Factories\NormalizedMeetingPayloadFactory;
+use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 
 #[DeleteWhenMissingModels]
 final class StoreMeetingJob implements ShouldQueue
@@ -23,6 +24,7 @@ final class StoreMeetingJob implements ShouldQueue
     public function __construct(
         public readonly ConnectedAccount $connectedAccount,
         public readonly CalendarEventData $event,
+        public readonly ?int $calendarSyncGeneration = null,
     ) {
         $this->onQueue('emails-sync');
     }
@@ -32,6 +34,11 @@ final class StoreMeetingJob implements ShouldQueue
         NormalizedMeetingPayloadFactory $factory,
     ): void {
         if ($this->batch()?->cancelled()) {
+            return;
+        }
+
+        if ($this->calendarSyncGeneration !== null
+            && ! MailboxSyncTracker::isCalendarSyncGenerationCurrent($this->connectedAccount, $this->calendarSyncGeneration)) {
             return;
         }
 

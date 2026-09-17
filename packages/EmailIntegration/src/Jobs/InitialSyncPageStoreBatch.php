@@ -118,9 +118,10 @@ final class InitialSyncPageStoreBatch
         }
 
         $accountId = (string) $account->getKey();
+        $calendarSyncGeneration = MailboxSyncTracker::currentCalendarSyncGeneration($account);
 
         $jobs = array_map(
-            fn (CalendarEventData $event): StoreMeetingJob => new StoreMeetingJob($account, $event),
+            fn (CalendarEventData $event): StoreMeetingJob => new StoreMeetingJob($account, $event, $calendarSyncGeneration),
             $eventsToStore,
         );
 

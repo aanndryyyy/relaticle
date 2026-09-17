@@ -124,9 +124,12 @@ final class InitialCalendarSyncJob implements ShouldBeUnique, ShouldQueue
         $update = [
             'last_calendar_synced_at' => now(),
             'status' => EmailAccountStatus::ACTIVE,
-            'last_error' => null,
             'initial_calendar_sync_imported' => $imported,
         ];
+
+        if (! resolve(MailboxHistoryImportService::class)->historyImportHasUnresolvedEmailFailures($account)) {
+            $update['last_error'] = null;
+        }
 
         if ($nextSyncToken !== null && $nextSyncToken !== '') {
             $update['calendar_sync_cursor'] = $nextSyncToken;

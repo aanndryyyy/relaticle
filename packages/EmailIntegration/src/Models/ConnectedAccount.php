@@ -329,7 +329,9 @@ final class ConnectedAccount extends Model
 
         $import = resolve(MailboxHistoryImportService::class);
 
-        if ($import->hasAwaitingRetrySuccessNotice((string) $this->history_import_batch_id)) {
+        $batchId = (string) $this->history_import_batch_id;
+
+        if ($import->hasAwaitingRetrySuccessNotice($batchId) || $import->calendarFailureCount($batchId) > 0) {
             return true;
         }
 

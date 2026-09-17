@@ -10,9 +10,13 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
+use Relaticle\EmailIntegration\Jobs\IncrementalCalendarSyncJob;
+use Relaticle\EmailIntegration\Jobs\InitialCalendarSyncJob;
 use Relaticle\EmailIntegration\Jobs\StoreEmailJob;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
+use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 use Throwable;
 
 final readonly class RetryMailboxHistoryImportFailuresAction
@@ -35,30 +39,39 @@ final readonly class RetryMailboxHistoryImportFailuresAction
                 return false;
             }
 
-            $failedJobUuids = $this->resolveFailedJobUuids($batch, $batchId);
-
-            if ($failedJobUuids === []) {
+            if ($account->status === EmailAccountStatus::REAUTH_REQUIRED) {
                 return false;
             }
 
-            /** @var list<string> $retryableUuids */
-            $retryableUuids = DB::table('failed_jobs')
-                ->whereIn('uuid', $failedJobUuids)
-                ->pluck('uuid')
-                ->map(static fn (mixed $uuid): string => (string) $uuid)
-                ->values()
-                ->all();
+            $retryableUuids = $this->retryableFailedJobUuids($batch, $batchId);
+            $needsCalendar = $this->needsCalendarRecovery($account, $batchId);
 
-            if ($retryableUuids === []) {
+            if ($retryableUuids === [] && ! $needsCalendar) {
                 return false;
             }
 
             $alreadyAwaiting = $this->mailboxHistoryImport->hasAwaitingRetrySuccessNotice($batchId);
             $this->mailboxHistoryImport->markAwaitingRetrySuccessNotice($batchId);
 
+            $queued = false;
+
             try {
                 foreach ($retryableUuids as $failedJobUuid) {
                     Artisan::call('queue:retry', ['id' => $failedJobUuid]);
+                }
+
+                $remainingUuids = DB::table('failed_jobs')
+                    ->whereIn('uuid', $retryableUuids)
+                    ->pluck('uuid')
+                    ->map(static fn (mixed $uuid): string => (string) $uuid)
+                    ->all();
+
+                if (array_diff($retryableUuids, $remainingUuids) !== []) {
+                    $queued = true;
+                }
+
+                if ($needsCalendar && $this->queueCalendarRecovery($account, $batchId)) {
+                    $queued = true;
                 }
             } catch (Throwable) {
                 if (! $alreadyAwaiting) {
@@ -68,13 +81,7 @@ final readonly class RetryMailboxHistoryImportFailuresAction
                 return false;
             }
 
-            $remainingUuids = DB::table('failed_jobs')
-                ->whereIn('uuid', $retryableUuids)
-                ->pluck('uuid')
-                ->map(static fn (mixed $uuid): string => (string) $uuid)
-                ->all();
-
-            if (array_diff($retryableUuids, $remainingUuids) === []) {
+            if (! $queued) {
                 if (! $alreadyAwaiting) {
                     $this->mailboxHistoryImport->clearAwaitingRetrySuccessNotice($batchId);
                 }
@@ -82,10 +89,99 @@ final readonly class RetryMailboxHistoryImportFailuresAction
                 return false;
             }
 
-            $account->update(['last_error' => null]);
+            $account = $account->fresh() ?? $account;
+
+            if ($this->mailboxHistoryImport->calendarFailureCount($batchId) === 0
+                && ($account->calendar_sync_cursor !== null || ! $account->hasCalendar())) {
+                $account->update(['last_error' => null]);
+            }
 
             return true;
         });
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function retryableFailedJobUuids(Batch $batch, string $batchId): array
+    {
+        $failedJobUuids = $this->resolveFailedJobUuids($batch, $batchId);
+
+        if ($failedJobUuids === []) {
+            return [];
+        }
+
+        return array_values(DB::table('failed_jobs')
+            ->whereIn('uuid', $failedJobUuids)
+            ->pluck('uuid')
+            ->map(static fn (mixed $uuid): string => (string) $uuid)
+            ->all());
+    }
+
+    private function needsCalendarRecovery(ConnectedAccount $account, string $batchId): bool
+    {
+        if (! $account->hasCalendar() || $this->mailboxHistoryImport->isCalendarImportPending($batchId)) {
+            return false;
+        }
+
+        if ($this->mailboxHistoryImport->calendarFailureCount($batchId) > 0) {
+            return true;
+        }
+
+        return $account->calendar_sync_cursor === null;
+    }
+
+    private function queueCalendarRecovery(ConnectedAccount $account, string $batchId): bool
+    {
+        if ($this->calendarRecoveryJobIsQueued($account)) {
+            return false;
+        }
+
+        $this->mailboxHistoryImport->markCalendarImportPending($batchId);
+        MailboxSyncTracker::markCalendarStarted($account);
+
+        $account->update(['status' => EmailAccountStatus::ACTIVE]);
+
+        if ($account->calendar_sync_cursor !== null) {
+            dispatch(new IncrementalCalendarSyncJob($account, reconcileAfter: true));
+        } else {
+            dispatch(new InitialCalendarSyncJob($account));
+        }
+
+        if ($this->calendarRecoveryJobIsQueued($account)) {
+            return true;
+        }
+
+        $this->mailboxHistoryImport->markCalendarImportFinished($batchId);
+
+        return false;
+    }
+
+    private function calendarRecoveryJobIsQueued(ConnectedAccount $account): bool
+    {
+        $accountId = (string) $account->getKey();
+
+        foreach (DB::table('jobs')->where('queue', 'emails-sync')->get(['payload']) as $row) {
+            $payload = json_decode((string) $row->payload, true);
+
+            if (! is_array($payload)) {
+                continue;
+            }
+
+            $displayName = $payload['displayName'] ?? '';
+
+            if (! is_string($displayName) || ! str_contains($displayName, 'CalendarSyncJob')) {
+                continue;
+            }
+
+            $command = $payload['data']['command'] ?? '';
+
+            if (is_string($command) && str_contains($command, $accountId)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -146,6 +146,11 @@ function bindMailboxImportCalendarService(
 
     if ($fetchDeltaException instanceof Throwable) {
         $service->shouldReceive('fetchDelta')->andThrow($fetchDeltaException);
+    } else {
+        $service->shouldReceive('fetchDelta')->andReturn(new CalendarSyncResult(
+            events: $events,
+            nextSyncToken: 'calendar-done',
+        ));
     }
 
     if ($initialSyncException instanceof Throwable) {
@@ -162,27 +167,50 @@ function bindMailboxImportCalendarService(
     app()->instance(CalendarServiceFactoryInterface::class, $factory);
 }
 
-function workMailboxImportQueueOnce(): void
+function workMailboxImportQueueOnce(?int $tries = null): void
 {
-    Artisan::call('queue:work', [
+    $parameters = [
         'connection' => 'database',
         '--queue' => 'emails-sync',
         '--once' => true,
         '--sleep' => 0,
         '--stop-when-empty' => true,
-    ]);
+    ];
+
+    if ($tries !== null) {
+        $parameters['--tries'] = $tries;
+    }
+
+    Artisan::call('queue:work', $parameters);
 
     test()->travel(20)->minutes();
 }
 
-function workMailboxImportQueueUntilEmpty(int $maxJobs = 50): void
+function workMailboxImportQueueUntilEmpty(int $maxJobs = 50, ?int $tries = null): void
 {
     $processed = 0;
 
     while ($processed < $maxJobs && DB::table('jobs')->where('queue', 'emails-sync')->exists()) {
-        workMailboxImportQueueOnce();
+        workMailboxImportQueueOnce($tries);
         $processed++;
     }
+}
+
+function mailboxImportQueueContains(string $jobClass): bool
+{
+    return DB::table('jobs')->where('queue', 'emails-sync')->get()->contains(function (object $job) use ($jobClass): bool {
+        $payload = json_decode((string) $job->payload, true);
+
+        return is_array($payload) && str_contains((string) ($payload['displayName'] ?? ''), class_basename($jobClass));
+    });
+}
+
+function retryMailboxImportFromAccountsPage(ConnectedAccount $account): void
+{
+    Livewire::test(EmailAccountsPage::class)
+        ->assertActionVisible(TestAction::make('retryFailedImport')->arguments(['account_id' => $account->getKey()]))
+        ->callAction(TestAction::make('retryFailedImport')->arguments(['account_id' => $account->getKey()]))
+        ->assertNotified(__('filament/pages/email-accounts.notifications.retry_failed_import_queued.title'));
 }
 
 function assertMailboxImportMail(User $user, MailboxHistoryImportCompletedNotification $notification, string $subject, string $line): void
@@ -743,23 +771,209 @@ it('sends one recovery notice after a calendar-only failure is repaired', functi
     bindMailboxImportCalendarService(initialSyncException: new RuntimeException('Calendar API unavailable'));
 
     resolve(StartMailboxHistoryImportAction::class)->execute($account);
-    workMailboxImportQueueUntilEmpty();
+    workMailboxImportQueueUntilEmpty(tries: 1);
 
     expect($user->notifications()->sole()->data['viewData']['kind'])->toBe('partial')
-        ->and($account->fresh()->calendar_sync_cursor)->toBeNull();
+        ->and($account->fresh()->calendar_sync_cursor)->toBeNull()
+        ->and($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeTrue();
 
-    $account->refresh();
-    $account->update(['status' => EmailAccountStatus::ACTIVE, 'last_error' => null]);
-    DB::table('jobs')->delete();
     bindMailboxImportCalendarService();
-    (new InitialCalendarSyncJob($account->fresh()))->handle(resolve(CalendarServiceFactoryInterface::class));
-    workMailboxImportQueueUntilEmpty();
+    retryMailboxImportFromAccountsPage($account->fresh());
+
+    expect(mailboxImportQueueContains(InitialCalendarSyncJob::class))->toBeTrue()
+        ->and(mailboxImportQueueContains(StoreEmailJob::class))->toBeFalse();
+
+    workMailboxImportQueueUntilEmpty(tries: 1);
 
     $notifications = $user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->get();
 
     expect($account->fresh()->calendar_sync_cursor)->toBe('calendar-done')
+        ->and($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeFalse()
         ->and($notifications)->toHaveCount(2)
         ->and($notifications->pluck('data.viewData.kind')->all())->toContain('partial', 'retry_success');
+});
+
+it('reports a calendar API failure on re-import when the mailbox already has a cursor', function (): void {
+    config()->set('queue.default', 'database');
+    $user = mailboxImportNotificationUser();
+    $this->actingAs($user);
+    Filament::setTenant($user->currentWorkspace);
+    $account = mailboxImportNotificationAccount($user, [
+        'capabilities' => ['email' => true, 'calendar' => true],
+        'calendar_sync_cursor' => 'calendar-token',
+    ]);
+
+    bindMailboxImportMailService(['ok-1'], function (MailServiceInterface $service): void {
+        $service->shouldReceive('fetchMessage')->with('ok-1')->andReturn(mailboxImportFetchedEmail('ok-1'));
+    });
+    bindMailboxImportCalendarService(fetchDeltaException: new RuntimeException('Calendar API unavailable'));
+
+    resolve(StartMailboxHistoryImportAction::class)->execute($account);
+    workMailboxImportQueueUntilEmpty(tries: 1);
+
+    $notification = $user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->sole();
+
+    expect($notification->data['viewData']['kind'])->toBe('partial')
+        ->and($notification->data['title'])->toBe(__('filament/notifications/mailbox-import-complete.title_with_issues'))
+        ->and($account->fresh()->calendar_sync_cursor)->toBe('calendar-token')
+        ->and($account->fresh()->last_error)->toBe('Calendar API unavailable')
+        ->and($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeTrue()
+        ->and(resolve(MailboxHistoryImportService::class)->calendarFailureCount((string) $account->fresh()->history_import_batch_id))->toBe(1);
+});
+
+it('retries a calendar API failure from the accounts page without requeueing email jobs', function (): void {
+    config()->set('queue.default', 'database');
+    $user = mailboxImportNotificationUser();
+    $this->actingAs($user);
+    Filament::setTenant($user->currentWorkspace);
+    $account = mailboxImportNotificationAccount($user, [
+        'capabilities' => ['email' => true, 'calendar' => true],
+        'calendar_sync_cursor' => 'calendar-token',
+    ]);
+
+    bindMailboxImportMailService(['ok-1'], function (MailServiceInterface $service): void {
+        $service->shouldReceive('fetchMessage')->with('ok-1')->andReturn(mailboxImportFetchedEmail('ok-1'));
+    });
+    bindMailboxImportCalendarService(fetchDeltaException: new RuntimeException('Calendar API unavailable'));
+
+    resolve(StartMailboxHistoryImportAction::class)->execute($account);
+    workMailboxImportQueueUntilEmpty(tries: 1);
+
+    bindMailboxImportCalendarService();
+    retryMailboxImportFromAccountsPage($account->fresh());
+
+    expect(mailboxImportQueueContains(IncrementalCalendarSyncJob::class))->toBeTrue()
+        ->and(mailboxImportQueueContains(StoreEmailJob::class))->toBeFalse()
+        ->and(mailboxImportQueueContains(InitialCalendarSyncJob::class))->toBeFalse();
+
+    workMailboxImportQueueUntilEmpty(tries: 1);
+
+    $notifications = $user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->get();
+
+    expect($account->fresh()->calendar_sync_cursor)->toBe('calendar-done')
+        ->and($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeFalse()
+        ->and($notifications)->toHaveCount(2)
+        ->and($notifications->pluck('data.viewData.kind')->all())->toContain('partial', 'retry_success');
+});
+
+it('retries email and calendar together then recovers only after both succeed', function (): void {
+    config()->set('queue.default', 'database');
+    $user = mailboxImportNotificationUser();
+    $this->actingAs($user);
+    Filament::setTenant($user->currentWorkspace);
+    $account = mailboxImportNotificationAccount($user, [
+        'capabilities' => ['email' => true, 'calendar' => true],
+        'calendar_sync_cursor' => 'calendar-token',
+    ]);
+
+    bindMailboxImportMailService(['ok-1', 'fail-1'], function (MailServiceInterface $service): void {
+        $service->shouldReceive('fetchMessage')->with('ok-1')->andReturn(mailboxImportFetchedEmail('ok-1'));
+        $service->shouldReceive('fetchMessage')->with('fail-1')->andThrow(new RuntimeException('Provider unavailable'));
+    });
+    bindMailboxImportCalendarService(fetchDeltaException: new RuntimeException('Calendar API unavailable'));
+
+    resolve(StartMailboxHistoryImportAction::class)->execute($account);
+    workMailboxImportQueueUntilEmpty(tries: 1);
+
+    expect($user->notifications()->sole()->data['viewData']['kind'])->toBe('partial')
+        ->and($account->emails()->count())->toBe(1)
+        ->and($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeTrue();
+
+    bindMailboxImportMailService([], function (MailServiceInterface $service): void {
+        $service->shouldReceive('fetchMessage')->with('fail-1')->andReturn(mailboxImportFetchedEmail('fail-1'));
+    });
+    bindMailboxImportCalendarService(fetchDeltaException: new RuntimeException('Calendar API unavailable'));
+
+    retryMailboxImportFromAccountsPage($account->fresh());
+
+    expect(mailboxImportQueueContains(StoreEmailJob::class))->toBeTrue()
+        ->and(mailboxImportQueueContains(IncrementalCalendarSyncJob::class))->toBeTrue();
+
+    workMailboxImportQueueUntilEmpty(tries: 1);
+
+    expect($account->emails()->count())->toBe(2)
+        ->and($account->fresh()->calendar_sync_cursor)->toBe('calendar-token')
+        ->and($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeTrue()
+        ->and($user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->count())->toBe(1);
+
+    bindMailboxImportCalendarService();
+    retryMailboxImportFromAccountsPage($account->fresh());
+
+    expect(mailboxImportQueueContains(IncrementalCalendarSyncJob::class))->toBeTrue()
+        ->and(mailboxImportQueueContains(StoreEmailJob::class))->toBeFalse();
+
+    workMailboxImportQueueUntilEmpty(tries: 1);
+
+    $notifications = $user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->get();
+
+    expect($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeFalse()
+        ->and($notifications)->toHaveCount(2)
+        ->and($notifications->pluck('data.viewData.kind')->all())->toContain('partial', 'retry_success');
+});
+
+it('does not queue a second calendar recovery while Retry is clicked again', function (): void {
+    config()->set('queue.default', 'database');
+    $user = mailboxImportNotificationUser();
+    $this->actingAs($user);
+    Filament::setTenant($user->currentWorkspace);
+    $account = mailboxImportNotificationAccount($user, [
+        'capabilities' => ['email' => true, 'calendar' => true],
+        'calendar_sync_cursor' => 'calendar-token',
+    ]);
+
+    bindMailboxImportMailService(['ok-1'], function (MailServiceInterface $service): void {
+        $service->shouldReceive('fetchMessage')->with('ok-1')->andReturn(mailboxImportFetchedEmail('ok-1'));
+    });
+    bindMailboxImportCalendarService(fetchDeltaException: new RuntimeException('Calendar API unavailable'));
+
+    resolve(StartMailboxHistoryImportAction::class)->execute($account);
+    workMailboxImportQueueUntilEmpty(tries: 1);
+
+    bindMailboxImportCalendarService();
+    retryMailboxImportFromAccountsPage($account->fresh());
+
+    expect(DB::table('jobs')->where('queue', 'emails-sync')->count())->toBe(1);
+
+    Livewire::test(EmailAccountsPage::class)
+        ->callAction(TestAction::make('retryFailedImport')->arguments(['account_id' => $account->getKey()]))
+        ->assertNotified(__('filament/pages/email-accounts.notifications.retry_failed_import_unavailable.title'));
+
+    expect(DB::table('jobs')->where('queue', 'emails-sync')->count())->toBe(1)
+        ->and($user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->count())->toBe(1);
+
+    workMailboxImportQueueUntilEmpty(tries: 1);
+
+    expect($user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->count())->toBe(2);
+});
+
+it('does not retry calendar work when the mailbox needs reconnection', function (): void {
+    config()->set('queue.default', 'database');
+    $user = mailboxImportNotificationUser();
+    $this->actingAs($user);
+    Filament::setTenant($user->currentWorkspace);
+    $account = mailboxImportNotificationAccount($user, [
+        'capabilities' => ['email' => true, 'calendar' => true],
+        'calendar_sync_cursor' => 'calendar-token',
+    ]);
+
+    bindMailboxImportMailService(['ok-1'], function (MailServiceInterface $service): void {
+        $service->shouldReceive('fetchMessage')->with('ok-1')->andReturn(mailboxImportFetchedEmail('ok-1'));
+    });
+    bindMailboxImportCalendarService(fetchDeltaException: new RuntimeException('invalid_grant'));
+
+    resolve(StartMailboxHistoryImportAction::class)->execute($account);
+    workMailboxImportQueueUntilEmpty(tries: 1);
+
+    expect($account->fresh()->status)->toBe(EmailAccountStatus::REAUTH_REQUIRED)
+        ->and($account->fresh()->showsMailboxHistoryImportFailureSummary())->toBeTrue();
+
+    Livewire::test(EmailAccountsPage::class)
+        ->callAction(TestAction::make('retryFailedImport')->arguments(['account_id' => $account->getKey()]))
+        ->assertNotified(__('filament/pages/email-accounts.notifications.retry_failed_import_unavailable.title'));
+
+    expect(DB::table('jobs')->where('queue', 'emails-sync')->count())->toBe(0)
+        ->and($account->fresh()->status)->toBe(EmailAccountStatus::REAUTH_REQUIRED)
+        ->and($user->notifications()->where('type', MailboxHistoryImportCompletedNotification::class)->count())->toBe(1);
 });
 
 it('keeps delayed mail counts at the snapshot taken when the import finished', function (): void {
