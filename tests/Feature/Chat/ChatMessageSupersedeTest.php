@@ -195,3 +195,33 @@ it('anchors a regenerate on the last typed message, never on a synthetic one', f
     expect(DB::table('agent_conversation_messages')->where('id', $ids[2])->value('superseded_at'))->not->toBeNull()
         ->and(DB::table('agent_conversation_messages')->where('id', $ids[1])->value('superseded_at'))->toBeNull();
 });
+
+it('refuses a synthetic user row as the anchor', function (): void {
+    $user = User::factory()->withPersonalWorkspace()->create();
+    [$conversationId] = seedSupersedeConversation($user);
+
+    $resumeId = (string) Str::uuid7();
+    DB::table('agent_conversation_messages')->insert([
+        'id' => $resumeId,
+        'conversation_id' => $conversationId,
+        'participant_type' => 'user',
+        'participant_id' => (string) $user->getKey(),
+        'agent' => 'test',
+        'role' => 'user',
+        'origin' => MessageOrigin::Resume->value,
+        'content' => MessageOrigin::Resume->opener(),
+        'attachments' => '[]',
+        'tool_calls' => '[]',
+        'tool_results' => '[]',
+        'usage' => '[]',
+        'meta' => '[]',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $this->actingAs($user)
+        ->postJson("/chat/conversations/{$conversationId}/messages/supersede", ['anchor_id' => $resumeId])
+        ->assertStatus(422);
+
+    expect(DB::table('agent_conversation_messages')->where('conversation_id', $conversationId)->whereNotNull('superseded_at')->count())->toBe(0);
+});

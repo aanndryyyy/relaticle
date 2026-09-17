@@ -392,12 +392,13 @@ it('does not re-title at turn end when the conversation already has a generated 
     Queue::assertNotPushed(GenerateConversationTitle::class);
 });
 
-it('does not let approval echoes and resumed turns burn the titling window', function (): void {
+it('does not let the greeting and resumed turns burn the titling window', function (): void {
     Queue::fake();
 
     $conversationId = seedTitlingConversation('hey');
     seedTitlingMessage($conversationId, 'user', 'hey');
     seedTitlingMessage($conversationId, 'assistant', 'Hi! How can I help?');
+    seedTitlingMessage($conversationId, 'user', 'The user opened their setup conversation.', [], 'greeting');
     seedTitlingMessage($conversationId, 'user', 'The user decided the proposals above.', [], 'resume');
 
     $this->postJson(route('chat.send', ['conversation' => $conversationId]), [
@@ -417,6 +418,7 @@ it('titles at turn end from what the user typed, not from the rows the system wr
     $conversationId = seedTitlingConversation('hey');
     seedTitlingMessage($conversationId, 'user', 'hey');
     seedTitlingMessage($conversationId, 'assistant', 'Hi! How can I help?');
+    seedTitlingMessage($conversationId, 'user', 'The user opened their setup conversation.', [], 'greeting');
     seedTitlingMessage($conversationId, 'user', 'The user decided the proposals above.', [], 'resume');
 
     (new ProcessChatMessage(

@@ -436,7 +436,7 @@ final readonly class ChatController
      *
      * anchor_id targets a persisted user message; when the client only has an
      * optimistic (not yet persisted) message it sends anchor_content instead,
-     * which must match the latest user row. A mismatch means that row belongs
+     * which must match the latest typed user row. A mismatch means that row belongs
      * to an OLDER turn (the optimistic one never persisted), and superseding it
      * would hide a good turn, so we refuse and supersede nothing.
      */
@@ -469,7 +469,11 @@ final readonly class ChatController
                 ->first();
 
             abort_if($anchor === null, 404);
-            abort_if((string) $anchor->role !== 'user', 422, 'Only user messages can anchor a supersede.');
+            abort_unless(
+                TypedMessages::apply(DB::table('agent_conversation_messages'))->where('id', $anchorId)->exists(),
+                422,
+                'Only user messages can anchor a supersede.',
+            );
         } else {
             $anchor = TypedMessages::apply(DB::table('agent_conversation_messages'))
                 ->where('conversation_id', $conversationId)
