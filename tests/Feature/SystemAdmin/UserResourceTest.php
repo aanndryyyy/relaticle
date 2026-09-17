@@ -432,3 +432,35 @@ it('lists exactly the users whose engagement badge matches the selected filter',
             ->assertCanNotSeeTableRecords($users->diff($matching)->values());
     }
 });
+
+it('offers impersonation to super administrators only', function (): void {
+    $user = User::factory()->create();
+
+    livewire(ViewUser::class, ['record' => $user->getKey()])
+        ->assertActionVisible('impersonate');
+
+    livewire(ListUsers::class)
+        ->assertActionVisible(TestAction::make('impersonate')->table($user));
+
+    $this->actingAs(SystemAdministrator::factory()->administrator()->create(), 'sysadmin');
+
+    livewire(ViewUser::class, ['record' => $user->getKey()])
+        ->assertActionHidden('impersonate');
+
+    livewire(ListUsers::class)
+        ->assertActionHidden(TestAction::make('impersonate')->table($user));
+});
+
+it('mints a single-use impersonation link addressed to the app', function (): void {
+    $user = User::factory()->create();
+
+    $link = livewire(ViewUser::class, ['record' => $user->getKey()])
+        ->callAction('impersonate')
+        ->effects['redirect'];
+
+    parse_str((string) parse_url($link, PHP_URL_QUERY), $query);
+
+    expect($link)->toStartWith(url()->getPublicUrl("impersonate/{$user->getKey()}?"))
+        ->and($query)->toHaveKeys(['administrator', 'nonce', 'expires', 'signature'])
+        ->and($query['administrator'])->toBe(Auth::guard('sysadmin')->id());
+});
