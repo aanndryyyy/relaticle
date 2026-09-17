@@ -30,7 +30,7 @@ final readonly class SearchConversations
             ->ownedBy($user)
             ->where(function (Builder $conversation) use ($needle): void {
                 $conversation->where('title', 'ilike', $needle)
-                    ->orWhereHas('messages', fn (Builder $message): Builder => $message->where('content', 'ilike', $needle));
+                    ->orWhereHas('messages', fn (Builder $message): Builder => $message->withoutSynthetic()->where('content', 'ilike', $needle));
             })
             ->latest('updated_at')
             ->limit(50)
