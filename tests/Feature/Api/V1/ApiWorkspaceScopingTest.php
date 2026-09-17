@@ -203,3 +203,28 @@ describe('/api/v1/user endpoint', function (): void {
             ->assertUnauthorized();
     });
 });
+
+describe('workspace members', function (): void {
+    it('resolves a related user only when they belong to the workspace', function (string $candidate, bool $visible): void {
+        $member = User::factory()->create();
+        $this->workspace->users()->attach($member);
+
+        $accountOwner = match ($candidate) {
+            'owner' => $this->user,
+            'member' => $member,
+            'outsider' => User::factory()->create(),
+        };
+
+        $company = Company::factory()->recycle([$this->user, $this->workspace])->create(['account_owner_id' => $accountOwner->id]);
+
+        Sanctum::actingAs($this->user);
+
+        $included = collect($this->getJson("/api/v1/companies/{$company->id}?include=accountOwner")->assertOk()->json('included'))->pluck('id');
+
+        expect($included->contains($accountOwner->id))->toBe($visible);
+    })->with([
+        'workspace owner' => ['owner', true],
+        'pivot member' => ['member', true],
+        'outsider' => ['outsider', false],
+    ]);
+});
