@@ -16,8 +16,10 @@ use Relaticle\EmailIntegration\Models\Meeting;
 use Relaticle\EmailIntegration\Models\MeetingAttendee;
 use Relaticle\EmailIntegration\Models\PublicEmailDomain;
 use Relaticle\EmailIntegration\Models\TeamEmailBlocklist;
+use Relaticle\EmailIntegration\Support\PersonEmailMatcher;
 
 mutates(LinkMeetingAction::class);
+mutates(PersonEmailMatcher::class);
 
 function savePersonEmail(People $person, string $email): void
 {
@@ -32,6 +34,49 @@ function savePersonEmail(People $person, string $email): void
         $person->saveCustomFieldValue($field, [$email], $person->workspace);
     }
 }
+
+it('matches an existing person when the stored address differs only by case', function (): void {
+    $user = User::factory()->withWorkspace()->create();
+    $this->actingAs($user);
+    $team = $user->currentWorkspace;
+    Filament::setTenant($team);
+
+    $account = ConnectedAccount::withoutEvents(fn () => ConnectedAccount::factory()->create([
+        'workspace_id' => $team->id,
+        'user_id' => $user->id,
+    ]));
+    $team->update(['contact_creation_mode' => ContactCreationMode::None]);
+
+    $person = People::factory()->for($team)->create();
+    savePersonEmail($person, 'Guest@Acme.COM');
+
+    $meeting = Meeting::factory()->create([
+        'workspace_id' => $account->workspace_id,
+        'connected_account_id' => $account->getKey(),
+    ]);
+    MeetingAttendee::factory()->create([
+        'meeting_id' => $meeting->getKey(),
+        'email_address' => 'guest@acme.com',
+        'is_self' => false,
+        'response_status' => AttendeeResponseStatus::ACCEPTED,
+    ]);
+
+    (app(LinkMeetingAction::class))->execute($meeting->fresh());
+
+    $emailField = CustomField::query()
+        ->withoutGlobalScopes()
+        ->where('code', 'emails')
+        ->where('entity_type', 'people')
+        ->where('tenant_id', $team->id)
+        ->first();
+
+    if (! $emailField) {
+        $this->markTestSkipped('No emails custom field seeded for this team.');
+    }
+
+    expect($meeting->people()->count())->toBe(1)
+        ->and($meeting->people()->first()?->is($person))->toBeTrue();
+});
 
 it('matches an existing person by email custom-field value', function (): void {
     $user = User::factory()->withWorkspace()->create();

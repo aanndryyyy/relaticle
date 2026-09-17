@@ -20,10 +20,12 @@ use Relaticle\EmailIntegration\Models\EmailBlocklist;
 use Relaticle\EmailIntegration\Models\EmailParticipant;
 use Relaticle\EmailIntegration\Models\PublicEmailDomain;
 use Relaticle\EmailIntegration\Models\TeamEmailBlocklist;
+use Relaticle\EmailIntegration\Support\PersonEmailMatcher;
 
 mutates(LinkEmailAction::class);
 mutates(AutoCreatePersonAction::class);
 mutates(AutoCreateCompanyAction::class);
+mutates(PersonEmailMatcher::class);
 
 beforeEach(function (): void {
     $this->user = User::factory()->withWorkspace()->create();
@@ -195,6 +197,40 @@ it('links email to an existing person matched by email custom field', function (
     ]);
 
     $person->saveCustomFieldValue($emailField, ['jane@external.com'], $this->workspace);
+
+    $email = makeLinkEmail();
+
+    EmailParticipant::factory()->from()->create([
+        'email_id' => $email->getKey(),
+        'email_address' => 'jane@external.com',
+    ]);
+
+    app(LinkEmailAction::class)->execute($email);
+
+    expect($email->people()->where('people.id', $person->getKey())->exists())->toBeTrue();
+});
+
+it('links email to an existing person when the stored address differs only by case', function (): void {
+    $this->workspace->update(['contact_creation_mode' => ContactCreationMode::None]);
+
+    $emailField = CustomField::query()
+        ->withoutGlobalScopes()
+        ->where('tenant_id', $this->workspace->getKey())
+        ->where('entity_type', 'people')
+        ->where('code', 'emails')
+        ->first();
+
+    if (! $emailField) {
+        $this->markTestSkipped('No emails custom field seeded for this team.');
+    }
+
+    $person = People::create([
+        'workspace_id' => $this->workspace->id,
+        'name' => 'Jane Doe',
+        'creator_id' => $this->user->id,
+    ]);
+
+    $person->saveCustomFieldValue($emailField, ['Jane@External.COM'], $this->workspace);
 
     $email = makeLinkEmail();
 

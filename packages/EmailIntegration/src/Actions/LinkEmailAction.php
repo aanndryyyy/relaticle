@@ -22,6 +22,7 @@ use Relaticle\EmailIntegration\Services\EmailVisibilityService;
 use Relaticle\EmailIntegration\Services\RecordCommunicationMetrics;
 use Relaticle\EmailIntegration\Support\AutomatedSenderMatcher;
 use Relaticle\EmailIntegration\Support\CompanyDomainMatcher;
+use Relaticle\EmailIntegration\Support\PersonEmailMatcher;
 
 final readonly class LinkEmailAction
 {
@@ -29,6 +30,7 @@ final readonly class LinkEmailAction
         private AutoCreateCompanyAction $autoCreateCompany,
         private AutoCreatePersonAction $autoCreatePerson,
         private CompanyDomainMatcher $domainMatcher,
+        private PersonEmailMatcher $personEmailMatcher,
         private AutomatedSenderMatcher $automatedSender,
         private EmailVisibilityService $visibility,
         private RecordCommunicationMetrics $metrics,
@@ -117,14 +119,7 @@ final readonly class LinkEmailAction
                 $email->connected_account_id,
             );
 
-            // 1. Resolve the person before deciding whether to create a company.
-            // Email values are stored as JSON arrays in json_value (e.g. ["user@example.com"])
-            $person = People::query()->where('workspace_id', $teamId)
-                ->whereHas('customFieldValues', fn (Builder $valueQuery) => $valueQuery
-                    ->whereHas('customField', fn (Builder $fieldQuery) => $fieldQuery->where('type', 'email'))
-                    ->whereJsonContains('json_value', $participant->email_address)
-                )
-                ->first();
+            $person = $this->personEmailMatcher->firstMatching($participant->email_address, $teamId);
 
             $wouldCreatePerson = ! $person
                 && ! $email->is_internal
@@ -168,7 +163,7 @@ final readonly class LinkEmailAction
                 );
             }
 
-            if ($person) {
+            if ($person instanceof People) {
                 $participant->update(['contact_id' => $person->getKey()]);
 
                 if ($this->autoAttach($email->people(), $person->getKey()) && ! isset($countedPeople[$person->getKey()])) {

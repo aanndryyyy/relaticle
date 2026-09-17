@@ -18,6 +18,7 @@ use Relaticle\EmailIntegration\Exceptions\MailHistoryExpired;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Services\Contracts\MailServiceInterface;
 use Relaticle\EmailIntegration\Services\Factories\MicrosoftGraphClientFactory;
+use Relaticle\EmailIntegration\Support\EmailAddressHeaderParser;
 use RuntimeException;
 
 final class MicrosoftGraphMailService implements MailServiceInterface
@@ -496,6 +497,7 @@ final class MicrosoftGraphMailService implements MailServiceInterface
      */
     private function mapAddresses(string $role, array $addresses): array
     {
+        $parser = new EmailAddressHeaderParser;
         $out = [];
 
         foreach ($addresses as $address) {
@@ -506,10 +508,16 @@ final class MicrosoftGraphMailService implements MailServiceInterface
             if (blank($email)) {
                 continue;
             }
+
+            $normalized = $parser->normalize($address['name'] ?? null, $email);
+
+            if ($normalized === null) {
+                continue;
+            }
+
             $out[] = [
                 'role' => $role,
-                'email_address' => strtolower($email),
-                'name' => $address['name'] ?? null,
+                ...$normalized,
             ];
         }
 

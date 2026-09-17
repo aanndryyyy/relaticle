@@ -8,6 +8,7 @@ use App\Models\Workspace;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Relaticle\CustomFields\Services\TenantContextService;
 use Relaticle\EmailIntegration\Data\FetchedEmailData;
 use Relaticle\EmailIntegration\Enums\EmailStatus;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
@@ -32,6 +33,21 @@ final readonly class StoreEmailAction
      * @throws Throwable
      */
     public function execute(ConnectedAccount $connectedAccount, FetchedEmailData $data): Email
+    {
+        $previousTenantId = TenantContextService::getCurrentTenantId();
+        TenantContextService::setTenantId($connectedAccount->workspace_id);
+
+        try {
+            return $this->storeForAccount($connectedAccount, $data);
+        } finally {
+            TenantContextService::setTenantId($previousTenantId);
+        }
+    }
+
+    /**
+     * @throws Throwable
+     */
+    private function storeForAccount(ConnectedAccount $connectedAccount, FetchedEmailData $data): Email
     {
         $adopted = $this->adoptPendingSentEmail($connectedAccount, $data);
 
