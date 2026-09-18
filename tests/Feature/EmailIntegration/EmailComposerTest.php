@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\CrmEntity;
 use App\Enums\CustomFields\PeopleField;
 use App\Models\Company;
 use App\Models\CustomField;
@@ -1026,6 +1027,53 @@ it('includes company team recipient options outside the first person option page
             'count' => 1,
             'emails' => ['zoe@example.com'],
         ]);
+});
+
+it('presents composer recipient options as record chips', function (): void {
+    $company = Company::factory()->for($this->user->currentWorkspace)->create(['name' => 'Northwind']);
+    $person = People::factory()
+        ->for($this->user->currentWorkspace)
+        ->for($company)
+        ->create([
+            'name' => 'Ada Lovelace',
+            'creator_id' => $this->user->getKey(),
+        ]);
+
+    $emailsField = CustomField::query()
+        ->withoutGlobalScopes()
+        ->where('tenant_id', $this->user->current_workspace_id)
+        ->where('entity_type', 'people')
+        ->where('code', PeopleField::EMAILS->value)
+        ->firstOrFail();
+
+    $person->saveCustomFieldValue($emailsField, ['ada@northwind.test'], $person->workspace);
+
+    $options = collect(
+        Livewire::test(EmailComposer::class)
+            ->dispatch('composer:open')
+            ->instance()
+            ->recipientOptions()
+    );
+
+    $personOption = $options->firstWhere('email', 'ada@northwind.test');
+    $companyOption = $options->first(
+        fn (array $option): bool => $option['type'] === 'company_team' && $option['label'] === 'Northwind',
+    );
+
+    expect($personOption)->toBeArray();
+    expect($companyOption)->toBeArray();
+    expect($personOption)->toMatchArray([
+        'type' => 'person',
+        'label' => 'Ada Lovelace',
+        'circular' => true,
+        'iconPath' => null,
+    ]);
+    expect($personOption['avatarColor'])->toBeIn(['primary', 'success', 'warning', 'danger', 'info']);
+    expect($companyOption)->toMatchArray([
+        'circular' => false,
+        'iconPath' => CrmEntity::Company->iconPath(),
+        'avatarUrl' => null,
+    ]);
 });
 
 it('saves pending attachments onto the draft when the composer is closed', function (): void {
