@@ -195,7 +195,7 @@ final readonly class MailboxHistoryImportService
             return false;
         }
 
-        if ($this->isEmailListingInProgress($account)) {
+        if ($account->sync_cursor === null && $this->isEmailListingInProgress($account)) {
             return true;
         }
 

@@ -122,7 +122,10 @@ final class InitialEmailSyncJob implements ShouldBeUnique, ShouldQueue
 
     public function uniqueId(): string
     {
-        return 'initial-sync-'.$this->connectedAccount->getKey().'-'.hash('xxh3', $this->pageToken ?? 'start');
+        $page = $this->pageToken ?? 'start';
+        $batchId = $this->historyImportBatchId ?? 'none';
+
+        return 'initial-sync-'.$this->connectedAccount->getKey().'-'.hash('xxh3', $page.':'.$batchId);
     }
 
     private function initialDaysCap(): ?int

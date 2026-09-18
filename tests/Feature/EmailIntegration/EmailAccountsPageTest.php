@@ -8,6 +8,8 @@ use Filament\Facades\Filament;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
+use Relaticle\EmailIntegration\Actions\ConnectAccountAction;
+use Relaticle\EmailIntegration\Data\ConnectAccountData;
 use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
 use Relaticle\EmailIntegration\Enums\EmailProvider;
 use Relaticle\EmailIntegration\Filament\Concerns\HasConnectedAccountActions;
@@ -289,6 +291,33 @@ it('warns when a connected mailbox cannot send', function (): void {
     livewire(EmailAccountsPage::class)
         ->assertSee(__('filament/pages/email-accounts.send_missing_tooltip'))
         ->assertSee(__('filament/pages/email-accounts.in_sync'));
+});
+
+it('shows syncing after reconnecting a live mailbox', function (): void {
+    Bus::fake();
+
+    $this->account->update([
+        'sync_cursor' => 'mail-cursor',
+        'history_import_batch_id' => 'batch-before-reconnect',
+        'status' => EmailAccountStatus::ACTIVE,
+    ]);
+
+    resolve(ConnectAccountAction::class)->execute(new ConnectAccountData(
+        userId: (string) $this->user->getKey(),
+        teamId: (string) $this->workspace->getKey(),
+        provider: $this->account->provider->value,
+        emailAddress: $this->account->email_address,
+        displayName: $this->account->display_name,
+        providerAccountId: $this->account->provider_account_id,
+        accessToken: 'new-access',
+        refreshToken: 'new-refresh',
+        tokenExpiresAt: now()->addHour(),
+        hasCalendar: $this->account->hasCalendar(),
+        hasSend: $this->account->hasSend(),
+    ));
+
+    livewire(EmailAccountsPage::class)
+        ->assertSee(__('filament/pages/email-accounts.importing'));
 });
 
 it('does not show the syncing badge during background incremental email sync', function (): void {
