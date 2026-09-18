@@ -31,6 +31,16 @@
                 .slice(0, 8);
         },
 
+        initials(name) {
+            return String(name ?? '')
+                .trim()
+                .split(/\s+/)
+                .filter(Boolean)
+                .slice(0, 2)
+                .map((word) => word.charAt(0).toUpperCase())
+                .join('') || '?';
+        },
+
         optionVisible(option) {
             if (option.type === 'person') {
                 return ! this.selectedIds.includes(option.id);
@@ -85,29 +95,26 @@
         x-cloak
         class="absolute left-0 right-0 top-full z-20 mt-1 max-h-56 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-white/10 dark:bg-gray-900"
     >
-        <template x-for="(option, index) in matches" x-bind:key="option.type + ':' + option.id">
+        <template x-for="(chip, index) in matches" x-bind:key="chip.type + ':' + chip.id">
             <li>
                 <button
                     type="button"
                     class="flex min-h-11 w-full items-center gap-2.5 px-2.5 py-2 text-left text-sm transition hover:bg-gray-50 dark:hover:bg-white/5"
                     x-bind:class="index === activeIndex ? 'bg-gray-50 dark:bg-white/5' : ''"
-                    x-on:click="choose(option)"
+                    x-on:click="choose(chip)"
                 >
-                    <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-300" aria-hidden="true">
-                        <x-heroicon-o-user x-show="option.type === 'person'" class="h-4 w-4" />
-                        <x-heroicon-o-building-office-2 x-show="option.type === 'company_team'" class="h-4 w-4" />
-                    </span>
+                    <x-emails.recipient-avatar box="size-7" glyph="size-4" initials-size="text-[11px]" />
                     <span
                         class="min-w-0 flex-1"
-                        x-bind:x-tooltip="optionTooltip(option) ? { content: optionTooltip(option), theme: $store.theme } : false"
+                        x-bind:x-tooltip="optionTooltip(chip) ? { content: optionTooltip(chip), theme: $store.theme } : false"
                     >
-                        <span class="block truncate font-medium text-gray-900 dark:text-gray-100" x-text="option.label"></span>
-                        <span class="block truncate text-xs text-gray-500 dark:text-gray-400" x-text="option.description"></span>
+                        <span class="block truncate font-medium text-gray-900 dark:text-gray-100" x-text="chip.label"></span>
+                        <span class="block truncate text-xs text-gray-500 dark:text-gray-400" x-text="chip.description"></span>
                     </span>
                     <span
-                        x-show="option.type === 'company_team'"
+                        x-show="chip.type === 'company_team'"
                         class="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-white/10 dark:text-gray-300"
-                        x-text="companyTeamLabel + ' (' + option.count + ')'"
+                        x-text="companyTeamLabel + ' (' + chip.count + ')'"
                     ></span>
                 </button>
             </li>
