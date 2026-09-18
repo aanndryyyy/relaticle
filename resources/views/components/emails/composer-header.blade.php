@@ -12,15 +12,15 @@
 ])
 
 @php
-    $rowClass = 'flex min-h-10 items-center gap-3';
-    $labelClass = 'w-14 shrink-0 self-center text-xs font-medium uppercase tracking-wide text-gray-400';
+    $rowClass = 'flex min-h-10 items-start gap-3';
+    $labelClass = 'flex h-10 w-14 shrink-0 items-center text-xs font-medium uppercase tracking-wide text-gray-400';
     $errorClass = 'pb-1 text-xs text-danger-600 dark:text-danger-400';
 @endphp
 
 <div {{ $attributes->class(['shrink-0 divide-y divide-gray-100 text-sm dark:divide-white/5']) }}>
     <label @class([$rowClass, 'cursor-default'])>
         <span class="{{ $labelClass }}">{{ __('filament/emails/composer.fields.from') }}</span>
-        <span class="flex min-w-0 flex-1 items-center gap-2">
+        <span class="flex h-10 min-w-0 flex-1 items-center gap-2">
             <x-filament::avatar
                 :src="$fromAvatarUrl"
                 :alt="$fromAccount?->label ?? ''"
@@ -47,7 +47,7 @@
         @if ($isMassSend)
             <x-emails.composer-mass-send-to-summary :count="count($massRecipients)" />
         @else
-            <div class="flex min-w-0 flex-1 items-center self-stretch">
+            <div class="min-w-0 flex-1">
                 <x-emails.recipient-chips
                     wire:model="to"
                     :autofocus="true"
@@ -57,7 +57,7 @@
                     class="w-full"
                 />
             </div>
-            <span class="shrink-0 space-x-2 text-xs font-medium text-gray-400">
+            <span class="flex h-10 shrink-0 items-center space-x-2 text-xs font-medium text-gray-400">
                 <button type="button" wire:click="toggleCc" @class(['transition hover:text-gray-700 dark:hover:text-gray-200', 'text-primary-600 dark:text-primary-400' => $showCc])>{{ __('filament/emails/composer.fields.cc') }}</button>
                 <button type="button" wire:click="toggleBcc" @class(['transition hover:text-gray-700 dark:hover:text-gray-200', 'text-primary-600 dark:text-primary-400' => $showBcc])>{{ __('filament/emails/composer.fields.bcc') }}</button>
             </span>
@@ -80,7 +80,7 @@
     @if ($showCc && ! $isMassSend)
         <div class="{{ $rowClass }}">
             <span class="{{ $labelClass }}">{{ __('filament/emails/composer.fields.cc') }}</span>
-            <div class="flex min-w-0 flex-1 items-center self-stretch">
+            <div class="min-w-0 flex-1">
                 <x-emails.recipient-chips
                     wire:model="cc"
                     :suggestions="$recipientSuggestions"
@@ -98,7 +98,7 @@
     @if ($showBcc && ! $isMassSend)
         <div class="{{ $rowClass }}">
             <span class="{{ $labelClass }}">{{ __('filament/emails/composer.fields.bcc') }}</span>
-            <div class="flex min-w-0 flex-1 items-center self-stretch">
+            <div class="min-w-0 flex-1">
                 <x-emails.recipient-chips
                     wire:model="bcc"
                     :suggestions="$recipientSuggestions"

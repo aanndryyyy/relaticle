@@ -272,17 +272,17 @@
         x-init="$nextTick(() => $refs.input.focus())"
     @endif
     @if ($wireModel) wire:ignore @endif
-    {{ $attributes->whereDoesntStartWith('wire:model')->merge(['class' => 'flex min-h-10 min-w-0 flex-wrap items-center gap-1']) }}
+    {{ $attributes->whereDoesntStartWith('wire:model')->merge(['class' => 'flex min-h-10 min-w-0 flex-wrap content-start items-center gap-2 py-2']) }}
 >
     <template x-for="chip in selectedChips" :key="chip.value">
         <span
-            class="inline-flex max-w-full items-center gap-1.5 rounded-full bg-gray-100 py-0.5 pl-0.5 pr-1 text-xs font-medium text-gray-800 ring-1 ring-gray-950/5 dark:bg-white/10 dark:text-gray-200 dark:ring-white/10"
+            class="inline-flex max-w-48 items-center gap-1 rounded-full bg-gray-100 py-0.5 pl-0.5 pr-0.5 text-[11px] font-medium leading-4 text-gray-800 ring-1 ring-gray-950/5 dark:bg-white/10 dark:text-gray-200 dark:ring-white/10"
             x-tooltip="{ content: chipTooltip(chip), theme: $store.theme }"
         >
-            <x-emails.recipient-avatar />
+            <x-emails.recipient-avatar box="size-4" glyph="size-2.5" initials-size="text-[9px]" />
             <span class="min-w-0 truncate" x-text="chip.label"></span>
-            <button type="button" x-on:click="remove(chip.value)" :aria-label="removeLabel + ': ' + chip.value" class="shrink-0 rounded-full p-0.5 text-gray-400 transition hover:bg-gray-950/5 hover:text-gray-700 dark:hover:bg-white/10 dark:hover:text-gray-200">
-                <x-heroicon-m-x-mark class="h-3 w-3" />
+            <button type="button" x-on:click="remove(chip.value)" :aria-label="removeLabel + ': ' + chip.value" class="shrink-0 rounded-full p-px text-gray-400 transition hover:bg-gray-950/5 hover:text-gray-700 dark:hover:bg-white/10 dark:hover:text-gray-200">
+                <x-heroicon-m-x-mark class="h-2.5 w-2.5" />
             </button>
         </span>
     </template>
@@ -300,7 +300,7 @@
         role="combobox"
         autocomplete="off"
         @if ($autofocus) autofocus @endif
-        class="h-10 min-w-[8rem] flex-1 border-0 bg-transparent p-0 text-sm leading-10 focus:outline-none focus:ring-0"
+        class="h-6 min-w-[8rem] flex-1 border-0 bg-transparent p-0 text-sm leading-6 focus:outline-none focus:ring-0"
     />
 
     <template x-teleport="body">
