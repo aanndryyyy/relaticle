@@ -3,6 +3,7 @@
 @php
     use Relaticle\EmailIntegration\Enums\EmailDirection;
     use Relaticle\EmailIntegration\Enums\EmailPrivacyTier;
+    use Relaticle\EmailIntegration\Models\EmailParticipant;
     use Relaticle\EmailIntegration\Support\EmailHtmlSanitizer;
 
     $authUser = auth()->user();
@@ -23,7 +24,43 @@
         ->map(fn (string $word): string => mb_strtoupper(mb_substr($word, 0, 1)))
         ->implode('');
 
-    $recipientChipClass = 'inline-flex cursor-pointer items-center rounded-md bg-gray-100 dark:bg-gray-800 px-2 py-0.5 text-xs font-medium text-gray-600 dark:text-gray-300 ring-1 ring-inset ring-gray-200 dark:ring-gray-700 transition-colors hover:bg-gray-200 dark:hover:bg-gray-700';
+    $participantDisplay = static function (?EmailParticipant $participant): ?array {
+        if (! $participant instanceof EmailParticipant) {
+            return null;
+        }
+
+        $email = filled($participant->email_address) ? $participant->email_address : null;
+        $name = trim((string) $participant->name);
+        $showName = $name !== '' && ($email === null || strcasecmp($name, $email) !== 0);
+
+        if ($showName === false && $email === null) {
+            return null;
+        }
+
+        return [
+            'name' => $showName ? $name : null,
+            'email' => $email,
+        ];
+    };
+
+    $participantGroups = [
+        [
+            'label' => __('filament/pages/email-inbox.recipients.from'),
+            'participants' => collect([$from])->map($participantDisplay)->filter()->values(),
+        ],
+        [
+            'label' => __('filament/pages/email-inbox.recipients.to_heading'),
+            'participants' => $toList->map($participantDisplay)->filter()->values(),
+        ],
+        [
+            'label' => __('filament/pages/email-inbox.recipients.cc_heading'),
+            'participants' => $ccList->map($participantDisplay)->filter()->values(),
+        ],
+    ];
+
+    $hasParticipantDetails = collect($participantGroups)->contains(
+        fn (array $group): bool => $group['participants']->isNotEmpty(),
+    );
 
     $decode = fn (?string $text): string => html_entity_decode((string) $text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
@@ -59,8 +96,7 @@
 
     {{-- ── Header ──────────────────────────────────────────────────────────
          Two quiet rows, subject then who and when, instead of one block that
-         crams sender, address, date, badges and every recipient together. The
-         recipients collapse behind a disclosure; they are reference, not headline. --}}
+         crams sender, address, date, badges and every recipient together. --}}
 
     {{-- Subject row: title, category pill, and sharing actions. Snippet sits on
          the line below so the headline stays scannable. --}}
@@ -117,8 +153,6 @@
     {{-- Sender, recipients and the reply actions --}}
     <div
         x-data="{
-            recipientsOpen: false,
-
             /**
              * Bring a freshly opened draft into view. Called twice on a delay because
              * the message iframe is still settling to its measured height when the
@@ -156,50 +190,91 @@
         {{-- A draft that comes back with its email was not opened by a click here, so
              the composer says when it has docked and the reader scrolls to it. --}}
         x-on:composer:opened-inline.window="scrollToDraft()"
-        class="shrink-0 border-b border-gray-100 dark:border-gray-800 px-4 py-3 sm:px-6"
+        class="relative z-10 shrink-0 border-b border-gray-100 dark:border-gray-800 px-4 py-3 sm:px-6"
     >
         <div class="flex items-start gap-3">
             <div class="flex h-8 w-8 aspect-square shrink-0 select-none items-center justify-center rounded-full bg-primary-100 dark:bg-primary-900/40 text-xs font-semibold text-primary-700 dark:text-primary-300">
                 {{ $initials ?: '?' }}
             </div>
 
-            <div class="min-w-0 flex-1">
-                <div class="flex flex-wrap items-baseline gap-x-2">
+            <div
+                x-data="{ detailsOpen: false }"
+                x-on:click.outside="detailsOpen = false"
+                x-on:keydown.escape.window="detailsOpen = false"
+                class="relative min-w-0 flex-1"
+            >
+                @if ($hasParticipantDetails)
+                    <button
+                        type="button"
+                        x-on:click="detailsOpen = ! detailsOpen"
+                        x-bind:aria-expanded="detailsOpen.toString()"
+                        aria-controls="email-participant-details-{{ $record->getKey() }}"
+                        aria-label="{{ __('filament/pages/email-inbox.recipients.details') }}"
+                        class="min-w-0 max-w-full rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+                    >
+                        <span class="flex flex-wrap items-baseline gap-x-1">
+                            <span class="text-sm font-medium text-gray-900 dark:text-white">
+                                {{ $from?->name ?: $from?->email_address ?: '(unknown sender)' }}
+                            </span>
+                            @if ($toList->isEmpty() && $ccList->isEmpty())
+                                <x-heroicon-m-chevron-down class="h-3.5 w-3.5 shrink-0 text-gray-400 transition-transform dark:text-gray-500" x-bind:class="detailsOpen && 'rotate-180'" />
+                            @endif
+                        </span>
+
+                        @if ($toList->isNotEmpty() || $ccList->isNotEmpty())
+                            <span class="mt-0.5 flex max-w-full items-center gap-1 text-xs text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300">
+                                <span class="truncate">
+                                    {{ __('filament/pages/email-inbox.recipients.to') }}
+                                    {{ $toList->first()?->email_address ?: $toList->first()?->name }}
+                                    @php $otherRecipients = $toList->count() + $ccList->count() - 1; @endphp
+                                    @if ($otherRecipients > 0)
+                                        {{ trans_choice('filament/pages/email-inbox.recipients.more', $otherRecipients, ['count' => $otherRecipients]) }}
+                                    @endif
+                                </span>
+                                <x-heroicon-m-chevron-down class="h-3.5 w-3.5 shrink-0 transition-transform" x-bind:class="detailsOpen && 'rotate-180'" />
+                            </span>
+                        @endif
+                    </button>
+                @else
                     <span class="text-sm font-medium text-gray-900 dark:text-white">
                         {{ $from?->name ?: $from?->email_address ?: '(unknown sender)' }}
                     </span>
-                </div>
+                @endif
 
-                @if ($toList->isNotEmpty() || $ccList->isNotEmpty())
-                    <button
-                        type="button"
-                        x-on:click="recipientsOpen = ! recipientsOpen"
-                        class="mt-0.5 flex max-w-full items-center gap-1 text-xs text-gray-400 hover:text-gray-600 dark:text-gray-500 dark:hover:text-gray-300"
+                @if ($hasParticipantDetails)
+                    <div
+                        x-cloak
+                        x-show="detailsOpen"
+                        x-transition
+                        id="email-participant-details-{{ $record->getKey() }}"
+                        class="absolute left-0 top-full z-30 pt-1.5"
                     >
-                        <span class="truncate">
-                            {{ __('filament/pages/email-inbox.recipients.to') }}
-                            {{ $toList->first()?->email_address ?: $toList->first()?->name }}
-                            @php $otherRecipients = $toList->count() + $ccList->count() - 1; @endphp
-                            @if ($otherRecipients > 0)
-                                {{ trans_choice('filament/pages/email-inbox.recipients.more', $otherRecipients, ['count' => $otherRecipients]) }}
-                            @endif
-                        </span>
-                        <x-heroicon-m-chevron-down class="h-3.5 w-3.5 shrink-0 transition-transform" x-bind:class="recipientsOpen && 'rotate-180'" />
-                    </button>
+                        <div class="w-max max-w-xl rounded-lg border border-gray-200 bg-white px-3.5 py-2.5 text-left shadow-lg ring-1 ring-black/5 dark:border-gray-600 dark:bg-gray-800 dark:ring-white/10">
+                            <div class="space-y-1.5">
+                                @foreach ($participantGroups as $group)
+                                    @continue($group['participants']->isEmpty())
 
-                    <div x-show="recipientsOpen" x-collapse x-cloak class="mt-2 space-y-1">
-                        @foreach ([__('filament/pages/email-inbox.recipients.to') => $toList, __('filament/pages/email-inbox.recipients.cc') => $ccList] as $groupLabel => $group)
-                            @if ($group->isNotEmpty())
-                                <div class="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-                                    <span class="w-6 shrink-0 text-xs text-gray-400 dark:text-gray-500">{{ $groupLabel }}</span>
-                                    @foreach ($group as $recipient)
-                                        <span class="{{ $recipientChipClass }}" title="{{ $recipient->name }}">
-                                            {{ $recipient->email_address ?: $recipient->name }}
-                                        </span>
+                                    @foreach ($group['participants'] as $index => $participant)
+                                        <div class="flex items-baseline gap-x-4">
+                                            <span class="w-10 shrink-0 text-xs font-medium text-gray-400 dark:text-gray-400">
+                                                {{ $index === 0 ? $group['label'] : '' }}
+                                            </span>
+                                            <span class="whitespace-nowrap text-sm">
+                                                @if (filled($participant['name']))
+                                                    <span class="font-medium text-gray-950 dark:text-white">{{ $participant['name'] }}</span>
+                                                @endif
+                                                @if (filled($participant['email']))
+                                                    <span @class([
+                                                        'text-gray-500 dark:text-gray-300',
+                                                        'ml-1.5' => filled($participant['name']),
+                                                    ])>{{ $participant['email'] }}</span>
+                                                @endif
+                                            </span>
+                                        </div>
                                     @endforeach
-                                </div>
-                            @endif
-                        @endforeach
+                                @endforeach
+                            </div>
+                        </div>
                     </div>
                 @endif
             </div>

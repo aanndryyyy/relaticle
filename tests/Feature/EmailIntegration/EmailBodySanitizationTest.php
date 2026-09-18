@@ -148,9 +148,35 @@ it('renders email participants and ai label through the email view helpers', fun
 
     mountEmailView($email->fresh(['body', 'participants', 'labels', 'attachments']))
         ->assertSeeHtml('Alice Sender')
+        ->assertSeeHtml('alice@example.test')
         ->assertSeeHtml('Tara Recipient')
+        ->assertSeeHtml('tara@example.test')
         ->assertSeeHtml('Cal Copy')
+        ->assertSeeHtml('cal@example.test')
+        ->assertSeeHtml(__('filament/pages/email-inbox.recipients.details'))
         ->assertSeeHtml('Sales');
+});
+
+it('shows only the address when a recipient has no distinct name', function (): void {
+    $email = makeEmailWithBody('<p>body</p>');
+
+    $email->participants()->createMany([
+        [
+            'role' => EmailParticipantRole::FROM,
+            'name' => 'White Shark',
+            'email_address' => 'white@example.test',
+        ],
+        [
+            'role' => EmailParticipantRole::TO,
+            'name' => null,
+            'email_address' => 'zzz-private-leak@example.test',
+        ],
+    ]);
+
+    mountEmailView($email->fresh(['body', 'participants', 'labels', 'attachments']))
+        ->assertSeeHtml('White Shark')
+        ->assertSeeHtml('white@example.test')
+        ->assertSeeHtml('zzz-private-leak@example.test');
 });
 
 it('does not truncate email bodies larger than the sanitizer default input cap', function (): void {
