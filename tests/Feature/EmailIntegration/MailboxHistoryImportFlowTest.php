@@ -532,20 +532,49 @@ it('bases import percent on jobs finished while any store work is still pending'
         ->and($service->progressPercent($account->fresh()))->toBe(80);
 });
 
-it('reaches one hundred percent when every store job finished even if some failed permanently', function (): void {
+it('reflects successful store jobs when some batch jobs failed permanently', function (): void {
     $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
         'sync_cursor' => 'history-done',
     ]));
     $batchId = attachHistoryImportBatch($account);
 
     DB::table('job_batches')->where('id', $batchId)->update([
-        'total_jobs' => 10,
+        'total_jobs' => 100,
         'pending_jobs' => 0,
         'failed_jobs' => 2,
+        'failed_job_ids' => json_encode(['failed-uuid-1', 'failed-uuid-2']),
         'finished_at' => now()->getTimestamp(),
     ]);
 
-    expect(resolve(MailboxHistoryImportService::class)->progressPercent($account->fresh()))->toBe(100);
+    expect(resolve(MailboxHistoryImportService::class)->progressPercent($account->fresh()))->toBe(98);
+});
+
+it('does not show one hundred percent on the estimate path while listing is still running', function (): void {
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'sync_cursor' => null,
+        'initial_sync_estimated' => 501,
+        'initial_sync_imported' => 636,
+    ]));
+
+    expect($account->initialSyncProgressPercent())->toBe(99);
+});
+
+it('caps batch progress below one hundred percent while provider listing is still running', function (): void {
+    $account = ConnectedAccount::withoutEvents(fn (): ConnectedAccount => ConnectedAccount::factory()->create([
+        'sync_cursor' => null,
+    ]));
+    $batchId = attachHistoryImportBatch($account);
+    $service = resolve(MailboxHistoryImportService::class);
+    $service->markEmailListingStarted($account);
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 50,
+        'pending_jobs' => 0,
+        'failed_jobs' => 0,
+        'finished_at' => null,
+    ]);
+
+    expect($service->progressPercent($account->fresh()))->toBe(99);
 });
 
 it('does not treat history import store failures as a mailbox sync error', function (): void {
@@ -675,7 +704,9 @@ it('keeps the failure summary visible after retry is queued while store jobs rer
 
     expect($account->fresh()?->showsMailboxHistoryImportFailureSummary())->toBeTrue()
         ->and($account->fresh()?->isMailboxHistoryImportRetryQueued())->toBeTrue()
-        ->and($account->fresh()?->showsSyncProgressOnAccountsPage())->toBeFalse();
+        ->and($account->fresh()?->showsSyncProgressOnAccountsPage())->toBeFalse()
+        ->and($account->fresh()?->showsMailboxHistoryImportPercent())->toBeFalse()
+        ->and($account->fresh()?->syncDisplayPercent())->toBe(0);
 });
 
 it('waits for pagination before notifying even when a page finishes storing early', function (): void {

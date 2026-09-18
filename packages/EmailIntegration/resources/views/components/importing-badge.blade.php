@@ -21,5 +21,7 @@
     :aria-label="__('filament/pages/email-accounts.importing')"
 >
     {{ __('filament/pages/email-accounts.importing') }}
-    {{ __('filament/pages/email-accounts.importing_percent', ['percent' => $percent]) }}
+    @if ($account->showsMailboxHistoryImportPercent() || $account->showsCalendarSyncProgress() || $account->isEmailSyncing())
+        {{ __('filament/pages/email-accounts.importing_percent', ['percent' => $percent]) }}
+    @endif
 </x-filament::badge>

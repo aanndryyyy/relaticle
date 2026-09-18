@@ -37,12 +37,11 @@ final readonly class CompleteMailboxHistoryImportAction
             $account = ConnectedAccount::query()->lockForUpdate()->find($accountId);
             $batch = Bus::findBatch($batchId);
 
-            // pendingJobs still counts in-flight store work; failedJobIds are permanent failures only.
             if (! $account instanceof ConnectedAccount || ! $batch instanceof Batch
                 || $account->history_import_batch_id !== $batchId
                 || $account->sync_cursor === null
                 || $batch->cancelled()
-                || $batch->pendingJobs > count($batch->failedJobIds)) {
+                || ! $this->importBatchHasSettled($batch, $batchId)) {
                 return;
             }
 
@@ -108,6 +107,15 @@ final readonly class CompleteMailboxHistoryImportAction
 
             $this->notifyImportComplete($user, $account, $batchId, afterRetry: false);
         });
+    }
+
+    private function importBatchHasSettled(Batch $batch, string $batchId): bool
+    {
+        if ($this->mailboxHistoryImport->hasAwaitingRetrySuccessNotice($batchId) && $batch->pendingJobs > 0) {
+            return false;
+        }
+
+        return ($batch->pendingJobs - count($batch->failedJobIds)) === 0;
     }
 
     private function alreadyNotified(User $user, string $batchId): bool

@@ -296,7 +296,7 @@ final readonly class MailboxHistoryImportService
                 return $account->sync_cursor !== null ? 100 : 0;
             }
 
-            return $this->batchProgressPercent($batch);
+            return $this->batchProgressPercent($batch, $account);
         }
 
         if ($account->sync_cursor !== null) {
@@ -307,13 +307,7 @@ final readonly class MailboxHistoryImportService
             return 0;
         }
 
-        $total = $this->totalJobCount($account);
-
-        if ($total <= 0) {
-            return 0;
-        }
-
-        return min(100, (int) round(($account->initial_sync_imported / $total) * 100));
+        return $account->initialSyncProgressPercent();
     }
 
     /**
@@ -325,6 +319,21 @@ final readonly class MailboxHistoryImportService
     }
 
     /**
+     * Store jobs that finished without a permanent batch failure.
+     */
+    public function batchSuccessfulJobCount(Batch $batch): int
+    {
+        if ($batch->totalJobs <= 0) {
+            return 0;
+        }
+
+        return max(0, min(
+            $batch->totalJobs,
+            $batch->totalJobs - $batch->pendingJobs - $this->batchFailedJobCount($batch),
+        ));
+    }
+
+    /**
      * Distinct unresolved batch jobs, not Laravel's cumulative failed-attempt counter.
      */
     private function batchFailedJobCount(Batch $batch): int
@@ -333,24 +342,25 @@ final readonly class MailboxHistoryImportService
     }
 
     /**
-     * Provider listing is done once every store job has left the queue. Failures to
-     * persist a message in Relaticle do not roll this back; they surface as import issue.
+     * Successful store jobs over the current batch size. Failures surface in import
+     * notifications; the bar reflects messages stored, not queue exhaustion alone.
      *
      * @return int<0, 100>
      */
-    public function batchProgressPercent(Batch $batch): int
+    public function batchProgressPercent(Batch $batch, ConnectedAccount $account): int
     {
         if ($batch->totalJobs <= 0) {
             return 0;
         }
 
-        if ($batch->pendingJobs === 0) {
-            return 100;
+        $percent = (int) round(($this->batchSuccessfulJobCount($batch) / $batch->totalJobs) * 100);
+        $percent = max(0, min(100, $percent));
+
+        if ($this->isEmailListingInProgress($account)) {
+            return min(99, $percent);
         }
 
-        $percent = (int) round(($this->batchProcessedJobCount($batch) / $batch->totalJobs) * 100);
-
-        return max(0, min(100, $percent));
+        return $percent;
     }
 
     private function historyImportBatch(ConnectedAccount $account): ?Batch
