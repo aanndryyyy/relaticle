@@ -201,7 +201,7 @@ it('wraps sanitized email html in a scriptless dark-mode preview document', func
     expect($html)
         ->toContain('<meta name="color-scheme" content="light dark">')
         ->toContain('@media (prefers-color-scheme: dark)')
-        ->toContain('background: #17181a')
+        ->toContain('background: transparent')
         ->toContain('padding: 0')
         ->toContain('background-color: transparent !important')
         ->toContain('<p style="color:#111111;background:#ffffff">Body</p>')
@@ -268,8 +268,8 @@ it('renders the email view iframe without scripts and with same-origin height me
         ->assertSeeHtml('sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"')
         ->assertSeeHtml('referrerpolicy="no-referrer"')
         ->assertSeeHtml('px-6 py-6 sm:px-8 lg:px-10')
-        ->assertSeeHtml('dark:bg-neutral-950 dark:[color-scheme:dark]')
-        ->assertSeeHtml('dark:bg-gray-950')
+        ->assertSeeHtml('dark:bg-gray-900 dark:[color-scheme:dark]')
+        ->assertSeeHtml('dark:bg-gray-900')
         ->assertDontSeeHtml('allow-scripts');
 });
 
