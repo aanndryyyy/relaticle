@@ -321,6 +321,19 @@ final class ConnectedAccount extends Model
         return resolve(MailboxHistoryImportService::class)->hasAwaitingRetrySuccessNotice((string) $batchId);
     }
 
+    public function showsMailboxHistoryImportPercent(): bool
+    {
+        if ($this->isMailboxHistoryImportRetryQueued() || $this->showsMailboxHistoryImportFailureSummary()) {
+            return false;
+        }
+
+        if ($this->isImportingHistory()) {
+            return true;
+        }
+
+        return $this->showsMailboxHistoryImportProgressOnAccountsPage();
+    }
+
     public function showsMailboxHistoryImportFailureSummary(): bool
     {
         if ($this->sync_cursor === null || blank($this->history_import_batch_id)) {
@@ -455,7 +468,15 @@ final class ConnectedAccount extends Model
             return 0;
         }
 
-        return min(100, (int) round(($this->initial_sync_imported / $estimated) * 100));
+        $imported = $this->initial_sync_imported;
+        $denominator = max($estimated, $imported);
+        $percent = (int) round(($imported / $denominator) * 100);
+
+        if ($this->sync_cursor === null) {
+            return min(99, max(0, $percent));
+        }
+
+        return min(100, max(0, $percent));
     }
 
     public function syncEmailsProcessedCount(): int
@@ -506,12 +527,8 @@ final class ConnectedAccount extends Model
         }
 
         if ($this->hasEmail() && filled($this->history_import_batch_id)) {
-            $import = resolve(MailboxHistoryImportService::class);
-
-            if ($import->isRunning($this)
-                || $this->showsMailboxHistoryImportFailureSummary()
-                || $this->isMailboxHistoryImportRetryQueued()) {
-                return $import->progressPercent($this);
+            if ($this->showsMailboxHistoryImportPercent()) {
+                return resolve(MailboxHistoryImportService::class)->progressPercent($this);
             }
         }
 

@@ -535,6 +535,44 @@ it('counts persisted rows and ignores skipped store jobs', function (): void {
         ->and($notification->data['body'])->not->toContain(trans_choice('filament/notifications/mailbox-import-complete.imported_emails', 4, ['count' => 4]));
 });
 
+it('does not complete the import while retried store jobs are still running', function (): void {
+    $user = mailboxImportNotificationUser();
+    $account = mailboxImportNotificationAccount($user, ['sync_cursor' => 'history-done']);
+    $batchId = attachHistoryImportBatch($account);
+
+    resolve(MailboxHistoryImportService::class)->markAwaitingRetrySuccessNotice($batchId);
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 3,
+        'pending_jobs' => 2,
+        'failed_jobs' => 2,
+        'failed_job_ids' => json_encode(['failed-uuid-1', 'failed-uuid-2']),
+        'finished_at' => null,
+    ]);
+
+    resolve(CompleteMailboxHistoryImportAction::class)->execute((string) $account->getKey(), $batchId);
+
+    expect($user->notifications()->count())->toBe(0);
+});
+
+it('does not complete the import until every batch job has finished its current attempt', function (): void {
+    $user = mailboxImportNotificationUser();
+    $account = mailboxImportNotificationAccount($user, ['sync_cursor' => 'history-done']);
+    $batchId = attachHistoryImportBatch($account);
+
+    DB::table('job_batches')->where('id', $batchId)->update([
+        'total_jobs' => 3,
+        'pending_jobs' => 2,
+        'failed_jobs' => 1,
+        'failed_job_ids' => json_encode(['failed-uuid-1']),
+        'finished_at' => null,
+    ]);
+
+    resolve(CompleteMailboxHistoryImportAction::class)->execute((string) $account->getKey(), $batchId);
+
+    expect($user->notifications()->count())->toBe(0);
+});
+
 it('does not send duplicate import notices from repeated completion callbacks or retry clicks', function (): void {
     config()->set('queue.default', 'database');
     $user = mailboxImportNotificationUser();
