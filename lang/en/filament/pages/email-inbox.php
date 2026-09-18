@@ -121,9 +121,13 @@ return [
     ],
     'back_to_list' => 'Back to list',
     'recipients' => [
+        'from' => 'From',
         'to' => 'to',
+        'to_heading' => 'To',
         'cc' => 'cc',
+        'cc_heading' => 'Cc',
         'more' => '{1}and 1 more|[2,*]and :count more',
+        'details' => 'Sender and recipients',
     ],
     'row_actions' => [
         'label' => 'Email actions',
