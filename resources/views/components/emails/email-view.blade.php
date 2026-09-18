@@ -396,16 +396,15 @@
                     },
                 }"
                 x-bind:class="ready ? 'shrink-0' : 'flex min-h-0 flex-1 flex-col'"
-                class="bg-gray-50 dark:bg-gray-950"
             >
                 <div
                     x-bind:class="ready ? '' : 'min-h-0 flex-1'"
-                    class="relative w-full overflow-hidden border-y border-gray-100 bg-white px-6 py-6 sm:px-8 lg:px-10 dark:border-gray-800 dark:bg-neutral-950"
+                    class="relative w-full overflow-hidden bg-white px-6 py-6 sm:px-8 lg:px-10 dark:bg-gray-900"
                 >
                     <div
                         x-show="! ready"
                         x-cloak
-                        class="absolute inset-0 z-10 flex items-center justify-center bg-white dark:bg-neutral-950"
+                        class="absolute inset-0 z-10 flex items-center justify-center bg-white dark:bg-gray-900"
                     >
                         <x-filament::loading-indicator class="h-8 w-8 text-primary-500" />
                     </div>
@@ -417,7 +416,7 @@
                         sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
                         referrerpolicy="no-referrer"
                         scrolling="no"
-                        class="block w-full border-0 bg-white transition-opacity duration-150 [color-scheme:light] dark:bg-neutral-950 dark:[color-scheme:dark]"
+                        class="block w-full border-0 bg-white transition-opacity duration-150 [color-scheme:light] dark:bg-gray-900 dark:[color-scheme:dark]"
                         {{-- A placeholder tall enough to centre the spinner in; replaced by
                              the measured content height the moment the frame loads. --}}
                         style="height: 24rem"
