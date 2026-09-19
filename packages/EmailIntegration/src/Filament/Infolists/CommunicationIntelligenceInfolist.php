@@ -8,12 +8,16 @@ use App\Models\Company;
 use App\Models\Opportunity;
 use App\Models\People;
 use App\Models\User;
+use Carbon\CarbonInterface;
+use Closure;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Fieldset;
+use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Facades\Auth;
 use Relaticle\EmailIntegration\Data\VisibleCommunicationIntelligence;
+use Relaticle\EmailIntegration\Enums\ConnectionStrength;
 use Relaticle\EmailIntegration\Services\EmailVisibilityService;
 
 final class CommunicationIntelligenceInfolist
@@ -24,77 +28,103 @@ final class CommunicationIntelligenceInfolist
 
         return Section::make(__("{$translationKey}.heading"))
             ->icon(Heroicon::ChartBar)
+            ->compact()
             ->schema([
-                Fieldset::make(__("{$translationKey}.groups.connection"))
+                Grid::make(['default' => 1, 'lg' => 3])
                     ->schema([
-                        TextEntry::make('visible_first_interaction_at')
-                            ->label(__("{$translationKey}.fields.first_interaction.label"))
-                            ->getStateUsing(fn (People|Company|Opportunity $record): ?string => self::metrics($record)->firstInteractionAt()?->toDateTimeString())
-                            ->dateTime()
-                            ->placeholder(__("{$translationKey}.fields.first_interaction.placeholder")),
-
-                        TextEntry::make('visible_last_interaction_at')
-                            ->label(__("{$translationKey}.fields.last_interaction.label"))
-                            ->getStateUsing(fn (People|Company|Opportunity $record): ?string => self::metrics($record)->lastInteractionAt()?->toDateTimeString())
-                            ->dateTime()
-                            ->placeholder(__("{$translationKey}.fields.last_interaction.placeholder")),
-
-                        TextEntry::make('visible_connection_strength')
-                            ->label(__("{$translationKey}.fields.connection_strength.label"))
-                            ->getStateUsing(fn (People|Company|Opportunity $record): string => self::metrics($record)->connectionStrength->getLabel()),
-
-                        TextEntry::make('visible_strongest_connection')
-                            ->label(__("{$translationKey}.fields.strongest_connection.label"))
-                            ->getStateUsing(fn (People|Company|Opportunity $record): ?string => self::metrics($record)->strongestConnectionName)
-                            ->placeholder(__("{$translationKey}.fields.strongest_connection.placeholder")),
-                    ])
-                    ->columns(2)
-                    ->columnSpanFull(),
-
-                Fieldset::make(__("{$translationKey}.groups.email"))
-                    ->schema([
-                        TextEntry::make('visible_first_email_at')
-                            ->label(__("{$translationKey}.fields.first_email.label"))
-                            ->getStateUsing(fn (People|Company|Opportunity $record): ?string => self::metrics($record)->firstEmailAt?->toDateTimeString())
-                            ->dateTime()
-                            ->placeholder(__("{$translationKey}.fields.first_email.placeholder")),
-
-                        TextEntry::make('visible_last_email_at')
-                            ->label(__("{$translationKey}.fields.last_email.label"))
-                            ->getStateUsing(fn (People|Company|Opportunity $record): ?string => self::metrics($record)->lastEmailAt?->toDateTimeString())
-                            ->dateTime()
-                            ->placeholder(__("{$translationKey}.fields.last_email.placeholder")),
-                    ])
-                    ->columns(2)
-                    ->columnSpanFull(),
-
-                Fieldset::make(__("{$translationKey}.groups.calendar"))
-                    ->schema([
-                        TextEntry::make('visible_first_calendar_at')
-                            ->label(__("{$translationKey}.fields.first_calendar.label"))
-                            ->getStateUsing(fn (People|Company|Opportunity $record): ?string => self::metrics($record)->firstMeetingAt?->toDateTimeString())
-                            ->dateTime()
-                            ->placeholder(__("{$translationKey}.fields.first_calendar.placeholder")),
-
-                        TextEntry::make('visible_last_calendar_at')
-                            ->label(__("{$translationKey}.fields.last_calendar.label"))
-                            ->getStateUsing(fn (People|Company|Opportunity $record): ?string => self::metrics($record)->lastMeetingAt?->toDateTimeString())
-                            ->dateTime()
-                            ->placeholder(__("{$translationKey}.fields.last_calendar.placeholder")),
-
-                        TextEntry::make('visible_next_calendar_at')
-                            ->label(__("{$translationKey}.fields.next_calendar.label"))
-                            ->getStateUsing(fn (People|Company|Opportunity $record): ?string => self::metrics($record)->nextMeetingAt?->toDateTimeString())
-                            ->dateTime()
-                            ->placeholder(__("{$translationKey}.fields.next_calendar.placeholder")),
-                    ])
-                    ->columns(3)
-                    ->columnSpanFull(),
+                        Fieldset::make(__("{$translationKey}.groups.connection"))
+                            ->schema([
+                                self::timestampEntry(
+                                    'visible_first_interaction_at',
+                                    'first_interaction',
+                                    fn (People|Company|Opportunity $record): ?CarbonInterface => self::metrics($record)->firstInteractionAt(),
+                                    Heroicon::OutlinedClock,
+                                ),
+                                self::timestampEntry(
+                                    'visible_last_interaction_at',
+                                    'last_interaction',
+                                    fn (People|Company|Opportunity $record): ?CarbonInterface => self::metrics($record)->lastInteractionAt(),
+                                    Heroicon::OutlinedClock,
+                                ),
+                                TextEntry::make('visible_connection_strength')
+                                    ->label(__("{$translationKey}.fields.connection_strength.label"))
+                                    ->getStateUsing(fn (People|Company|Opportunity $record): ConnectionStrength => self::metrics($record)->connectionStrength)
+                                    ->badge(),
+                                TextEntry::make('visible_strongest_connection')
+                                    ->label(__("{$translationKey}.fields.strongest_connection.label"))
+                                    ->getStateUsing(fn (People|Company|Opportunity $record): ?string => self::metrics($record)->strongestConnectionName)
+                                    ->placeholder(__("{$translationKey}.fields.strongest_connection.placeholder"))
+                                    ->icon(Heroicon::OutlinedUser),
+                            ])
+                            ->columns(1),
+                        Fieldset::make(__("{$translationKey}.groups.email"))
+                            ->schema([
+                                self::timestampEntry(
+                                    'visible_first_email_at',
+                                    'first_email',
+                                    fn (People|Company|Opportunity $record): ?CarbonInterface => self::metrics($record)->firstEmailAt,
+                                    Heroicon::OutlinedEnvelope,
+                                ),
+                                self::timestampEntry(
+                                    'visible_last_email_at',
+                                    'last_email',
+                                    fn (People|Company|Opportunity $record): ?CarbonInterface => self::metrics($record)->lastEmailAt,
+                                    Heroicon::OutlinedEnvelope,
+                                ),
+                            ])
+                            ->columns(1),
+                        Fieldset::make(__("{$translationKey}.groups.calendar"))
+                            ->schema([
+                                self::timestampEntry(
+                                    'visible_first_calendar_at',
+                                    'first_calendar',
+                                    fn (People|Company|Opportunity $record): ?CarbonInterface => self::metrics($record)->firstMeetingAt,
+                                    Heroicon::OutlinedCalendar,
+                                ),
+                                self::timestampEntry(
+                                    'visible_last_calendar_at',
+                                    'last_calendar',
+                                    fn (People|Company|Opportunity $record): ?CarbonInterface => self::metrics($record)->lastMeetingAt,
+                                    Heroicon::OutlinedCalendar,
+                                ),
+                                self::timestampEntry(
+                                    'visible_next_calendar_at',
+                                    'next_calendar',
+                                    fn (People|Company|Opportunity $record): ?CarbonInterface => self::metrics($record)->nextMeetingAt,
+                                    Heroicon::OutlinedCalendar,
+                                    withTime: true,
+                                ),
+                            ])
+                            ->columns(1),
+                    ]),
             ])
             ->columns(1)
             ->columnSpanFull()
             ->collapsible()
             ->collapsed();
+    }
+
+    /**
+     * @param  Closure(People|Company|Opportunity): ?CarbonInterface  $state
+     */
+    private static function timestampEntry(
+        string $name,
+        string $field,
+        Closure $state,
+        Heroicon $icon,
+        bool $withTime = false,
+    ): TextEntry {
+        $entry = TextEntry::make($name)
+            ->label(__("filament/communication-intelligence.fields.{$field}.label"))
+            ->getStateUsing($state)
+            ->placeholder(__("filament/communication-intelligence.fields.{$field}.placeholder"))
+            ->icon($icon);
+
+        if ($withTime) {
+            return $entry->dateTime();
+        }
+
+        return $entry->date();
     }
 
     /**

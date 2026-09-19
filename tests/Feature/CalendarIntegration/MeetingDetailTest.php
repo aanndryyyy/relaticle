@@ -104,6 +104,7 @@ it('shows title, time range, duration, and rsvp in the view modal', function ():
         ->assertMountedActionModalSee('6:30 AM')
         ->assertMountedActionModalSee('(1h)')
         ->assertMountedActionModalSee(AttendeeResponseStatus::ACCEPTED->getLabel())
+        ->assertMountedActionModalSee(__('filament/resources/meeting.fields.html_link.label'))
         ->assertMountedActionModalSee('https://meet.example.test/abc')
         ->assertMountedActionModalSee('HQ')
         ->assertMountedActionModalSee('Agenda')
@@ -246,10 +247,40 @@ it('hides link, location, and description when they are empty', function (): voi
 
     meetingDetailsOnRecord([$meeting])
         ->mountAction(TestAction::make('view')->table($meeting))
+        ->assertMountedActionModalDontSee(__('filament/resources/meeting.fields.html_link.label'))
         ->assertMountedActionModalDontSee('https://meet.example.test/abc')
         ->assertMountedActionModalDontSee('Rooftop Terrace 7B')
         ->assertMountedActionModalDontSee('Kickoff notes')
         ->assertMountedActionModalDontSee(__('filament/resources/meeting.sections.description.heading'));
+});
+
+it('shows location without a calendar link when only location is filled', function (): void {
+    $meeting = Meeting::factory()->create([
+        'workspace_id' => $this->workspace->id,
+        'connected_account_id' => $this->account->id,
+        'html_link' => null,
+        'location' => 'Boardroom A',
+    ]);
+
+    meetingDetailsOnRecord([$meeting])
+        ->mountAction(TestAction::make('view')->table($meeting))
+        ->assertMountedActionModalSee('Boardroom A')
+        ->assertMountedActionModalDontSee(__('filament/resources/meeting.fields.html_link.label'));
+});
+
+it('shows the calendar link without location when only html_link is filled', function (): void {
+    $meeting = Meeting::factory()->create([
+        'workspace_id' => $this->workspace->id,
+        'connected_account_id' => $this->account->id,
+        'html_link' => 'https://meet.example.test/solo',
+        'location' => null,
+    ]);
+
+    meetingDetailsOnRecord([$meeting])
+        ->mountAction(TestAction::make('view')->table($meeting))
+        ->assertMountedActionModalSee(__('filament/resources/meeting.fields.html_link.label'))
+        ->assertMountedActionModalSee('https://meet.example.test/solo')
+        ->assertMountedActionModalDontSee('Boardroom A');
 });
 
 it('lists attendees with host and rsvp in the view modal', function (): void {
@@ -590,6 +621,7 @@ it('shows link, location, and description when they are filled', function (): vo
 
     meetingDetailsOnRecord([$meeting])
         ->mountAction(TestAction::make('view')->table($meeting))
+        ->assertMountedActionModalSee(__('filament/resources/meeting.fields.html_link.label'))
         ->assertMountedActionModalSee('https://meet.example.test/abc')
         ->assertMountedActionModalSee('Rooftop Terrace 7B')
         ->assertMountedActionModalSee('Kickoff notes')
