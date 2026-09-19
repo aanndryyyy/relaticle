@@ -44,7 +44,7 @@
                                         </span>
                                     </label>
                                 @else
-                                    <span class="text-gray-400 dark:text-gray-500">—</span>
+                                    <span class="text-gray-400 dark:text-gray-500">{{ '—' }}</span>
                                 @endif
                             </td>
                             <td class="px-4 py-3 text-gray-600 dark:text-gray-300">

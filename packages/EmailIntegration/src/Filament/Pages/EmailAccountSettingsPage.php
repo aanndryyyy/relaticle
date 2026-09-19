@@ -423,10 +423,11 @@ final class EmailAccountSettingsPage extends Page implements HasSchemas
             ];
         }
 
-        return collect($rows)
-            ->unique(fn (array $row): string => $row['type'].'|'.$row['value'])
-            ->values()
-            ->all();
+        return array_values(
+            collect($rows)
+                ->unique(fn (array $row): string => $row['type'].'|'.$row['value'])
+                ->all(),
+        );
     }
 
     /**
