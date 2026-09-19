@@ -15,7 +15,7 @@ final class MeetingTimeEntry extends Entry
     protected string $view = 'email-integration::filament.infolists.meeting-time';
 
     /**
-     * @return array{start_date: string, start_time: string|null, end_time: string|null, end_date: string|null, duration: string|null, all_day: bool, datetime: string}
+     * @return array{start_date: string, start_time: string|null, end_time: string|null, end_date: string|null, duration: string|null, all_day: bool, datetime: string, location: string|null, calendar_url: string|null, calendar_label: string}
      */
     public function getState(): array
     {
@@ -32,15 +32,15 @@ final class MeetingTimeEntry extends Entry
     }
 
     /**
-     * @return array{start_date: string, start_time: string|null, end_time: string|null, end_date: string|null, duration: string|null, all_day: bool, datetime: string}
+     * @return array{start_date: string, start_time: string|null, end_time: string|null, end_date: string|null, duration: string|null, all_day: bool, datetime: string, location: string|null, calendar_url: string|null, calendar_label: string}
      */
     private function present(Meeting $meeting, string $timezone): array
     {
-        if ($meeting->all_day) {
-            return $this->presentAllDay($meeting);
-        }
+        $state = $meeting->all_day
+            ? $this->presentAllDay($meeting)
+            : $this->presentTimed($meeting, $timezone);
 
-        return $this->presentTimed($meeting, $timezone);
+        return $this->withMeta($state, $meeting);
     }
 
     /**
@@ -128,7 +128,24 @@ final class MeetingTimeEntry extends Entry
     }
 
     /**
-     * @return array{start_date: string, start_time: string|null, end_time: string|null, end_date: string|null, duration: string|null, all_day: bool, datetime: string}
+     * @param  array{start_date: string, start_time: string|null, end_time: string|null, end_date: string|null, duration: string|null, all_day: bool, datetime: string}  $state
+     * @return array{start_date: string, start_time: string|null, end_time: string|null, end_date: string|null, duration: string|null, all_day: bool, datetime: string, location: string|null, calendar_url: string|null, calendar_label: string}
+     */
+    private function withMeta(array $state, Meeting $meeting): array
+    {
+        $location = $meeting->location;
+        $calendarUrl = $meeting->html_link;
+
+        return [
+            ...$state,
+            'location' => filled($location) ? $location : null,
+            'calendar_url' => filled($calendarUrl) ? $calendarUrl : null,
+            'calendar_label' => __('filament/resources/meeting.fields.html_link.label'),
+        ];
+    }
+
+    /**
+     * @return array{start_date: string, start_time: string|null, end_time: string|null, end_date: string|null, duration: string|null, all_day: bool, datetime: string, location: string|null, calendar_url: string|null, calendar_label: string}
      */
     private function emptyState(): array
     {
@@ -140,6 +157,9 @@ final class MeetingTimeEntry extends Entry
             'duration' => null,
             'all_day' => false,
             'datetime' => '',
+            'location' => null,
+            'calendar_url' => null,
+            'calendar_label' => __('filament/resources/meeting.fields.html_link.label'),
         ];
     }
 }
