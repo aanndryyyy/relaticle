@@ -178,6 +178,25 @@ it('defaults new visibility entries to protected and allows changing enforcement
     expect($entry->fresh()->enforcement_level)->toBe(EmailVisibilityEnforcement::Blocked);
 });
 
+it('persists include subdomains from the add contacts modal onto new domain entries', function (): void {
+    livewire(EmailPrivacySettingsPage::class)
+        ->call('setTab', 'visibility')
+        ->callAction('addVisibilityContact', data: [
+            'visibility_emails' => [],
+            'visibility_domains' => ['acme.com'],
+            'visibility_include_subdomains' => true,
+        ])
+        ->assertNotified();
+
+    $entry = TeamEmailBlocklist::query()
+        ->where('workspace_id', $this->workspace->id)
+        ->where('type', 'domain')
+        ->where('value', 'acme.com')
+        ->firstOrFail();
+
+    expect($entry->include_subdomains)->toBeTrue();
+});
+
 it('normalizes domain urls when adding visibility entries', function (): void {
     livewire(EmailPrivacySettingsPage::class)
         ->call('setTab', 'visibility')

@@ -10,7 +10,7 @@ use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Notifications\Notification;
-use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Section;
 use Filament\Support\Enums\Width;
 use Illuminate\Contracts\View\View;
@@ -88,7 +88,9 @@ trait HasEmailReaderActions
             ->extraAttributes(['class' => 'fi-email-reader-action'])
             ->tooltip(__('filament/pages/record-emails.actions.manage_sharing.label'))
             ->modalHeading(__('filament/pages/record-emails.actions.manage_sharing.modal_heading'))
-            ->modalWidth(Width::FiveExtraLarge)
+            ->modalWidth(Width::ExtraLarge)
+            ->stickyModalHeader()
+            ->stickyModalFooter()
             ->modalSubmitActionLabel(__('filament/pages/record-emails.actions.manage_sharing.submit'))
             ->visible(function (mixed $record = null): bool {
                 if (! $record instanceof Email) {
@@ -98,51 +100,51 @@ trait HasEmailReaderActions
                 return $record->user_id === $this->readerUser()->getKey();
             })
             ->schema([
-                Grid::make(['default' => 1, 'md' => 12])
+                Section::make(__('filament/pages/record-emails.fields.privacy_tier.label'))
+                    ->icon('heroicon-o-globe-alt')
+                    ->compact()
+                    ->columnSpanFull()
                     ->schema([
-                        Section::make(__('filament/pages/record-emails.fields.privacy_tier.label'))
-                            ->icon('heroicon-o-globe-alt')
-                            ->compact()
-                            ->columnSpan(['default' => 1, 'md' => 5])
-                            ->schema([
-                                Radio::make('privacy_tier')
-                                    ->hiddenLabel()
-                                    ->options(EmailPrivacyTier::class)
-                                    ->view('email-integration::forms.sharing-tier-cards')
-                                    ->viewData(['ariaLabel' => __('filament/pages/record-emails.fields.privacy_tier.label')])
-                                    ->required(),
-                            ]),
+                        Radio::make('privacy_tier')
+                            ->hiddenLabel()
+                            ->options(EmailPrivacyTier::class)
+                            ->view('email-integration::forms.sharing-tier-cards')
+                            ->viewData(['ariaLabel' => __('filament/pages/record-emails.fields.privacy_tier.label')])
+                            ->required(),
+                    ]),
 
-                        Section::make(__('filament/pages/record-emails.fields.shares.label'))
-                            ->description(__('filament/pages/email-inbox.sharing.fields.shares.description'))
-                            ->icon('heroicon-o-user-group')
-                            ->compact()
-                            ->columnSpan(['default' => 1, 'md' => 7])
+                Section::make(__('filament/pages/record-emails.fields.shares.label'))
+                    ->description(__('filament/pages/email-inbox.sharing.fields.shares.description'))
+                    ->icon('heroicon-o-user-group')
+                    ->compact()
+                    ->columnSpanFull()
+                    ->schema([
+                        Repeater::make('shares')
+                            ->hiddenLabel()
+                            ->defaultItems(0)
+                            ->reorderable(false)
+                            ->addActionLabel(__('filament/pages/email-inbox.sharing.fields.shares.add_action_label'))
+                            ->itemLabel(fn (array $state): string => $this->shareRowLabel($state))
                             ->schema([
-                                Repeater::make('shares')
+                                Fieldset::make()
                                     ->hiddenLabel()
-                                    ->defaultItems(0)
-                                    ->reorderable(false)
-                                    ->addActionLabel(__('filament/pages/email-inbox.sharing.fields.shares.add_action_label'))
-                                    ->itemLabel(fn (array $state): string => $this->shareRowLabel($state))
-                                    ->columns(2)
+                                    ->columns(3)
                                     ->schema([
                                         Select::make('tier')
                                             ->label(__('filament/pages/record-emails.fields.tier.label'))
-                                            ->hiddenLabel()
                                             ->options(EmailPrivacyTier::class)
                                             ->disableOptionsWhenSelectedInSiblingRepeaterItems()
-                                            ->required(),
-
+                                            ->required()
+                                            ->columnSpan(1),
                                         Select::make('shared_with')
                                             ->label(__('filament/pages/record-emails.fields.shared_with.label'))
-                                            ->hiddenLabel()
                                             ->placeholder(__('filament/pages/email-inbox.sharing.fields.shared_with.placeholder'))
                                             ->options(fn (): array => $this->teammateOptions())
                                             ->multiple()
                                             ->searchable()
                                             ->disableOptionsWhenSelectedInSiblingRepeaterItems()
-                                            ->required(),
+                                            ->required()
+                                            ->columnSpan(2),
                                     ]),
                             ]),
                     ]),
