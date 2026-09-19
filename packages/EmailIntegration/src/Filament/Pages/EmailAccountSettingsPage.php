@@ -15,6 +15,7 @@ use Filament\Forms\Components\ViewField;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Component;
+use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Tabs;
@@ -290,7 +291,7 @@ final class EmailAccountSettingsPage extends Page implements HasSchemas
     }
 
     /**
-     * @return array<int, TagsInput>
+     * @return array<int, Component>
      */
     private function blocklistFormSchema(): array
     {
@@ -299,16 +300,22 @@ final class EmailAccountSettingsPage extends Page implements HasSchemas
                 ->label(__('filament/pages/email-account-settings.blocklist.emails_label'))
                 ->placeholder(__('filament/pages/email-account-settings.blocklist.emails_placeholder'))
                 ->afterLabel(__('filament/pages/email-account-settings.blocklist.emails_after_label'))
-                ->nestedRecursiveRules(['email', 'max:255']),
-            TagsInput::make('blocklist_domains')
-                ->label(__('filament/pages/email-account-settings.blocklist.domains_label'))
-                ->placeholder(__('filament/pages/email-account-settings.blocklist.domains_placeholder'))
-                ->afterLabel(__('filament/pages/email-account-settings.blocklist.domains_after_label'))
-                ->nestedRecursiveRules(['regex:/^[a-z0-9.-]+\.[a-z]{2,}$/i', 'max:255']),
-            Toggle::make('blocklist_include_subdomains')
-                ->label(__('filament/pages/email-account-settings.blocklist.include_subdomains_label'))
-                ->helperText(__('filament/pages/email-account-settings.blocklist.include_subdomains_hint'))
-                ->default(false),
+                ->nestedRecursiveRules(['email', 'max:255'])
+                ->columnSpanFull(),
+            Fieldset::make(__('filament/pages/email-account-settings.blocklist.domains_label'))
+                ->columns(1)
+                ->columnSpanFull()
+                ->schema([
+                    TagsInput::make('blocklist_domains')
+                        ->hiddenLabel()
+                        ->placeholder(__('filament/pages/email-account-settings.blocklist.domains_placeholder'))
+                        ->helperText(__('filament/pages/email-account-settings.blocklist.domains_after_label'))
+                        ->nestedRecursiveRules(['regex:/^[a-z0-9.-]+\.[a-z]{2,}$/i', 'max:255']),
+                    Toggle::make('blocklist_include_subdomains')
+                        ->label(__('filament/pages/email-account-settings.blocklist.include_subdomains_label'))
+                        ->helperText(__('filament/pages/email-account-settings.blocklist.include_subdomains_hint'))
+                        ->default(false),
+                ]),
         ];
     }
 

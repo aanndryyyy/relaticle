@@ -15,6 +15,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Forms\Components\ViewField;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\Fieldset;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\View;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
@@ -205,15 +206,21 @@ final class EmailPrivacySettingsPage extends Page implements HasSchemas
                     ->label(__('filament/pages/email-privacy-settings.visibility.emails_label'))
                     ->placeholder(__('filament/pages/email-privacy-settings.visibility.emails_placeholder'))
                     ->afterLabel(__('filament/pages/email-privacy-settings.visibility.emails_after_label'))
-                    ->nestedRecursiveRules(['email', 'max:255']),
-                TagsInput::make('visibility_domains')
-                    ->label(__('filament/pages/email-privacy-settings.visibility.domains_label'))
-                    ->placeholder(__('filament/pages/email-privacy-settings.visibility.domains_placeholder'))
-                    ->afterLabel(__('filament/pages/email-privacy-settings.visibility.domains_after_label')),
-                Toggle::make('visibility_include_subdomains')
-                    ->label(__('filament/pages/email-privacy-settings.visibility.include_subdomains_label'))
-                    ->helperText(__('filament/pages/email-privacy-settings.visibility.include_subdomains_hint'))
-                    ->default(false),
+                    ->nestedRecursiveRules(['email', 'max:255'])
+                    ->columnSpanFull(),
+                Fieldset::make(__('filament/pages/email-privacy-settings.visibility.domains_label'))
+                    ->columns(1)
+                    ->columnSpanFull()
+                    ->schema([
+                        TagsInput::make('visibility_domains')
+                            ->hiddenLabel()
+                            ->placeholder(__('filament/pages/email-privacy-settings.visibility.domains_placeholder'))
+                            ->helperText(__('filament/pages/email-privacy-settings.visibility.domains_after_label')),
+                        Toggle::make('visibility_include_subdomains')
+                            ->label(__('filament/pages/email-privacy-settings.visibility.include_subdomains_label'))
+                            ->helperText(__('filament/pages/email-privacy-settings.visibility.include_subdomains_hint'))
+                            ->default(false),
+                    ]),
             ])
             ->action(function (array $data): void {
                 /** @var User $user */

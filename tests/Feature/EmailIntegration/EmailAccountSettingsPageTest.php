@@ -175,6 +175,23 @@ it('adds blocklist entries from the blocklist modal', function (): void {
     ]);
 });
 
+it('persists include subdomains from the blocklist modal onto new domain entries', function (): void {
+    livewire(EmailAccountSettingsPage::class, ['account' => $this->account->id])
+        ->callAction('addBlocklist', data: [
+            'blocklist_emails' => [],
+            'blocklist_domains' => ['spammy.com'],
+            'blocklist_include_subdomains' => true,
+        ])
+        ->assertNotified();
+
+    $this->assertDatabaseHas(EmailBlocklist::class, [
+        'connected_account_id' => $this->account->id,
+        'type' => EmailBlocklistType::DOMAIN->value,
+        'value' => 'spammy.com',
+        'include_subdomains' => true,
+    ]);
+});
+
 it('does not load another account\'s blocklist on this settings page', function (): void {
     $otherAccount = ConnectedAccount::withoutEvents(fn () => ConnectedAccount::factory()->create([
         'workspace_id' => $this->workspace->id,
