@@ -18,9 +18,11 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Relaticle\EmailIntegration\Data\MailboxHistoryImportSummary;
 use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
 use Relaticle\EmailIntegration\Enums\EmailDirection;
 use Relaticle\EmailIntegration\Enums\EmailProvider;
+use Relaticle\EmailIntegration\Services\MailboxHistoryImportService;
 use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
 
 /**
@@ -52,6 +54,8 @@ use Relaticle\EmailIntegration\Services\MailboxSyncTracker;
  * @property string|null $calendar_push_verification_token
  * @property CarbonInterface|null $calendar_push_expires_at
  * @property EmailAccountStatus $status
+ * @property string|null $last_error
+ * @property string|null $history_import_batch_id
  */
 final class ConnectedAccount extends Model
 {
@@ -90,6 +94,7 @@ final class ConnectedAccount extends Model
         'calendar_push_expires_at',
         'status',
         'last_error',
+        'history_import_batch_id',
         'sync_inbox',
         'sync_sent',
         'daily_send_limit',
@@ -264,6 +269,16 @@ final class ConnectedAccount extends Model
     }
 
     /**
+     * Mailbox-level sync problems (auth, API, incremental sync). History import store
+     * failures are import issue on the batch, not a sync error on the account.
+     */
+    public function hasSyncError(): bool
+    {
+        return filled($this->last_error)
+            && ! $this->showsMailboxHistoryImportFailureSummary();
+    }
+
+    /**
      * True while the first mailbox or calendar backfill has not yet written a cursor.
      */
     public function isImportingHistory(): bool
@@ -276,14 +291,88 @@ final class ConnectedAccount extends Model
             return true;
         }
 
-        return $this->hasCalendar() && $this->calendar_sync_cursor === null;
+        return $this->isImportingCalendarHistory();
+    }
+
+    public function mailboxHistoryImportSummary(): ?MailboxHistoryImportSummary
+    {
+        return resolve(MailboxHistoryImportService::class)->summary($this);
+    }
+
+    public function isEmailHistoryImportRunning(): bool
+    {
+        return resolve(MailboxHistoryImportService::class)->isRunning($this);
+    }
+
+    public function showsMailboxHistoryImportProgressOnAccountsPage(): bool
+    {
+        return $this->isEmailHistoryImportRunning()
+            && ! $this->showsMailboxHistoryImportFailureSummary();
+    }
+
+    public function isMailboxHistoryImportRetryQueued(): bool
+    {
+        $batchId = $this->history_import_batch_id;
+
+        if (blank($batchId)) {
+            return false;
+        }
+
+        return resolve(MailboxHistoryImportService::class)->hasAwaitingRetrySuccessNotice((string) $batchId);
+    }
+
+    public function showsMailboxHistoryImportPercent(): bool
+    {
+        if ($this->isMailboxHistoryImportRetryQueued() || $this->showsMailboxHistoryImportFailureSummary()) {
+            return false;
+        }
+
+        if ($this->isImportingHistory()) {
+            return true;
+        }
+
+        return $this->showsMailboxHistoryImportProgressOnAccountsPage();
+    }
+
+    public function showsMailboxHistoryImportFailureSummary(): bool
+    {
+        if ($this->sync_cursor === null || blank($this->history_import_batch_id)) {
+            return false;
+        }
+
+        $import = resolve(MailboxHistoryImportService::class);
+
+        $batchId = (string) $this->history_import_batch_id;
+
+        if ($import->hasAwaitingRetrySuccessNotice($batchId) || $import->calendarFailureCount($batchId) > 0) {
+            return true;
+        }
+
+        $summary = $this->mailboxHistoryImportSummary();
+
+        return $summary instanceof MailboxHistoryImportSummary
+            && $summary->finished
+            && $summary->failedJobs > 0;
     }
 
     public function isImportingCalendarHistory(): bool
     {
-        return $this->isActive()
-            && $this->hasCalendar()
-            && $this->calendar_sync_cursor === null;
+        if (! $this->isActive() || ! $this->hasCalendar() || $this->calendar_sync_cursor !== null) {
+            return false;
+        }
+
+        $batchId = $this->history_import_batch_id;
+
+        if (is_string($batchId) && $batchId !== '') {
+            $import = resolve(MailboxHistoryImportService::class);
+
+            if (! $import->isCalendarImportPending($batchId)
+                && $import->calendarFailureCount($batchId) > 0) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public function isCalendarSyncing(): bool
@@ -293,8 +382,7 @@ final class ConnectedAccount extends Model
 
     public function showsCalendarSyncProgress(): bool
     {
-        return $this->isImportingCalendarHistory()
-            || ($this->hasCalendar() && $this->isCalendarSyncing());
+        return $this->isImportingCalendarHistory();
     }
 
     public function isEmailSyncing(): bool
@@ -304,7 +392,39 @@ final class ConnectedAccount extends Model
 
     public function showsSyncProgress(): bool
     {
-        return $this->isImportingHistory() || $this->isCalendarSyncing() || $this->isEmailSyncing();
+        return $this->isImportingHistory()
+            || $this->isEmailHistoryImportRunning()
+            || $this->isCalendarSyncing()
+            || $this->isEmailSyncing();
+    }
+
+    public function showsSyncProgressOnAccountsPage(): bool
+    {
+        return $this->isImportingHistory()
+            || $this->showsMailboxHistoryImportProgressOnAccountsPage()
+            || $this->showsCalendarSyncProgress();
+    }
+
+    public function showsHomeMailboxImportProgress(): bool
+    {
+        if ($this->isImportingHistory()) {
+            return true;
+        }
+
+        return $this->showsMailboxHistoryImportProgressOnAccountsPage();
+    }
+
+    public function mailboxHistoryImportFailureDismissToken(): ?string
+    {
+        $batchId = $this->history_import_batch_id;
+
+        if (blank($batchId) || ! $this->showsMailboxHistoryImportFailureSummary()) {
+            return null;
+        }
+
+        $generation = resolve(MailboxHistoryImportService::class)->failureGeneration((string) $batchId);
+
+        return $batchId.':'.$generation;
     }
 
     public function isIncrementalSyncing(): bool
@@ -348,13 +468,32 @@ final class ConnectedAccount extends Model
             return 0;
         }
 
-        return min(100, (int) round(($this->initial_sync_imported / $estimated) * 100));
+        $imported = $this->initial_sync_imported;
+        $denominator = max($estimated, $imported);
+        $percent = (int) round(($imported / $denominator) * 100);
+
+        if ($this->sync_cursor === null) {
+            return min(99, max(0, $percent));
+        }
+
+        return min(100, max(0, $percent));
     }
 
     public function syncEmailsProcessedCount(): int
     {
         if ($this->isEmailSyncing()) {
             return MailboxSyncTracker::emailProcessedCount($this);
+        }
+
+        if ($this->hasEmail() && filled($this->history_import_batch_id)) {
+            $import = resolve(MailboxHistoryImportService::class);
+
+            if ($import->isRunning($this)
+                || $this->showsMailboxHistoryImportFailureSummary()
+                || $this->isMailboxHistoryImportRetryQueued()
+                || $this->sync_cursor === null) {
+                return $import->processedJobCount($this);
+            }
         }
 
         if ($this->isImportingHistory() && $this->hasEmail() && $this->sync_cursor === null) {
@@ -366,12 +505,12 @@ final class ConnectedAccount extends Model
 
     public function syncMeetingsProcessedCount(): int
     {
-        if ($this->isCalendarSyncing()) {
-            return MailboxSyncTracker::calendarProcessedCount($this);
-        }
-
         if ($this->isImportingCalendarHistory()) {
             return $this->initial_calendar_sync_imported;
+        }
+
+        if ($this->isCalendarSyncing()) {
+            return MailboxSyncTracker::calendarProcessedCount($this);
         }
 
         return $this->initial_calendar_sync_imported;
@@ -380,7 +519,17 @@ final class ConnectedAccount extends Model
     public function syncDisplayPercent(): int
     {
         if ($this->isImportingHistory()) {
+            if ($this->hasEmail() && filled($this->history_import_batch_id)) {
+                return resolve(MailboxHistoryImportService::class)->progressPercent($this);
+            }
+
             return $this->initialSyncProgressPercent();
+        }
+
+        if ($this->hasEmail() && filled($this->history_import_batch_id)) {
+            if ($this->showsMailboxHistoryImportPercent()) {
+                return resolve(MailboxHistoryImportService::class)->progressPercent($this);
+            }
         }
 
         return MailboxSyncTracker::runProgressPercent($this);

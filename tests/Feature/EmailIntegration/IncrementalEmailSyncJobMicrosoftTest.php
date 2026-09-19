@@ -13,6 +13,7 @@ use Relaticle\EmailIntegration\Enums\EmailAccountStatus;
 use Relaticle\EmailIntegration\Exceptions\MailHistoryExpired;
 use Relaticle\EmailIntegration\Jobs\IncrementalEmailSyncJob;
 use Relaticle\EmailIntegration\Jobs\InitialEmailSyncJob;
+use Relaticle\EmailIntegration\Jobs\RelinkMailboxHistoryJob;
 use Relaticle\EmailIntegration\Jobs\StoreEmailJob;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Email;
@@ -175,7 +176,23 @@ it('does not advance the cursor when the store batch fails', function (): void {
         return true;
     });
 
-    expect($account->refresh()->sync_cursor)->toBe('old-cursor');
+    expect($account->refresh()->sync_cursor)->toBe('old-cursor')
+        ->and($account->status)->toBe(EmailAccountStatus::ACTIVE)
+        ->and($account->last_error)->toContain('1 email(s)');
+});
+
+it('keeps a mailbox that failed to store messages eligible for the scheduled sync', function (): void {
+    $account = syncableAccount();
+    $account->update(['last_error' => '1 email(s) could not be stored during sync.']);
+
+    Bus::fake();
+
+    $this->artisan('email:incremental-sync')->assertSuccessful();
+
+    Bus::assertDispatched(
+        IncrementalEmailSyncJob::class,
+        fn (IncrementalEmailSyncJob $job): bool => $job->connectedAccount->is($account),
+    );
 });
 
 it('advances the cursor inline when the delta has no new messages', function (): void {
@@ -245,10 +262,11 @@ it('removes the owner read state when the provider marks a message unread', func
     ]);
 });
 
-it('resets the cursor and dispatches a full import when mailbox history has expired', function (): void {
-    Bus::fake([InitialEmailSyncJob::class]);
+it('starts a fresh history import batch when mailbox history has expired', function (): void {
+    Bus::fake([InitialEmailSyncJob::class, RelinkMailboxHistoryJob::class]);
 
     $account = syncableAccount();
+    $account->update(['history_import_batch_id' => 'stale-batch-id']);
 
     $service = Mockery::mock(MailServiceInterface::class);
     $service->shouldReceive('fetchDelta')
@@ -264,7 +282,13 @@ it('resets the cursor and dispatches a full import when mailbox history has expi
     $account->refresh();
 
     expect($account->sync_cursor)->toBeNull()
-        ->and($account->status)->toBe(EmailAccountStatus::ACTIVE);
+        ->and($account->status)->toBe(EmailAccountStatus::ACTIVE)
+        ->and($account->history_import_batch_id)->not->toBe('stale-batch-id')
+        ->and($account->history_import_batch_id)->not->toBeNull();
 
-    Bus::assertDispatched(InitialEmailSyncJob::class, fn (InitialEmailSyncJob $job): bool => $job->connectedAccount->is($account));
+    Bus::assertDispatched(
+        InitialEmailSyncJob::class,
+        fn (InitialEmailSyncJob $job): bool => $job->connectedAccount->is($account)
+            && $job->historyImportBatchId === $account->history_import_batch_id,
+    );
 });

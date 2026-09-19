@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Enums\CrmEntity;
 use App\Enums\CustomFields\PeopleField;
 use App\Models\Company;
 use App\Models\CustomField;
@@ -30,6 +31,7 @@ use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Email;
 use Relaticle\EmailIntegration\Models\EmailAttachment;
 use Relaticle\EmailIntegration\Models\EmailParticipant;
+use Relaticle\EmailIntegration\Models\EmailShare;
 use Relaticle\EmailIntegration\Models\EmailSignature;
 use Relaticle\EmailIntegration\Models\EmailTemplate;
 use Relaticle\EmailIntegration\Models\TeamEmailBlocklist;
@@ -74,6 +76,24 @@ it('opens via the composer:open event with the default account preselected', fun
         ->dispatch('composer:open')
         ->assertSet('isOpen', true)
         ->assertSet('accountId', $this->account->id);
+});
+
+it('prefills to from the current page when compose opens without a payload', function (): void {
+    Livewire::test(EmailComposer::class, ['pageTo' => 'jane@example.com'])
+        ->dispatch('composer:open')
+        ->assertSet('to', ['jane@example.com']);
+});
+
+it('uses the payload to instead of the page email', function (): void {
+    Livewire::test(EmailComposer::class, ['pageTo' => 'jane@example.com'])
+        ->dispatch('composer:open', payload: ['to' => ['other@example.com']])
+        ->assertSet('to', ['other@example.com']);
+});
+
+it('leaves to blank when the current page has no email', function (): void {
+    Livewire::test(EmailComposer::class)
+        ->dispatch('composer:open')
+        ->assertSet('to', []);
 });
 
 it('puts merge tags last on the message toolbar instead of the footer', function (): void {
@@ -852,6 +872,20 @@ it('excludes a teammate\'s private mail recipients from recipient suggestions', 
     expect(composerRecipientSuggestions())->not->toContain($address);
 });
 
+it('excludes recipients from mail hidden by a private per-teammate share override', function (): void {
+    $address = 'hidden-by-private-share@example.com';
+    $email = teammateSentEmailReturningEmail($this->user, EmailPrivacyTier::FULL, $address, EmailParticipantRole::TO);
+
+    EmailShare::factory()->tier(EmailPrivacyTier::PRIVATE)->create([
+        'workspace_id' => $this->user->current_workspace_id,
+        'email_id' => $email->id,
+        'shared_by' => $email->user_id,
+        'shared_with' => $this->user->id,
+    ]);
+
+    expect(composerRecipientSuggestions())->not->toContain($address);
+});
+
 it('excludes protected-recipient addresses from recipient suggestions', function (): void {
     $address = 'vip@protected.example';
 
@@ -1008,6 +1042,53 @@ it('includes company team recipient options outside the first person option page
             'count' => 1,
             'emails' => ['zoe@example.com'],
         ]);
+});
+
+it('presents composer recipient options as record chips', function (): void {
+    $company = Company::factory()->for($this->user->currentWorkspace)->create(['name' => 'Northwind']);
+    $person = People::factory()
+        ->for($this->user->currentWorkspace)
+        ->for($company)
+        ->create([
+            'name' => 'Ada Lovelace',
+            'creator_id' => $this->user->getKey(),
+        ]);
+
+    $emailsField = CustomField::query()
+        ->withoutGlobalScopes()
+        ->where('tenant_id', $this->user->current_workspace_id)
+        ->where('entity_type', 'people')
+        ->where('code', PeopleField::EMAILS->value)
+        ->firstOrFail();
+
+    $person->saveCustomFieldValue($emailsField, ['ada@northwind.test'], $person->workspace);
+
+    $options = collect(
+        Livewire::test(EmailComposer::class)
+            ->dispatch('composer:open')
+            ->instance()
+            ->recipientOptions()
+    );
+
+    $personOption = $options->firstWhere('email', 'ada@northwind.test');
+    $companyOption = $options->first(
+        fn (array $option): bool => $option['type'] === 'company_team' && $option['label'] === 'Northwind',
+    );
+
+    expect($personOption)->toBeArray();
+    expect($companyOption)->toBeArray();
+    expect($personOption)->toMatchArray([
+        'type' => 'person',
+        'label' => 'Ada Lovelace',
+        'circular' => true,
+        'iconPath' => null,
+    ]);
+    expect($personOption['avatarColor'])->toBeIn(['primary', 'success', 'warning', 'danger', 'info']);
+    expect($companyOption)->toMatchArray([
+        'circular' => false,
+        'iconPath' => CrmEntity::Company->iconPath(),
+        'avatarUrl' => null,
+    ]);
 });
 
 it('saves pending attachments onto the draft when the composer is closed', function (): void {
@@ -1769,6 +1850,16 @@ function teammateSentEmail(
     EmailParticipantRole $role,
     bool $isInternal = false,
 ): void {
+    teammateSentEmailReturningEmail($viewer, $privacyTier, $address, $role, $isInternal);
+}
+
+function teammateSentEmailReturningEmail(
+    User $viewer,
+    EmailPrivacyTier $privacyTier,
+    string $address,
+    EmailParticipantRole $role,
+    bool $isInternal = false,
+): Email {
     $teammate = User::factory()->create(['current_workspace_id' => $viewer->current_workspace_id]);
 
     $teammateAccount = ConnectedAccount::withoutEvents(fn () => ConnectedAccount::factory()->create([
@@ -1791,4 +1882,6 @@ function teammateSentEmail(
         'email_address' => $address,
         'role' => $role,
     ]);
+
+    return $email;
 }

@@ -121,8 +121,8 @@ img, video { max-width: 100%; height: auto; }
 table { max-width: 100%; }
 pre { white-space: pre-wrap; }
 @media (prefers-color-scheme: dark) {
-    :root { background: #17181a; }
-    html, body { background: #17181a !important; color: #f3f4f6 !important; }
+    :root { background: transparent; }
+    html, body { background: transparent !important; color: #f3f4f6 !important; }
     body, table, tbody, thead, tfoot, tr, td, th, div, p, span, section, article, main, blockquote, li {
         background-color: transparent !important;
         border-color: #4b5563 !important;

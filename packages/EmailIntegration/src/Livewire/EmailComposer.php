@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Relaticle\EmailIntegration\Livewire;
 
+use App\Filament\Components\RecordChip;
 use App\Models\Company;
 use App\Models\CustomField;
 use App\Models\CustomFieldValue;
@@ -25,6 +26,7 @@ use Filament\Schemas\Schema;
 use Illuminate\Contracts\Database\Query\Builder;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Number;
@@ -61,6 +63,7 @@ use Relaticle\EmailIntegration\Services\ForwardAttachmentCopyService;
 use Relaticle\EmailIntegration\Services\MassSendRecipientResolver;
 use Relaticle\EmailIntegration\Services\PrivacyService;
 use Relaticle\EmailIntegration\Services\RecipientSuggestionService;
+use Relaticle\EmailIntegration\Support\ComposerPageTo;
 use Relaticle\EmailIntegration\Support\MailboxOAuthWorkspace;
 use Relaticle\EmailIntegration\Support\PersonRecipientFormatter;
 use Relaticle\EmailIntegration\Support\QueuedSendNotifier;
@@ -162,6 +165,14 @@ final class EmailComposer extends Component implements HasActions, HasSchemas
 
     public ?string $privacyTier = null;
 
+    #[Locked]
+    public ?string $pageTo = null;
+
+    public function mount(): void
+    {
+        $this->pageTo ??= ComposerPageTo::email();
+    }
+
     /**
      * Pending uploads: `TemporaryUploadedFile`s not yet written to the attachment
      * disk. They become {@see $savedAttachments} the moment the draft is saved.
@@ -234,7 +245,9 @@ final class EmailComposer extends Component implements HasActions, HasSchemas
         $this->massRecipients = $this->isMassSend
             ? ($payload['recipients'] ?? [])
             : [];
-        $this->to = $this->isMassSend ? [] : ($payload['to'] ?? []);
+        $this->to = $this->isMassSend
+            ? []
+            : ($payload['to'] ?? ($this->pageTo !== null && $this->pageTo !== '' ? [$this->pageTo] : []));
         $this->linkRecordType = $payload['linkRecordType'] ?? null;
         $this->linkRecordId = $payload['linkRecordId'] ?? null;
         $this->privacyTier = resolve(PrivacyService::class)
@@ -1146,6 +1159,10 @@ final class EmailComposer extends Component implements HasActions, HasSchemas
      *     email?: string,
      *     count?: int,
      *     emails?: list<string>,
+     *     avatarUrl: string|null,
+     *     iconPath: string|null,
+     *     circular: bool,
+     *     avatarColor: string,
      * }>
      */
     #[Computed]
@@ -1181,6 +1198,7 @@ final class EmailComposer extends Component implements HasActions, HasSchemas
                 'label' => PersonRecipientFormatter::displayName($person, $email),
                 'description' => $email,
                 'email' => $email,
+                ...$this->recipientChipAppearance($person),
             ];
         }
 
@@ -1249,6 +1267,10 @@ final class EmailComposer extends Component implements HasActions, HasSchemas
      *     description: string,
      *     count: int,
      *     emails: list<string>,
+     *     avatarUrl: string|null,
+     *     iconPath: string|null,
+     *     circular: bool,
+     *     avatarColor: string,
      * }>
      */
     private function companyTeamRecipientOptions(string $teamId): array
@@ -1289,10 +1311,11 @@ final class EmailComposer extends Component implements HasActions, HasSchemas
             return [];
         }
 
-        /** @var list<array{type: 'company_team', id: string, label: string, description: string, count: int, emails: list<string>}> */
+        /** @var list<array{type: 'company_team', id: string, label: string, description: string, count: int, emails: list<string>, avatarUrl: string|null, iconPath: string|null, circular: bool, avatarColor: string}> */
         return Company::query()
             ->where('workspace_id', $teamId)
             ->whereKey(array_keys($companyCounts))
+            ->with('media')
             ->orderBy('name')
             ->get(['id', 'name'])
             ->map(function (Company $company) use ($companyCounts, $companyEmails): array {
@@ -1305,10 +1328,38 @@ final class EmailComposer extends Component implements HasActions, HasSchemas
                     'description' => __('filament/emails/composer.fields.company_team'),
                     'count' => $companyCounts[$companyId],
                     'emails' => $companyEmails[$companyId],
+                    ...$this->recipientChipAppearance($company),
                 ];
             })
             ->values()
             ->all();
+    }
+
+    /**
+     * @return array{avatarUrl: string|null, iconPath: string|null, circular: bool, avatarColor: string}
+     */
+    private function recipientChipAppearance(Model $record): array
+    {
+        $chip = RecordChip::forRecord($record);
+        $avatarUrl = $chip->imageUrl;
+
+        if (is_string($avatarUrl) && str_starts_with($avatarUrl, 'data:')) {
+            $avatarUrl = null;
+        }
+
+        return [
+            'avatarUrl' => $avatarUrl,
+            'iconPath' => $chip->iconPath,
+            'circular' => $chip->circular,
+            'avatarColor' => $this->recipientAvatarColor($chip->name),
+        ];
+    }
+
+    private function recipientAvatarColor(string $name): string
+    {
+        $colors = ['primary', 'success', 'warning', 'danger', 'info'];
+
+        return $colors[abs(crc32(mb_strtolower($name))) % count($colors)];
     }
 
     /**

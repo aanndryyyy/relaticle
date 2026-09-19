@@ -32,6 +32,7 @@ use Relaticle\EmailIntegration\Enums\MeetingLinkedRecordType;
 use Relaticle\EmailIntegration\Filament\Actions\MeetingRsvpActions;
 use Relaticle\EmailIntegration\Filament\Infolists\Entries\MeetingAttendeeEntry;
 use Relaticle\EmailIntegration\Filament\Infolists\Entries\MeetingHeaderEntry;
+use Relaticle\EmailIntegration\Filament\Infolists\Entries\MeetingTimeEntry;
 use Relaticle\EmailIntegration\Models\Meeting;
 use Relaticle\EmailIntegration\Models\MeetingAttendee;
 use Relaticle\EmailIntegration\Services\MailboxDisplayNameDirectory;
@@ -42,6 +43,7 @@ final class MeetingDetailInfolist
     {
         return ViewAction::make()
             ->slideOver(false)
+            ->modalIcon(Heroicon::OutlinedCalendar)
             ->modalHeading(__('filament/resources/meeting.view.heading'))
             ->modalWidth(Width::FiveExtraLarge)
             ->modalCancelAction(false)
@@ -54,147 +56,118 @@ final class MeetingDetailInfolist
 
     public static function configure(Schema $schema): Schema
     {
-        return $schema->components(function (Schema $schema): array {
-            $record = $schema->getRecord();
+        return $schema
+            ->columns(1)
+            ->components(function (Schema $schema): array {
+                $record = $schema->getRecord();
 
-            if ($record instanceof Meeting) {
-                $record->loadMissing(['attendees.contact', 'people', 'companies', 'opportunities', 'connectedAccount.user']);
-                $record->attendees->each(
-                    fn (MeetingAttendee $attendee) => $attendee->setRelation('meeting', $record),
-                );
+                if ($record instanceof Meeting) {
+                    $record->loadMissing(['attendees.contact', 'people', 'companies', 'opportunities', 'connectedAccount.user']);
+                    $record->attendees->each(
+                        fn (MeetingAttendee $attendee) => $attendee->setRelation('meeting', $record),
+                    );
 
-                $viewer = auth()->user();
+                    $viewer = auth()->user();
 
-                if ($viewer instanceof User) {
-                    resolve(MailboxDisplayNameDirectory::class)->primeFromMeetings($viewer, [$record]);
+                    if ($viewer instanceof User) {
+                        resolve(MailboxDisplayNameDirectory::class)->primeFromMeetings($viewer, [$record]);
+                    }
                 }
-            }
 
-            $rsvpGroup = MeetingRsvpActions::group();
+                $rsvpGroup = MeetingRsvpActions::group();
 
-            if ($record instanceof Meeting) {
-                $rsvpGroup->record($record);
-            }
+                if ($record instanceof Meeting) {
+                    $rsvpGroup->record($record);
+                }
 
-            return [
-                Flex::make([
-                    MeetingHeaderEntry::make('header')
-                        ->hiddenLabel()
-                        ->grow(),
-                    $rsvpGroup,
-                ])->verticallyAlignCenter(),
-                TextEntry::make('time_row')
-                    ->hiddenLabel()
-                    ->icon(Heroicon::OutlinedClock)
-                    ->state(function (Meeting $record): string {
-                        if ($record->all_day) {
-                            return $record->starts_at->format('M j').' ('.__('filament/resources/meeting.time.all_day').')';
-                        }
-
-                        return $record->starts_at->format('M j').'  '.$record->starts_at->format('g:i A').' → '.$record->ends_at->format('g:i A').' ('.self::compactDuration($record).')';
-                    }),
-                TextEntry::make('html_link')
-                    ->hiddenLabel()
-                    ->color('primary')
-                    ->icon(Heroicon::OutlinedLink)
-                    ->url(fn (Meeting $record): ?string => $record->html_link, shouldOpenInNewTab: true)
-                    ->visible(fn (Meeting $record): bool => filled($record->html_link)),
-                TextEntry::make('location')
-                    ->hiddenLabel()
-                    ->icon(Heroicon::OutlinedMapPin)
-                    ->visible(fn (Meeting $record): bool => filled($record->location)),
-                Grid::make(5)
-                    ->schema([
-                        Section::make(__('filament/resources/meeting.sections.participants.heading'))
-                            ->afterHeader([
-                                TextEntry::make('attendees_badge')
-                                    ->hiddenLabel()
-                                    ->badge()
-                                    ->state(fn (Meeting $record): int => $record->attendees->count()),
-                            ])
-                            ->schema([
-                                RepeatableEntry::make('attendees')
-                                    ->contained(false)
-                                    ->hiddenLabel()
-                                    ->schema([
-                                        MeetingAttendeeEntry::make('attendee')->hiddenLabel(),
-                                    ]),
-                                TextEntry::make('attendees_empty')
-                                    ->hiddenLabel()
-                                    ->state(__('filament/resources/meeting.sections.participants.empty'))
-                                    ->visible(fn (Meeting $record): bool => $record->attendees->isEmpty()),
-                            ])
-                            ->columnSpan(3),
-                        Section::make(__('filament/resources/meeting.sections.linked_records.heading'))
-                            ->afterLabel([
-                                TextEntry::make('linked_badge')
-                                    ->hiddenLabel()
-                                    ->badge()
-                                    ->state(fn (Meeting $record): int => self::linkedCount($record)),
-                            ])
-                            ->afterHeader([
-                                self::linkRecordsAction('linkRecords')
-                                    ->visible(fn (Meeting $record): bool => self::linkedCount($record) > 0),
-                            ])
-                            ->schema([
-                                RepeatableEntry::make('linked_records')
-                                    ->contained(false)
-                                    ->hiddenLabel()
-                                    ->state(fn (Meeting $record): array => self::linkedRecordsState($record))
-                                    ->visible(fn (Meeting $record): bool => self::linkedCount($record) > 0)
-                                    ->schema([
-                                        Flex::make([
-                                            TextEntry::make('name')
-                                                ->hiddenLabel()
-                                                ->weight(FontWeight::Medium)
-                                                ->grow(),
-                                            TextEntry::make('record_type')
-                                                ->hiddenLabel()
-                                                ->badge()
-                                                ->formatStateUsing(fn (string $state): string => MeetingLinkedRecordType::from($state)->getLabel())
-                                                ->icon(fn (string $state): Heroicon => MeetingLinkedRecordType::from($state)->getIcon())
-                                                ->color(fn (string $state): string => MeetingLinkedRecordType::from($state)->getColor())
-                                                ->grow(false)
-                                                ->size(TextSize::Small),
-                                        ])->alignment(Alignment::Between),
-                                    ]),
-                                EmptyState::make(__('filament/resources/meeting.sections.linked_records.empty.heading'))
-                                    ->description(__('filament/resources/meeting.sections.linked_records.empty.description'))
-                                    ->icon(Heroicon::OutlinedLink)
-                                    ->contained(false)
-                                    ->footer([
-                                        self::linkRecordsAction('linkRecords')->button()->size(Size::ExtraSmall),
-                                    ])
-                                    ->visible(fn (Meeting $record): bool => self::linkedCount($record) === 0),
-                            ])
-                            ->compact(true)
-                            ->columnSpan(2),
-                    ]),
-                Section::make(__('filament/resources/meeting.sections.description.heading'))
-                    ->schema([
-                        TextEntry::make('description')->hiddenLabel()->html(),
+                return [
+                    Flex::make([
+                        MeetingHeaderEntry::make('header')
+                            ->hiddenLabel()
+                            ->grow(),
+                        $rsvpGroup,
                     ])
-                    ->visible(fn (Meeting $record): bool => filled($record->description)),
-            ];
-        });
-    }
-
-    public static function compactDuration(Meeting $meeting): string
-    {
-        $minutes = (int) $meeting->starts_at->diffInMinutes($meeting->ends_at);
-
-        if ($minutes < 60) {
-            return $minutes.'m';
-        }
-
-        $hours = intdiv($minutes, 60);
-        $remainder = $minutes % 60;
-
-        if ($remainder === 0) {
-            return $hours.'h';
-        }
-
-        return $hours.'h '.$remainder.'m';
+                        ->verticallyAlignCenter()
+                        ->columnSpanFull(),
+                    MeetingTimeEntry::make('time_row')
+                        ->hiddenLabel()
+                        ->columnSpanFull(),
+                    Grid::make(5)
+                        ->columnSpanFull()
+                        ->schema([
+                            Section::make(__('filament/resources/meeting.sections.participants.heading'))
+                                ->afterHeader([
+                                    TextEntry::make('attendees_badge')
+                                        ->hiddenLabel()
+                                        ->badge()
+                                        ->state(fn (Meeting $record): int => $record->attendees->count()),
+                                ])
+                                ->schema([
+                                    RepeatableEntry::make('attendees')
+                                        ->contained(false)
+                                        ->hiddenLabel()
+                                        ->schema([
+                                            MeetingAttendeeEntry::make('attendee')->hiddenLabel(),
+                                        ]),
+                                    TextEntry::make('attendees_empty')
+                                        ->hiddenLabel()
+                                        ->state(__('filament/resources/meeting.sections.participants.empty'))
+                                        ->visible(fn (Meeting $record): bool => $record->attendees->isEmpty()),
+                                ])
+                                ->columnSpan(3),
+                            Section::make(__('filament/resources/meeting.sections.linked_records.heading'))
+                                ->afterLabel([
+                                    TextEntry::make('linked_badge')
+                                        ->hiddenLabel()
+                                        ->badge()
+                                        ->state(fn (Meeting $record): int => self::linkedCount($record)),
+                                ])
+                                ->afterHeader([
+                                    self::linkRecordsAction('linkRecords')
+                                        ->visible(fn (Meeting $record): bool => self::linkedCount($record) > 0),
+                                ])
+                                ->schema([
+                                    RepeatableEntry::make('linked_records')
+                                        ->contained(false)
+                                        ->hiddenLabel()
+                                        ->state(fn (Meeting $record): array => self::linkedRecordsState($record))
+                                        ->visible(fn (Meeting $record): bool => self::linkedCount($record) > 0)
+                                        ->schema([
+                                            Flex::make([
+                                                TextEntry::make('name')
+                                                    ->hiddenLabel()
+                                                    ->weight(FontWeight::Medium)
+                                                    ->grow(),
+                                                TextEntry::make('record_type')
+                                                    ->hiddenLabel()
+                                                    ->badge()
+                                                    ->formatStateUsing(fn (string $state): string => MeetingLinkedRecordType::from($state)->getLabel())
+                                                    ->icon(fn (string $state): Heroicon => MeetingLinkedRecordType::from($state)->getIcon())
+                                                    ->color(fn (string $state): string => MeetingLinkedRecordType::from($state)->getColor())
+                                                    ->grow(false)
+                                                    ->size(TextSize::Small),
+                                            ])->alignment(Alignment::Between),
+                                        ]),
+                                    EmptyState::make(__('filament/resources/meeting.sections.linked_records.empty.heading'))
+                                        ->description(__('filament/resources/meeting.sections.linked_records.empty.description'))
+                                        ->icon(Heroicon::OutlinedLink)
+                                        ->contained(false)
+                                        ->footer([
+                                            self::linkRecordsAction('linkRecords')->button()->size(Size::ExtraSmall),
+                                        ])
+                                        ->visible(fn (Meeting $record): bool => self::linkedCount($record) === 0),
+                                ])
+                                ->compact(true)
+                                ->columnSpan(2),
+                        ]),
+                    Section::make(__('filament/resources/meeting.sections.description.heading'))
+                        ->schema([
+                            TextEntry::make('description')->hiddenLabel()->html(),
+                        ])
+                        ->columnSpanFull()
+                        ->visible(fn (Meeting $record): bool => filled($record->description)),
+                ];
+            });
     }
 
     public static function linkedCount(Meeting $meeting): int

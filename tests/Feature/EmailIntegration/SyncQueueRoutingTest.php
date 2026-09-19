@@ -99,7 +99,7 @@ it('dispatches the initial-sync StoreEmailJob batch onto the emails-sync queue',
     $factory = Mockery::mock(MailServiceFactoryInterface::class);
     $factory->shouldReceive('make')->andReturn($service);
 
-    (new InitialEmailSyncJob($account))->handle($factory);
+    app()->call([new InitialEmailSyncJob($account), 'handle'], ['mailFactory' => $factory]);
 
     // Bus::batch() ignores each job's constructor onQueue() — without an explicit
     // ->onQueue() on the batch the StoreEmailJobs leak onto the default queue.
@@ -140,7 +140,7 @@ it('keeps the job instance out of the initial email sync batch callback', functi
     $factory = Mockery::mock(MailServiceFactoryInterface::class);
     $factory->shouldReceive('make')->andReturn($service);
 
-    (new InitialEmailSyncJob($account))->handle($factory);
+    app()->call([new InitialEmailSyncJob($account), 'handle'], ['mailFactory' => $factory]);
 
     assertBatchCallbacksCarryNoJobInstance();
 });

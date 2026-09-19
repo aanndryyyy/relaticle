@@ -12,6 +12,7 @@
     $listboxId = Str::slug($wireModel ?: 'recipients').'-suggestions';
     $removeLabel = __('filament/emails/composer.actions.remove_recipient');
     $companyTeamLabel = __('filament/emails/composer.fields.company_team_count');
+    $avatarColor = static fn (string $name): string => ['primary', 'success', 'warning', 'danger', 'info'][abs(crc32(mb_strtolower($name))) % 5];
     $manualOptions = collect($suggestions)
         ->map(fn (string $suggestion): array => [
             'type' => 'email',
@@ -19,6 +20,10 @@
             'label' => $suggestion,
             'description' => null,
             'email' => $suggestion,
+            'avatarUrl' => null,
+            'iconPath' => null,
+            'circular' => true,
+            'avatarColor' => $avatarColor($suggestion),
         ])
         ->all();
 @endphp
@@ -47,6 +52,48 @@
                     .filter(Boolean)
                     .some((value) => value.toLowerCase().includes(query)))
                 .slice(0, 8);
+        },
+
+        get selectedChips() {
+            return this.values.map((value) => ({ value, ...this.chipFor(value) }));
+        },
+
+        chipFor(value) {
+            const normalized = value.toLowerCase();
+            const option = this.options.find((candidate) => (candidate.email ?? '').toLowerCase() === normalized);
+
+            if (option) {
+                return option;
+            }
+
+            return {
+                type: 'email',
+                id: value,
+                label: value,
+                email: value,
+                avatarUrl: null,
+                iconPath: null,
+                circular: true,
+                avatarColor: 'primary',
+            };
+        },
+
+        initials(name) {
+            return String(name ?? '')
+                .trim()
+                .split(/\s+/)
+                .filter(Boolean)
+                .slice(0, 2)
+                .map((word) => word.charAt(0).toUpperCase())
+                .join('') || '?';
+        },
+
+        chipTooltip(chip) {
+            if (chip.email && chip.label && chip.label !== chip.email) {
+                return chip.label + ' · ' + chip.email;
+            }
+
+            return chip.email || chip.label || '';
         },
 
         get isOpen() {
@@ -225,13 +272,17 @@
         x-init="$nextTick(() => $refs.input.focus())"
     @endif
     @if ($wireModel) wire:ignore @endif
-    {{ $attributes->whereDoesntStartWith('wire:model')->merge(['class' => 'flex min-h-10 min-w-0 flex-wrap items-center gap-1']) }}
+    {{ $attributes->whereDoesntStartWith('wire:model')->merge(['class' => 'flex min-h-10 min-w-0 flex-wrap content-start items-center gap-2 py-2']) }}
 >
-    <template x-for="value in values" :key="value">
-        <span class="inline-flex max-w-full items-center gap-1 rounded-full bg-primary-50 py-0.5 pl-2 pr-1 text-xs font-medium text-primary-700 ring-1 ring-primary-600/10 dark:bg-primary-400/10 dark:text-primary-300 dark:ring-primary-400/20">
-            <span class="truncate" x-text="value"></span>
-            <button type="button" x-on:click="remove(value)" :aria-label="removeLabel + ': ' + value" class="shrink-0 rounded-full p-0.5 text-primary-400 transition hover:bg-primary-600/10 hover:text-primary-700 dark:hover:text-primary-200">
-                <x-heroicon-m-x-mark class="h-3 w-3" />
+    <template x-for="chip in selectedChips" :key="chip.value">
+        <span
+            class="inline-flex max-w-48 items-center gap-1 rounded-full bg-gray-100 py-0.5 pl-0.5 pr-0.5 text-[11px] font-medium leading-4 text-gray-800 ring-1 ring-gray-950/5 dark:bg-white/10 dark:text-gray-200 dark:ring-white/10"
+            x-tooltip="{ content: chipTooltip(chip), theme: $store.theme }"
+        >
+            <x-emails.recipient-avatar box="size-4" glyph="size-2.5" initials-size="text-[9px]" />
+            <span class="min-w-0 truncate" x-text="chip.label"></span>
+            <button type="button" x-on:click="remove(chip.value)" :aria-label="removeLabel + ': ' + chip.value" class="shrink-0 rounded-full p-px text-gray-400 transition hover:bg-gray-950/5 hover:text-gray-700 dark:hover:bg-white/10 dark:hover:text-gray-200">
+                <x-heroicon-m-x-mark class="h-2.5 w-2.5" />
             </button>
         </span>
     </template>
@@ -249,7 +300,7 @@
         role="combobox"
         autocomplete="off"
         @if ($autofocus) autofocus @endif
-        class="h-10 min-w-[8rem] flex-1 border-0 bg-transparent p-0 text-sm leading-10 focus:outline-none focus:ring-0"
+        class="h-6 min-w-[8rem] flex-1 border-0 bg-transparent p-0 text-sm leading-6 focus:outline-none focus:ring-0"
     />
 
     <template x-teleport="body">
@@ -262,28 +313,24 @@
             role="listbox"
             class="fixed z-50 max-h-72 overflow-y-auto rounded-md border border-gray-200 bg-white py-1 text-sm shadow-lg ring-1 ring-black/5 dark:border-white/10 dark:bg-gray-900 dark:ring-white/10"
         >
-            <template x-for="(option, index) in matches" :key="option.type + ':' + option.id">
+            <template x-for="(chip, index) in matches" :key="chip.type + ':' + chip.id">
                 <button
                     type="button"
                     role="option"
-                    x-on:click="choose(option)"
+                    x-on:click="choose(chip)"
                     x-bind:aria-selected="index === activeIndex"
                     class="flex min-h-11 w-full items-center gap-2.5 px-2.5 py-2 text-left transition focus:outline-none"
                     x-bind:class="index === activeIndex ? 'bg-gray-100 dark:bg-white/10' : 'hover:bg-gray-50 dark:hover:bg-white/5'"
                 >
-                    <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-300" aria-hidden="true">
-                        <x-heroicon-o-user x-show="option.type === 'person'" class="h-4 w-4" />
-                        <x-heroicon-o-building-office-2 x-show="option.type === 'company_team'" class="h-4 w-4" />
-                        <x-heroicon-o-envelope x-show="option.type === 'email'" class="h-4 w-4" />
-                    </span>
+                    <x-emails.recipient-avatar box="size-7" glyph="size-4" initials-size="text-[11px]" />
                     <span class="min-w-0 flex-1">
-                        <span class="block truncate text-sm font-medium text-gray-900 dark:text-gray-100" x-text="option.label"></span>
-                        <span class="block truncate text-xs text-gray-500 dark:text-gray-400" x-text="option.description"></span>
+                        <span class="block truncate text-sm font-medium text-gray-900 dark:text-gray-100" x-text="chip.label"></span>
+                        <span class="block truncate text-xs text-gray-500 dark:text-gray-400" x-text="chip.description"></span>
                     </span>
                     <span
-                        x-show="option.type === 'company_team'"
+                        x-show="chip.type === 'company_team'"
                         class="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 dark:bg-white/10 dark:text-gray-300"
-                        x-text="companyTeamLabel + ' (' + option.count + ')'"
+                        x-text="companyTeamLabel + ' (' + chip.count + ')'"
                     ></span>
                 </button>
             </template>

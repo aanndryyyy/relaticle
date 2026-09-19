@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace Relaticle\EmailIntegration\Enums;
 
+use Filament\Support\Contracts\HasColor;
 use Filament\Support\Contracts\HasLabel;
 
-enum ConnectionStrength: string implements HasLabel
+enum ConnectionStrength: string implements HasColor, HasLabel
 {
     case None = 'none';
     case VeryWeak = 'very_weak';
@@ -18,6 +19,17 @@ enum ConnectionStrength: string implements HasLabel
     public function getLabel(): string
     {
         return __('filament/communication-intelligence.connection_strength.'.$this->value);
+    }
+
+    public function getColor(): string
+    {
+        return match ($this) {
+            self::None => 'gray',
+            self::VeryWeak => 'danger',
+            self::Weak => 'warning',
+            self::Good => 'info',
+            self::Strong, self::VeryStrong => 'success',
+        };
     }
 
     public static function fromScore(float $score): self

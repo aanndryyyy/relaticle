@@ -19,6 +19,7 @@ use Relaticle\EmailIntegration\Enums\EmailFolder;
 use Relaticle\EmailIntegration\Exceptions\MailHistoryExpired;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Services\Contracts\MailServiceInterface;
+use Relaticle\EmailIntegration\Support\EmailAddressHeaderParser;
 
 final readonly class GmailService implements MailServiceInterface
 {
@@ -586,6 +587,7 @@ final readonly class GmailService implements MailServiceInterface
      */
     private function extractParticipants(Collection $headers): array
     {
+        $parser = new EmailAddressHeaderParser;
         $participants = [];
 
         foreach (['from', 'to', 'cc', 'bcc'] as $role) {
@@ -594,50 +596,12 @@ final readonly class GmailService implements MailServiceInterface
                 continue;
             }
 
-            foreach ($this->parseAddressList($value) as $address) {
+            foreach ($parser->parse($value) as $address) {
                 $participants[] = array_merge(['role' => $role], $address);
             }
         }
 
         return $participants;
-    }
-
-    /**
-     * @return array<int, array{email_address: string, name: string|null}>
-     */
-    private function parseAddressList(string $raw): array
-    {
-        $addresses = [];
-
-        $parts = preg_split('/,(?![^<>]*>)/', $raw);
-
-        if ($parts === false) {
-            return [];
-        }
-
-        foreach ($parts as $part) {
-            $part = trim($part);
-            if ($part === '') {
-                continue;
-            }
-            if ($part === '0') {
-                continue;
-            }
-
-            if (preg_match('/^(.*?)\s*<([^>]+)>$/', $part, $matches)) {
-                $addresses[] = [
-                    'name' => trim($matches[1], ' "\''),
-                    'email_address' => strtolower(trim($matches[2])),
-                ];
-            } elseif (filter_var($part, FILTER_VALIDATE_EMAIL)) {
-                $addresses[] = [
-                    'name' => null,
-                    'email_address' => strtolower($part),
-                ];
-            }
-        }
-
-        return $addresses;
     }
 
     /**

@@ -15,13 +15,16 @@ use Google\Service\Gmail\MessagePart;
 use Google\Service\Gmail\MessagePartBody;
 use Google\Service\Gmail\MessagePartHeader;
 use Google\Service\Gmail\Profile;
+use Relaticle\EmailIntegration\Data\FetchedEmailData;
 use Relaticle\EmailIntegration\Enums\EmailDirection;
 use Relaticle\EmailIntegration\Enums\EmailFolder;
 use Relaticle\EmailIntegration\Exceptions\MailHistoryExpired;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Services\GmailService;
+use Relaticle\EmailIntegration\Support\EmailAddressHeaderParser;
 
 mutates(GmailService::class);
+mutates(EmailAddressHeaderParser::class);
 
 /**
  * @param  Closure(Message): void  $capture
@@ -46,6 +49,44 @@ function fakeGmail(Closure $capture): Gmail
 function decodeRaw(Message $message): string
 {
     return base64_decode(strtr($message->getRaw(), '-_', '+/'));
+}
+
+function fetchGmailMessageFromHeader(string $from): FetchedEmailData
+{
+    $account = ConnectedAccount::factory()->make();
+
+    $payload = new MessagePart;
+    $payload->setMimeType('text/plain');
+    $payload->setHeaders([
+        new MessagePartHeader(['name' => 'Message-ID', 'value' => '<msg@example.test>']),
+        new MessagePartHeader(['name' => 'Subject', 'value' => 'Hello']),
+        new MessagePartHeader(['name' => 'From', 'value' => $from]),
+        new MessagePartHeader(['name' => 'To', 'value' => 'Owner <owner@example.test>']),
+    ]);
+    $payload->setBody(new MessagePartBody([
+        'data' => rtrim(strtr(base64_encode('Hello'), '+/', '-_'), '='),
+        'size' => 5,
+    ]));
+
+    $message = new Message([
+        'id' => 'gmail-msg-from',
+        'threadId' => 'gmail-thread-from',
+        'internalDate' => (string) (now()->timestamp * 1000),
+        'labelIds' => ['INBOX'],
+        'snippet' => 'Hello',
+    ]);
+    $message->setPayload($payload);
+
+    $messages = Mockery::mock();
+    $messages->shouldReceive('get')
+        ->once()
+        ->with('me', 'gmail-msg-from', ['format' => 'full'])
+        ->andReturn($message);
+
+    $gmail = Mockery::mock(Gmail::class);
+    $gmail->users_messages = $messages;
+
+    return new GmailService($account, $gmail)->fetchMessage('gmail-msg-from');
 }
 
 /**
@@ -449,6 +490,36 @@ it('imports a file when the gmail payload itself is the attachment', function ()
         ->and($data->attachments[0]['size'])->toBe(2048)
         ->and($data->attachments[0]['attachment_id'])->toBe('pdf-attachment-id')
         ->and($data->attachments[0]['is_inline'])->toBeFalse();
+});
+
+it('keeps a quoted From display name that contains a comma', function (): void {
+    $data = fetchGmailMessageFromHeader('"Pashayan, Ilya" <ilya@example.test>');
+
+    $from = collect($data->participants)->firstWhere('role', 'from');
+
+    expect($from)->not->toBeNull()
+        ->and($from['email_address'])->toBe('ilya@example.test')
+        ->and($from['name'])->toBe('Pashayan, Ilya');
+});
+
+it('decodes an RFC 2047 encoded From display name', function (): void {
+    $data = fetchGmailMessageFromHeader('=?UTF-8?Q?Ilya_Pashayan?= <ilya@example.test>');
+
+    $from = collect($data->participants)->firstWhere('role', 'from');
+
+    expect($from)->not->toBeNull()
+        ->and($from['email_address'])->toBe('ilya@example.test')
+        ->and($from['name'])->toBe('Ilya Pashayan');
+});
+
+it('drops a From display name that is only the email address', function (): void {
+    $data = fetchGmailMessageFromHeader('support@escrow.com <support@escrow.com>');
+
+    $from = collect($data->participants)->firstWhere('role', 'from');
+
+    expect($from)->not->toBeNull()
+        ->and($from['email_address'])->toBe('support@escrow.com')
+        ->and($from['name'])->toBeNull();
 });
 
 it('does not treat a root text payload as an attachment', function (): void {

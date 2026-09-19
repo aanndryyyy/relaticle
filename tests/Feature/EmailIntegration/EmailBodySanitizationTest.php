@@ -148,9 +148,35 @@ it('renders email participants and ai label through the email view helpers', fun
 
     mountEmailView($email->fresh(['body', 'participants', 'labels', 'attachments']))
         ->assertSeeHtml('Alice Sender')
+        ->assertSeeHtml('alice@example.test')
         ->assertSeeHtml('Tara Recipient')
+        ->assertSeeHtml('tara@example.test')
         ->assertSeeHtml('Cal Copy')
+        ->assertSeeHtml('cal@example.test')
+        ->assertSeeHtml(__('filament/pages/email-inbox.recipients.details'))
         ->assertSeeHtml('Sales');
+});
+
+it('shows only the address when a recipient has no distinct name', function (): void {
+    $email = makeEmailWithBody('<p>body</p>');
+
+    $email->participants()->createMany([
+        [
+            'role' => EmailParticipantRole::FROM,
+            'name' => 'White Shark',
+            'email_address' => 'white@example.test',
+        ],
+        [
+            'role' => EmailParticipantRole::TO,
+            'name' => null,
+            'email_address' => 'zzz-private-leak@example.test',
+        ],
+    ]);
+
+    mountEmailView($email->fresh(['body', 'participants', 'labels', 'attachments']))
+        ->assertSeeHtml('White Shark')
+        ->assertSeeHtml('white@example.test')
+        ->assertSeeHtml('zzz-private-leak@example.test');
 });
 
 it('does not truncate email bodies larger than the sanitizer default input cap', function (): void {
@@ -175,7 +201,7 @@ it('wraps sanitized email html in a scriptless dark-mode preview document', func
     expect($html)
         ->toContain('<meta name="color-scheme" content="light dark">')
         ->toContain('@media (prefers-color-scheme: dark)')
-        ->toContain('background: #17181a')
+        ->toContain('background: transparent')
         ->toContain('padding: 0')
         ->toContain('background-color: transparent !important')
         ->toContain('<p style="color:#111111;background:#ffffff">Body</p>')
@@ -242,8 +268,8 @@ it('renders the email view iframe without scripts and with same-origin height me
         ->assertSeeHtml('sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"')
         ->assertSeeHtml('referrerpolicy="no-referrer"')
         ->assertSeeHtml('px-6 py-6 sm:px-8 lg:px-10')
-        ->assertSeeHtml('dark:bg-neutral-950 dark:[color-scheme:dark]')
-        ->assertSeeHtml('dark:bg-gray-950')
+        ->assertSeeHtml('dark:bg-gray-900 dark:[color-scheme:dark]')
+        ->assertSeeHtml('dark:bg-gray-900')
         ->assertDontSeeHtml('allow-scripts');
 });
 

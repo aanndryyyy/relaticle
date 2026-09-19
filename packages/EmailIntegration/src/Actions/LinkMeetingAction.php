@@ -8,7 +8,6 @@ use App\Models\Company;
 use App\Models\Opportunity;
 use App\Models\People;
 use App\Models\Workspace;
-use Illuminate\Contracts\Database\Query\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Collection;
@@ -19,6 +18,7 @@ use Relaticle\EmailIntegration\Services\EmailVisibilityService;
 use Relaticle\EmailIntegration\Services\RecordCommunicationMetrics;
 use Relaticle\EmailIntegration\Support\AutomatedSenderMatcher;
 use Relaticle\EmailIntegration\Support\CompanyDomainMatcher;
+use Relaticle\EmailIntegration\Support\PersonEmailMatcher;
 
 final readonly class LinkMeetingAction
 {
@@ -26,6 +26,7 @@ final readonly class LinkMeetingAction
         private AutoCreateCompanyAction $autoCreateCompany,
         private AutoCreatePersonAction $autoCreatePerson,
         private CompanyDomainMatcher $domainMatcher,
+        private PersonEmailMatcher $personEmailMatcher,
         private AutomatedSenderMatcher $automatedSender,
         private EmailVisibilityService $visibility,
         private RecordCommunicationMetrics $metrics,
@@ -48,12 +49,7 @@ final readonly class LinkMeetingAction
                 $meeting->connected_account_id,
             );
 
-            $person = People::query()->where('workspace_id', $teamId)
-                ->whereHas('customFieldValues', fn (Builder $valueQuery) => $valueQuery
-                    ->whereHas('customField', fn (Builder $fieldQuery) => $fieldQuery->where('type', 'email'))
-                    ->whereJsonContains('json_value', $attendee->email_address)
-                )
-                ->first();
+            $person = $this->personEmailMatcher->firstMatching($attendee->email_address, $teamId);
 
             $wouldCreatePerson = ! $person
                 && ! $isAutomatedSender
@@ -91,7 +87,7 @@ final readonly class LinkMeetingAction
                 );
             }
 
-            if ($person) {
+            if ($person instanceof People) {
                 $attendee->update(['contact_id' => $person->getKey()]);
                 if ($this->autoAttach($meeting->people(), $person->getKey()) && $countsTowardIntelligence) {
                     $this->metrics->incrementMeetingMetrics($person, $meeting);

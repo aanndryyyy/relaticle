@@ -15,6 +15,7 @@ use Filament\Facades\Filament;
 use Illuminate\Support\Facades\DB;
 use Laravel\Pennant\Feature;
 use Relaticle\EmailIntegration\Data\VisibleCommunicationIntelligence;
+use Relaticle\EmailIntegration\Enums\ConnectionStrength;
 use Relaticle\EmailIntegration\Enums\EmailPrivacyTier;
 use Relaticle\EmailIntegration\Filament\Actions\ViewRecordEmailsAction;
 use Relaticle\EmailIntegration\Filament\Infolists\CommunicationIntelligenceInfolist;
@@ -22,7 +23,7 @@ use Relaticle\EmailIntegration\Models\ConnectedAccount;
 use Relaticle\EmailIntegration\Models\Email;
 use Relaticle\EmailIntegration\Services\EmailVisibilityService;
 
-mutates(ViewCompany::class, ViewPeople::class, ViewOpportunity::class, ViewRecordEmailsAction::class, EmailVisibilityService::class, CommunicationIntelligenceInfolist::class, VisibleCommunicationIntelligence::class);
+mutates(ViewCompany::class, ViewPeople::class, ViewOpportunity::class, ViewRecordEmailsAction::class, EmailVisibilityService::class, CommunicationIntelligenceInfolist::class, VisibleCommunicationIntelligence::class, ConnectionStrength::class);
 
 beforeEach(function (): void {
     $this->user = User::factory()->withWorkspace()->create();
@@ -243,9 +244,10 @@ it('renders scoped communication intelligence once on the person view', function
         ->assertSee(__('filament/communication-intelligence.fields.last_email.label'))
         ->assertSee(__('filament/communication-intelligence.fields.connection_strength.label'))
         ->assertSee(__('filament/communication-intelligence.fields.strongest_connection.label'))
+        ->assertSee(__('filament/communication-intelligence.connection_strength.weak'))
         ->assertDontSee('Total Emails')
         ->assertSchemaStateSet([
-            'visible_connection_strength' => __('filament/communication-intelligence.connection_strength.weak'),
+            'visible_connection_strength' => ConnectionStrength::Weak,
             'visible_strongest_connection' => $this->user->name,
         ]);
 

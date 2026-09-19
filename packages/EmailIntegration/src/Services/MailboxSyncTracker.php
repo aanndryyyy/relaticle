@@ -29,6 +29,13 @@ final readonly class MailboxSyncTracker
         return $generation === self::currentCalendarSyncGeneration($account);
     }
 
+    public static function hasCalendarRunTotal(ConnectedAccount $account): bool
+    {
+        $total = Cache::get(self::calendarTotalKey($account));
+
+        return is_int($total) && $total > 0;
+    }
+
     public static function markCalendarFinished(ConnectedAccount $account): void
     {
         Cache::forget(self::calendarKey($account));
