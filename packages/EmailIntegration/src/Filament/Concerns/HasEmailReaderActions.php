@@ -89,6 +89,8 @@ trait HasEmailReaderActions
             ->tooltip(__('filament/pages/record-emails.actions.manage_sharing.label'))
             ->modalHeading(__('filament/pages/record-emails.actions.manage_sharing.modal_heading'))
             ->modalWidth(Width::ExtraLarge)
+            ->stickyModalHeader()
+            ->stickyModalFooter()
             ->modalSubmitActionLabel(__('filament/pages/record-emails.actions.manage_sharing.submit'))
             ->visible(function (mixed $record = null): bool {
                 if (! $record instanceof Email) {
