@@ -23,6 +23,7 @@ use Relaticle\Chat\Livewire\Chat\ProposalCard;
 use Relaticle\Chat\Models\PendingAction;
 use Relaticle\Chat\Services\PendingActionService;
 use Relaticle\Chat\Tools\Workspace\RemoveSampleDataTool;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 mutates(RemoveSampleDataTool::class, RemoveSampleData::class);
 
@@ -147,6 +148,36 @@ it('refuses when no sample records remain', function (): void {
 
     expect($result['error'])->toContain('no sample records')
         ->and(PendingAction::query()->count())->toBe(0);
+});
+
+it('refuses to approve the removal from another workspace', function (): void {
+    seedChatSampleRecords($this->workspace, $this->owner);
+    proposeSampleRemoval();
+
+    $pending = PendingAction::query()->where('workspace_id', $this->workspace->getKey())->sole();
+    $outsider = User::factory()->withPersonalWorkspace()->create();
+
+    expect(fn () => resolve(PendingActionService::class)->approve($pending, $outsider))
+        ->toThrow(RuntimeException::class, 'This action belongs to another workspace.');
+
+    expect(remainingSampleRecords($this->workspace))->toBe(6)
+        ->and($pending->fresh()->status)->toBe(PendingActionStatus::Pending);
+});
+
+it('refuses an approval by a workspace admin who is not the owner', function (): void {
+    seedChatSampleRecords($this->workspace, $this->owner);
+    proposeSampleRemoval();
+
+    $pending = PendingAction::query()->where('workspace_id', $this->workspace->getKey())->sole();
+    $admin = User::factory()->create();
+    $this->workspace->users()->attach($admin, ['role' => WorkspaceRole::Admin->value]);
+    $admin->switchWorkspace($this->workspace);
+
+    expect(fn () => resolve(PendingActionService::class)->approve($pending, $admin))
+        ->toThrow(HttpException::class);
+
+    expect(remainingSampleRecords($this->workspace))->toBe(6)
+        ->and($pending->fresh()->status)->toBe(PendingActionStatus::Pending);
 });
 
 it('offers sample removal in the setup conversation too', function (): void {
