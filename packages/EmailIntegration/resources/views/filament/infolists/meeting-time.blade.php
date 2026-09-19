@@ -21,6 +21,7 @@
         <span>{{ $state['start_date'] }}</span>
 
         @if ($state['start_time'] !== null)
+            <span aria-hidden="true" class="text-gray-300 dark:text-gray-600">|</span>
             <span>{{ $state['start_time'] }}</span>
         @endif
 

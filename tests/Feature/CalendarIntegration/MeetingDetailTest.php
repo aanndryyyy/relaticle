@@ -126,7 +126,8 @@ it('shows all-day meetings without a clock range', function (): void {
         ->mountAction(TestAction::make('view')->table($meeting))
         ->assertMountedActionModalSee('Offsite')
         ->assertMountedActionModalSee(__('filament/resources/meeting.time.all_day'))
-        ->assertMountedActionModalDontSee('→');
+        ->assertMountedActionModalDontSee('→')
+        ->assertMountedActionModalDontSee('|');
 });
 
 it('shows the end date after a pipe when a timed meeting spans days', function (): void {
@@ -144,6 +145,7 @@ it('shows the end date after a pipe when a timed meeting spans days', function (
         ->mountAction(TestAction::make('view')->table($meeting))
         ->assertMountedActionModalSee('Overnight sync')
         ->assertMountedActionModalSee('Sep 10')
+        ->assertMountedActionModalSee('|')
         ->assertMountedActionModalSee('5:45 AM')
         ->assertMountedActionModalSee('(1d)')
         ->assertMountedActionModalSee('Sep 11')
