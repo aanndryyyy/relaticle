@@ -671,6 +671,9 @@ abstract class BaseReadListTool implements Tool
         return $value;
     }
 
+    /**
+     * @throws ValidationException
+     */
     private function buildHttpRequest(User $user, Request $request): HttpRequest
     {
         $input = [];

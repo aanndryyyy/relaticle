@@ -63,10 +63,7 @@ final class RemoveSampleDataTool implements Tool
             actionClass: RemoveSampleData::class,
             operation: PendingActionOperation::Delete,
             entityType: 'sample_data',
-            actionData: [
-                '_record_ids' => [$workspace->getKey()],
-                'name' => __('All sample records'),
-            ],
+            actionData: ['name' => __('All sample records')],
             displayData: [
                 'title' => __('Remove sample data'),
                 'summary' => trans_choice('Delete :count sample record|Delete :count sample records', $total, ['count' => $total]),
