@@ -53,45 +53,48 @@ for every object in it.
 
 So attach two buckets.
 
-**A private bucket, as the environment's default disk, with disk name `s3`.**
-Cloud injects `FILESYSTEM_DISK` and the `AWS_*` credentials for whichever bucket
-is the default, and the `s3` disk in `config/filesystems.php` already reads them.
-This backs pending uploads and media library files — everything that must not be
-reachable by URL. Signed `/media/{uuid}` routes serve these to the browser.
-Livewire's temporary uploads follow it too, because
+Attaching a bucket asks for a disk name, and Cloud then builds that disk itself,
+credentials and all, and adds it to `config/filesystems.php` at runtime. So both
+buckets are wired by attaching them and naming the two disks — no `AWS_*`
+variables are set by hand, and the `s3`/`s3_public` disks in this repository are
+for S3 deployments off Cloud.
+
+**A private bucket, attached as the environment's default disk, disk name
+`private`.** It backs pending uploads and media library files — everything that
+must not be reachable by URL. Signed `/media/{uuid}` routes serve these to the
+browser. Livewire's temporary uploads follow it too, because
 `LIVEWIRE_TEMPORARY_FILE_UPLOAD_DISK` is unset and Livewire then falls back to
 the default disk. Leave it unset.
 
-Leave `AWS_DEFAULT_REGION` unset as well. Cloud injects `AWS_REGION` for the
-attached bucket, and the `s3` disk falls back to it; a value carried over from
-`.env.example` would take precedence over the right one.
-
-**A public bucket, with any disk name.** Its credentials are not injected, so
-copy them from the bucket's settings page into the environment's own variables
-under the `AWS_PUBLIC_*` names below. `AWS_PUBLIC_URL` is the bucket's public
-base URL, which Cloud shows on the same page but never injects. This backs
-workspace and company logos and legacy rich-editor images, all of which render
-through a plain `<img src>`.
+**A public bucket, disk name `public`.** It backs workspace and company logos
+and legacy rich-editor images, all of which render through a plain `<img src>`.
+The name deliberately shadows Laravel's local `public` disk, which is what the
+defaults in `config/relaticle.php` already point at, so nothing else has to
+change.
 
 ```ini
-# Injected when the private bucket is attached as the default disk.
-# FILESYSTEM_DISK=s3
-# AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_BUCKET / ...
+FILESYSTEM_PRIVATE_DISK=private
+MEDIA_DISK=private
 
-FILESYSTEM_PRIVATE_DISK=s3
-MEDIA_DISK=s3
-
-FILESYSTEM_PUBLIC_DISK=s3_public
-FILAMENT_FILESYSTEM_DISK=s3_public
-
-# Copied by hand from the public bucket's settings page.
-AWS_PUBLIC_ACCESS_KEY_ID=
-AWS_PUBLIC_SECRET_ACCESS_KEY=
-AWS_PUBLIC_DEFAULT_REGION=auto
-AWS_PUBLIC_BUCKET=
-AWS_PUBLIC_URL=
-AWS_PUBLIC_ENDPOINT=
+FILESYSTEM_PUBLIC_DISK=public
+FILAMENT_FILESYSTEM_DISK=public
 ```
+
+Do not set `AWS_ACCESS_KEY_ID`, `AWS_BUCKET`, `AWS_ENDPOINT` or their
+`AWS_PUBLIC_*` counterparts on Cloud. Variables you set yourself take precedence
+over the ones Cloud injects, so they override a working disk with a broken one.
+The trap is that a bucket's real name is the `fls-…` identifier, not the display
+name you typed when creating it — so `AWS_BUCKET=my-bucket-name` points at a
+bucket that does not exist, and R2 answers `AccessDenied` rather than a missing
+bucket. Confirm a disk end to end instead of trusting a write to report success:
+
+```php
+Storage::disk('private')->put('smoke.txt', 'x');   // silent on failure
+```
+
+Both `s3` disks set `'throw' => false`, so a failed write returns `false` rather
+than raising. Read the file back, or build the disk with `'throw' => true`, when
+checking whether storage actually works.
 
 Add the environment's domain to the public bucket's allowed origins if you also
 upload from a local machine; Cloud adds its own domains for you.
