@@ -98,10 +98,11 @@ upload from a local machine; Cloud adds its own domains for you.
 
 ## Queues, cache, and sessions
 
-Horizon only supervises Redis queues, so `QUEUE_CONNECTION` must be `redis`
-against the attached Valkey cache. This mirrors what `compose.yml` already
-overrides — the `database` default in `.env.example` is for a bare local setup,
-not for a deployment that runs Horizon.
+Horizon only supervises Redis queues, so with Horizon `QUEUE_CONNECTION` must be
+`redis` against the attached Valkey cache. This mirrors what `compose.yml`
+already overrides — the `database` default in `.env.example` is for a bare local
+setup, not for a deployment that runs a worker. With managed queues, Cloud sets
+`QUEUE_CONNECTION` itself; leave it alone.
 
 ```ini
 DB_CONNECTION=pgsql
@@ -117,10 +118,51 @@ are attached. If connection counts become a problem, point `DB_HOST` at the
 cluster's pgbouncer endpoint, which is the hostname with `-pooler` appended to
 its first segment.
 
-Run the worker cluster's process as `php artisan horizon`, not `queue:work`;
-`config/horizon.php` owns the queue and balance settings. Set
-`HORIZON_ADMIN_EMAILS` to reach the dashboard, since it denies everyone by
-default outside local.
+There are two ways to actually run the jobs, and they are mutually exclusive.
+
+### Horizon on a worker
+
+The arrangement Relaticle is built for. Run the worker's process as
+`php artisan horizon`, not `queue:work`; `config/horizon.php` owns the
+supervisors, and all three queues keep their own memory ceilings, timeouts and
+autoscaling. Set `HORIZON_ADMIN_EMAILS` to reach the dashboard, which denies
+everyone by default outside local. Leave the `RELATICLE_QUEUE_*` variables alone.
+
+The catch is scale-to-zero: the App cluster stops when the sleep timeout
+elapses even if a job is still running, so an environment that hibernates will
+cut long jobs short.
+
+### Managed queues
+
+Cloud supervises the workers itself, and they scale independently of the App
+cluster — so background work survives the application sleeping. Horizon cannot
+be used at all here: it does not support managed queues, and neither do
+`queue:failed`, `queue:retry` or `queue:clear`. Failed jobs are handled from the
+Queues dashboard.
+
+Creating any managed queue makes Cloud set `QUEUE_CONNECTION=cloud`, and from
+that moment every job dispatched without an explicit connection goes to it. A
+job pinned to a queue that has no managed queue behind it is accepted and then
+never processed, with nothing raised — so the pins have to come off in the same
+breath:
+
+```ini
+RELATICLE_QUEUE_HORIZON=false
+RELATICLE_QUEUE_IMPORTS=
+RELATICLE_QUEUE_CHAT=
+RELATICLE_QUEUE_CHAT_CONNECTION=
+```
+
+Empty values drop the pin and the job falls back to the default queue.
+`RELATICLE_QUEUE_HORIZON=false` also removes the Horizon health check, which
+would otherwise fail against a Horizon that is not running.
+
+Two limits decide whether this is viable for a given plan. The Starter plan
+allows **one** managed queue per environment, which is what forces the pins off
+rather than one managed queue per name. And Flex workers cap a job at **90
+seconds**, while `config/horizon.php` gives imports a 300-second timeout — so
+large imports need a Pro queue, available from the Growth plan up. On Starter,
+expect long imports to be cut off.
 
 ## Broadcasting
 

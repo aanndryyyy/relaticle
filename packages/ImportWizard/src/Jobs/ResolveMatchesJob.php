@@ -23,7 +23,10 @@ final class ResolveMatchesJob implements ShouldQueue
     public function __construct(
         private readonly string $importId,
     ) {
-        $this->onQueue('imports');
+        /** @var string|null $queue */
+        $queue = config('relaticle.queues.imports');
+
+        $this->onQueue($queue);
     }
 
     public function handle(): void

@@ -31,6 +31,12 @@ final class HealthServiceProvider extends ServiceProvider
             return;
         }
 
+        // Both of these watch something a deployment may not have. Horizon is
+        // absent wherever the platform supervises the queues itself, and the
+        // imports queue only exists while the queue split is in effect.
+        $usesHorizon = config('relaticle.queues.horizon') === true;
+        $importsQueue = config('relaticle.queues.imports');
+
         Health::checks([
             DatabaseCheck::new(),
 
@@ -57,14 +63,16 @@ final class HealthServiceProvider extends ServiceProvider
                 ->warnWhenAboveMb(500)
                 ->failWhenAboveMb(1_000),
 
-            HorizonCheck::new(),
+            ...($usesHorizon ? [HorizonCheck::new()] : []),
 
             QueueCheck::new()
                 ->name('Queue: default'),
 
-            QueueCheck::new()
-                ->name('Queue: imports')
-                ->onQueue('imports'),
+            ...(is_string($importsQueue) ? [
+                QueueCheck::new()
+                    ->name('Queue: imports')
+                    ->onQueue($importsQueue),
+            ] : []),
 
             UsedDiskSpaceCheck::new()
                 ->warnWhenUsedSpaceIsAbovePercentage(70)
