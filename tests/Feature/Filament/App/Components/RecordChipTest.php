@@ -78,11 +78,11 @@ function assigneesFilterField(ManageTasks $page): Select
 function pickerLabelText(array $options): array
 {
     return array_values(array_map(
-        fn (string $label): string => trim((string) preg_replace(
-            '/\s+/',
-            ' ',
-            html_entity_decode(strip_tags($label), ENT_QUOTES | ENT_HTML5, 'UTF-8'),
-        )),
+        fn (string $label): string => html_entity_decode(
+            trim((string) preg_replace('/\s+/', ' ', strip_tags($label))),
+            ENT_QUOTES,
+            'UTF-8',
+        ),
         $options,
     ));
 }
@@ -192,6 +192,7 @@ it('loads company logos in one query on the people list', function (): void {
 });
 
 it('renders member chips in the assignees filter and lets the caller order win', function (): void {
+    $this->user->update(['name' => "Sheila O'Kon"]);
     $mate = User::factory()->create(['name' => 'Aaron Ant']);
     $this->workspace->users()->attach($mate, ['role' => 'editor']);
 
@@ -202,7 +203,7 @@ it('renders member chips in the assignees filter and lets the caller order win',
         ->and($field->getOptionLabelFromRecord($this->user))->toContain($this->user->getFilamentAvatarUrl());
 
     expect(pickerLabelText($field->getOptionsFromRelationship()))
-        ->toBe([$this->user->name, 'Aaron Ant']);
+        ->toBe(["Sheila O'Kon", 'Aaron Ant']);
 });
 
 it('falls back to the shared entity icon for a company with no logo', function (): void {

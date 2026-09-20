@@ -16,6 +16,7 @@ declare(strict_types=1);
 
 use App\Models\User;
 use App\Models\Workspace;
+use App\Support\Http\HostResolver;
 use Filament\Actions\Action;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Contracts\Broadcasting\Broadcaster as BroadcasterContract;
@@ -225,4 +226,33 @@ function loginViaBrowser(User $user): AwaitableWebpage
         ->click('button[type="submit"]')
         ->type('[id="form.password"]', 'password')
         ->click('button[type="submit"]');
+}
+
+function pdfBytes(): string
+{
+    return "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n";
+}
+
+function onePixelPng(): string
+{
+    return (string) base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', true);
+}
+
+function signedUrlSignature(string $url): string
+{
+    parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+
+    return (string) ($query['signature'] ?? '');
+}
+
+/** @param list<string> $addresses */
+function resolveHostsTo(array $addresses, int &$calls = 0): void
+{
+    $calls = 0;
+
+    app()->instance(HostResolver::class, new HostResolver(function (string $host) use ($addresses, &$calls): array {
+        $calls++;
+
+        return $addresses;
+    }));
 }

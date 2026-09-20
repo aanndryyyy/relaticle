@@ -8,6 +8,7 @@ use App\Enums\CreationSource;
 use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Support\Facades\DB;
+use Relaticle\Chat\Models\AgentConversationMessage;
 use Relaticle\EmailIntegration\Models\ConnectedAccount;
 
 /**
@@ -75,12 +76,16 @@ final class WorkspaceActivationFacts
         return ConnectedAccount::hasConnectedFor($user, $workspace);
     }
 
+    /**
+     * A user row the person actually typed. The setup greeting and every
+     * resumed turn store their own prompt as a user message, so the step would
+     * otherwise tick itself before the user had said anything.
+     */
     public function hasUserChatMessage(Workspace $workspace): bool
     {
-        return DB::table('agent_conversation_messages as m')
-            ->join('agent_conversations as c', 'c.id', '=', 'm.conversation_id')
-            ->where('c.workspace_id', $workspace->getKey())
-            ->where('m.role', 'user')
+        return AgentConversationMessage::query()
+            ->typed()
+            ->whereRelation('conversation', 'workspace_id', $workspace->getKey())
             ->exists();
     }
 

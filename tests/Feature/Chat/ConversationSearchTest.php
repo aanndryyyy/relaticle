@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Models\Workspace;
 use Illuminate\Support\Facades\DB;
 use Relaticle\Chat\Actions\SearchConversations;
+use Relaticle\Chat\Enums\MessageOrigin;
 use Tests\Helpers\ChatDocument;
 
 mutates(SearchConversations::class);
@@ -95,4 +96,40 @@ it('returns empty for blank query', function (): void {
 
     expect((new SearchConversations)->execute($user, ''))->toBeEmpty();
     expect((new SearchConversations)->execute($user, '   '))->toBeEmpty();
+});
+
+it('does not match a conversation by the opener of a synthetic message', function (): void {
+    $user = User::factory()->withPersonalWorkspace()->create();
+
+    DB::table('agent_conversations')->insert([
+        'id' => 'e',
+        'participant_type' => 'user',
+        'participant_id' => $user->getKey(),
+        'workspace_id' => $user->current_workspace_id,
+        'title' => 'Generic title',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+    DB::table('agent_conversation_messages')->insert([
+        'id' => 'm2',
+        'conversation_id' => 'e',
+        'participant_type' => 'user',
+        'participant_id' => $user->getKey(),
+        'agent' => 'Relaticle\\Chat\\Agents\\CrmAssistant',
+        'role' => 'user',
+        'origin' => MessageOrigin::Resume->value,
+        'content' => MessageOrigin::Resume->opener(),
+        'document' => ChatDocument::emptyJson(),
+        'attachments' => '[]',
+        'tool_calls' => '[]',
+        'tool_results' => '[]',
+        'usage' => '{}',
+        'meta' => '{}',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $hits = (new SearchConversations)->execute($user, 'proposals');
+
+    expect($hits)->toBeEmpty();
 });

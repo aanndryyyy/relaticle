@@ -6,4 +6,5 @@
 
 @source '../../../../app/Filament';
 @source '../../../../resources/views/filament';
+@source '../../../../packages/SystemAdmin/resources/views';
 @source '../../../../vendor/relaticle/custom-fields';

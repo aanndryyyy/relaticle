@@ -11,10 +11,11 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
-use Laravel\Ai\Contracts\ConversationStore;
 use Laravel\Pennant\Feature;
 use Livewire\Livewire;
 use Relaticle\Chat\Actions\ListConversationMessages;
+use Relaticle\Chat\Agents\CrmAssistant;
+use Relaticle\Chat\Enums\MessageOrigin;
 use Relaticle\Chat\Enums\PendingActionOperation;
 use Relaticle\Chat\Enums\PendingActionStatus;
 use Relaticle\Chat\Jobs\ProcessChatMessage;
@@ -26,7 +27,6 @@ use Relaticle\Chat\Services\CreditService;
 use Relaticle\Chat\Services\PendingActionService;
 use Relaticle\Chat\Services\ProposalPlanService;
 use Relaticle\Chat\Services\TurnContinuationService;
-use Relaticle\Chat\Storage\SupersededAwareConversationStore;
 use Tests\Helpers\AnthropicSse;
 
 mutates(TurnContinuationService::class);
@@ -89,9 +89,8 @@ it('resumes the assistant when an approval leaves nothing pending', function ():
 
     Queue::assertPushed(
         ProcessChatMessage::class,
-        fn (ProcessChatMessage $job): bool => $job->isContinuation
-            && $job->conversationId === $this->convId
-            && $job->message === TurnContinuationService::PROMPT,
+        fn (ProcessChatMessage $job): bool => $job->origin === MessageOrigin::Resume
+            && $job->conversationId === $this->convId,
     );
 });
 
@@ -105,7 +104,7 @@ it('resumes after a rejection too, so a discarded card is not a dead end', funct
         ->dispatch('proposal:set-active', id: (string) $proposal->getKey(), context: 'conversation')
         ->call('discardCurrent', resolve(PendingActionService::class));
 
-    Queue::assertPushed(ProcessChatMessage::class, fn (ProcessChatMessage $job): bool => $job->isContinuation);
+    Queue::assertPushed(ProcessChatMessage::class, fn (ProcessChatMessage $job): bool => $job->origin === MessageOrigin::Resume);
 });
 
 it('does not resume while another step of the plan is still pending', function (): void {
@@ -153,11 +152,11 @@ it('hands the resume back when the queued turn finds a step still pending', func
     resolve(ProcessChatMessage::class, [
         'user' => $this->user,
         'workspace' => $this->user->currentWorkspace,
-        'message' => TurnContinuationService::PROMPT,
+        'message' => '',
         'conversationId' => $this->convId,
         'resolved' => resolve(AiModelResolver::class)->resolve($this->user),
         'turnId' => (string) Str::ulid(),
-        'isContinuation' => true,
+        'origin' => MessageOrigin::Resume,
         'resumesTurnId' => $turnId,
     ])->handle(resolve(CreditService::class));
 
@@ -195,10 +194,10 @@ it('charges one credit for the resumed turn', function (): void {
 
 it('hides the resumed turn prompt from the transcript but keeps every other message', function (): void {
     $rows = [
-        ['role' => 'user', 'content' => 'Create a company', 'meta' => '[]'],
-        ['role' => 'assistant', 'content' => 'Review the proposal below.', 'meta' => '{"model": "claude-sonnet-4-6"}'],
-        ['role' => 'user', 'content' => TurnContinuationService::PROMPT, 'meta' => json_encode(['kind' => SupersededAwareConversationStore::CONTINUATION_KIND], JSON_THROW_ON_ERROR)],
-        ['role' => 'assistant', 'content' => 'Created it.', 'meta' => '{"model": "claude-sonnet-4-6"}'],
+        ['role' => 'user', 'content' => 'Create a company', 'origin' => MessageOrigin::Typed],
+        ['role' => 'assistant', 'content' => 'Review the proposal below.', 'origin' => MessageOrigin::Typed],
+        ['role' => 'user', 'content' => MessageOrigin::Resume->opener(), 'origin' => MessageOrigin::Resume],
+        ['role' => 'assistant', 'content' => 'Created it.', 'origin' => MessageOrigin::Typed],
     ];
 
     foreach ($rows as $index => $row) {
@@ -214,7 +213,8 @@ it('hides the resumed turn prompt from the transcript but keeps every other mess
             'tool_calls' => '[]',
             'tool_results' => '[]',
             'usage' => '[]',
-            'meta' => $row['meta'],
+            'meta' => '[]',
+            'origin' => $row['origin']->value,
             'created_at' => now()->addSeconds($index),
             'updated_at' => now()->addSeconds($index),
         ]);
@@ -224,33 +224,7 @@ it('hides the resumed turn prompt from the transcript but keeps every other mess
 
     expect($messages)->toHaveCount(3)
         ->and(array_column($messages, 'role'))->toBe(['user', 'assistant', 'assistant'])
-        ->and(collect($messages)->pluck('content')->implode(' '))->not->toContain('their outcome is in');
-});
-
-it('clears the continuation flag when the resumed turn dies before it stores anything', function (): void {
-    $workspace = $this->user->currentWorkspace;
-    $workspace->forceFill(['plan' => Plan::Pro])->save();
-
-    AnthropicSse::fake(AnthropicSse::TERMINAL_ERROR);
-    Queue::fake();
-
-    $job = new ProcessChatMessage(
-        user: $this->user,
-        workspace: $workspace,
-        message: TurnContinuationService::PROMPT,
-        conversationId: $this->convId,
-        resolved: ['provider' => 'anthropic', 'model' => 'claude-sonnet-4-6', 'id' => 'claude-sonnet-4-6', 'source' => 'auto'],
-        turnId: (string) Str::ulid(),
-        isContinuation: true,
-    );
-
-    try {
-        $job->handle(resolve(CreditService::class));
-    } catch (Throwable) {
-        // The turn dying is the premise; the flag it leaves behind is the subject.
-    }
-
-    expect(resolve(ConversationStore::class)->nextUserMessageIsContinuation)->toBeFalse();
+        ->and(collect($messages)->pluck('content')->implode(' '))->not->toContain(MessageOrigin::Resume->opener());
 });
 
 it('leaves the next job on the worker to store its own question as the user typed it', function (): void {
@@ -274,11 +248,11 @@ it('leaves the next job on the worker to store its own question as the user type
         (new ProcessChatMessage(
             user: $this->user,
             workspace: $workspace,
-            message: TurnContinuationService::PROMPT,
+            message: '',
             conversationId: $this->convId,
             resolved: ['provider' => 'anthropic', 'model' => 'claude-sonnet-4-6', 'id' => 'claude-sonnet-4-6', 'source' => 'auto'],
             turnId: (string) Str::ulid(),
-            isContinuation: true,
+            origin: MessageOrigin::Resume,
         ))->handle(resolve(CreditService::class));
     } catch (Throwable) {
         // Premise, not subject.
@@ -302,9 +276,37 @@ it('leaves the next job on the worker to store its own question as the user type
 
     expect($stored)->not->toBeNull()
         ->and($stored->content)->toContain('Acme')
-        ->and((string) $stored->meta)->not->toContain(SupersededAwareConversationStore::CONTINUATION_KIND);
+        ->and($stored->origin)->toBe(MessageOrigin::Typed->value);
 
     $transcript = resolve(ListConversationMessages::class)->execute($this->user, $this->convId);
 
     expect(collect($transcript)->pluck('content')->implode(' '))->toContain('What did we agree with Acme?');
+});
+
+it('saves a resumed turn as its opener with a resume origin and keeps it out of the transcript', function (): void {
+    $workspace = $this->user->currentWorkspace;
+    $workspace->forceFill(['plan' => Plan::Pro])->save();
+
+    CrmAssistant::fake(['Created it.']);
+    Queue::fake();
+
+    (new ProcessChatMessage(
+        user: $this->user,
+        workspace: $workspace,
+        message: '',
+        conversationId: $this->convId,
+        resolved: ['provider' => 'anthropic', 'model' => 'claude-sonnet-4-6', 'id' => 'claude-sonnet-4-6', 'source' => 'auto'],
+        turnId: (string) Str::ulid(),
+        origin: MessageOrigin::Resume,
+    ))->handle(resolve(CreditService::class));
+
+    $row = DB::table('agent_conversation_messages')
+        ->where('conversation_id', $this->convId)
+        ->where('role', 'user')
+        ->sole();
+
+    expect($row->origin)->toBe(MessageOrigin::Resume->value)
+        ->and($row->content)->toBe(MessageOrigin::Resume->opener())
+        ->and(array_column(resolve(ListConversationMessages::class)->execute($this->user, $this->convId), 'role'))
+        ->toBe(['assistant']);
 });

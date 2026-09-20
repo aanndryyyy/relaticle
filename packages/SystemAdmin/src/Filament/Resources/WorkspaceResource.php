@@ -92,6 +92,8 @@ final class WorkspaceResource extends Resource
             ->components([
                 Select::make('user_id')
                     ->relationship('owner', 'name')
+                    ->disabled(fn (string $operation): bool => $operation === 'edit' && ! auth('sysadmin')->user()?->role->canManageCustomerAccess())
+                    ->dehydrated()
                     ->label('Owner')
                     ->searchable()
                     ->required(),
@@ -104,6 +106,8 @@ final class WorkspaceResource extends Resource
                     ->unique(ignoreRecord: true)
                     ->maxLength(255),
                 Toggle::make('personal_workspace')
+                    ->disabled(fn (string $operation): bool => $operation === 'edit' && ! auth('sysadmin')->user()?->role->canManageCustomerAccess())
+                    ->dehydrated()
                     ->required(),
             ]);
     }
@@ -140,6 +144,14 @@ final class WorkspaceResource extends Resource
                         ->label('Use Case')
                         ->badge()
                         ->placeholder('—'),
+                    TextEntry::make('onboarding_context')
+                        ->label('Use Case Details')
+                        ->badge()
+                        ->formatStateUsing(self::contextLabel(...))
+                        ->placeholder('—'),
+                    TextEntry::make('onboarding_other_use_case')
+                        ->label('What They Track')
+                        ->placeholder('—'),
                     TextEntry::make('onboarding_referral_source')
                         ->label('Referral Source')
                         ->badge()
@@ -154,6 +166,11 @@ final class WorkspaceResource extends Resource
                         ->dateTime(),
                 ])->columnSpanFull()->columns(),
             ]);
+    }
+
+    public static function contextLabel(Workspace $record, string $state): string
+    {
+        return $record->onboarding_use_case?->getSubOptions()[$state] ?? $state;
     }
 
     #[Override]
@@ -195,6 +212,18 @@ final class WorkspaceResource extends Resource
                     ->sortable()
                     ->toggleable()
                     ->placeholder('—'),
+                TextColumn::make('onboarding_context')
+                    ->label('Use Case Details')
+                    ->badge()
+                    ->formatStateUsing(self::contextLabel(...))
+                    ->toggleable(isToggledHiddenByDefault: true)
+                    ->placeholder('—'),
+                TextColumn::make('onboarding_other_use_case')
+                    ->label('What They Track')
+                    ->searchable()
+                    ->wrap()
+                    ->toggleable(isToggledHiddenByDefault: true)
+                    ->placeholder('—'),
                 TextColumn::make('onboarding_referral_source')
                     ->label('Referral')
                     ->badge()
@@ -225,7 +254,7 @@ final class WorkspaceResource extends Resource
             ])
             ->recordActions([
                 ViewAction::make(),
-                EditAction::make(),
+                EditAction::make()->action(null),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([

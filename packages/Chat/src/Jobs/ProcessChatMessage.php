@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Relaticle\Chat\Jobs;
 
+use App\Features\SetupConversation;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Services\Billing\HostedWorkspaceAccess;
@@ -17,9 +18,9 @@ use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\TimeoutExceededException;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
-use Laravel\Ai\Contracts\ConversationStore;
 use Laravel\Ai\Exceptions\ProviderConnectionException;
 use Laravel\Ai\Exceptions\ProviderOverloadedException;
 use Laravel\Ai\Exceptions\RateLimitedException;
@@ -30,13 +31,16 @@ use Laravel\Ai\Streaming\Events\Error;
 use Laravel\Ai\Streaming\Events\StreamEvent;
 use Laravel\Ai\Streaming\Events\TextDelta;
 use Laravel\Ai\Streaming\Events\ToolCall;
+use Laravel\Pennant\Feature;
 use Relaticle\Chat\Agents\CrmAssistant;
 use Relaticle\Chat\Enums\AiCreditType;
+use Relaticle\Chat\Enums\MessageOrigin;
 use Relaticle\Chat\Enums\PendingActionStatus;
 use Relaticle\Chat\Events\ChatStreamFailed;
 use Relaticle\Chat\Events\ChatStreamRetrying;
 use Relaticle\Chat\Events\ConversationResolved;
 use Relaticle\Chat\Events\PendingActionsSuperseded;
+use Relaticle\Chat\Models\AgentConversation;
 use Relaticle\Chat\Models\PendingAction;
 use Relaticle\Chat\Services\AiModelResolver;
 use Relaticle\Chat\Services\CreditService;
@@ -70,6 +74,7 @@ final class ProcessChatMessage implements ShouldQueue
      * @param  list<array{type: string, id: string, label: string}>  $mentions
      * @param  array<string, mixed>  $document
      * @param  array{type: string, id: string, label: string}|null  $pageContext
+     * @param  array{id: string, name: string, row_count: int}|null  $attachment
      */
     public function __construct(
         private readonly User $user,
@@ -82,8 +87,9 @@ final class ProcessChatMessage implements ShouldQueue
         public readonly ?array $pageContext = null,
         public readonly string $turnId = '',
         public readonly int $failoverDepth = 0,
-        public readonly bool $isContinuation = false,
+        public readonly MessageOrigin $origin = MessageOrigin::Typed,
         public readonly ?string $resumesTurnId = null,
+        public readonly ?array $attachment = null,
     ) {
         $this->onConnection('redis-chat');
         $this->onQueue('chat');
@@ -161,7 +167,7 @@ final class ProcessChatMessage implements ShouldQueue
         // between two steps streaming in. WithoutOverlapping only delays this
         // job until the stream ends, so the check has to run again here, where
         // the later steps already exist: continuing now would supersede them.
-        if ($this->isContinuation && resolve(TurnContinuationService::class)->hasPendingProposals($this->conversationId)) {
+        if (! $this->origin->isTyped() && resolve(TurnContinuationService::class)->hasPendingProposals($this->conversationId)) {
             ChatTelemetry::breadcrumb('continuation.aborted', ['reason' => 'pending_proposals']);
 
             // Hand the resume back, or deciding the step that blocked it would
@@ -203,6 +209,8 @@ final class ProcessChatMessage implements ShouldQueue
             $agent->continue($this->conversationId, as: $this->user);
             $agent->withUserTimezone($this->user->timezone);
             $agent->withWorkspace($this->workspace);
+            $agent->withSetupMode($this->isSetupConversation());
+            $agent->withTurnOrigin($this->origin);
             $agent->withCurrentUser([
                 'name' => $this->user->name,
                 'id' => (string) $this->user->getKey(),
@@ -249,18 +257,17 @@ final class ProcessChatMessage implements ShouldQueue
             return;
         }
 
-        // The prompt a resumed turn runs on is ours, not the user's, so the row
-        // it lands in is marked and the transcript leaves it out. Resolved
-        // through the contract because that is what ChatServiceProvider binds
-        // the single shared store instance to; the concrete class would build a
-        // second one and this flag would land on the wrong object.
-        if ($this->isContinuation) {
-            resolve(ConversationStore::class)->nextUserMessageIsContinuation = true;
-        }
+        Context::scope(
+            fn () => $this->streamTurn($agent, $broadcaster, $creditService, $startedAt),
+            hidden: [MessageOrigin::CONTEXT_KEY => $this->origin->value],
+        );
+    }
 
+    private function streamTurn(CrmAssistant $agent, StreamEventBroadcaster $broadcaster, CreditService $creditService, float $startedAt): void
+    {
         try {
             $response = $agent->stream(
-                prompt: $this->message,
+                prompt: $this->origin->opener() ?? $this->message,
                 provider: $this->resolved['provider'],
                 model: $this->resolved['model'],
             );
@@ -344,6 +351,7 @@ final class ProcessChatMessage implements ShouldQueue
 
                 $this->persistMentions();
                 $this->persistUserDocument();
+                $this->persistUserAttachment();
                 $this->materializeAssistantDocument($streamedResponse, $startedAt);
                 $this->maybeTitleFromTurn($streamedResponse);
                 $this->suggestNextSteps($streamedResponse);
@@ -418,8 +426,9 @@ final class ProcessChatMessage implements ShouldQueue
                         pageContext: $this->pageContext,
                         turnId: $this->turnId,
                         failoverDepth: $this->failoverDepth + 1,
-                        isContinuation: $this->isContinuation,
+                        origin: $this->origin,
                         resumesTurnId: $this->resumesTurnId,
+                        attachment: $this->attachment,
                     ));
 
                     return;
@@ -451,15 +460,6 @@ final class ProcessChatMessage implements ShouldQueue
             throw $e;
         } finally {
             $this->releaseAuth();
-
-            // storeUserMessage() consumes this on the happy path, but it only
-            // runs if the stream reaches its then() callback. A turn that dies
-            // first (provider error, release, cancel, failover re-dispatch)
-            // would otherwise leave the flag set on the container singleton,
-            // which queue workers do not rebuild between jobs: the next job on
-            // this worker, any user and any tenant, would have its own question
-            // stored as ours and filtered out of its transcript for good.
-            resolve(ConversationStore::class)->nextUserMessageIsContinuation = false;
         }
     }
 
@@ -536,11 +536,13 @@ final class ProcessChatMessage implements ShouldQueue
 
         resolve(PendingActionService::class)->supersedePendingForConversation($this->conversationId);
 
-        try {
-            $this->persistFailedTurn($exception);
-        } catch (Throwable $e) {
-            report($e);
-            ChatTelemetry::breadcrumb('failed.persist_failed', ['exception' => $e->getMessage()]);
+        if (! $this->opensTheThread()) {
+            try {
+                $this->persistFailedTurn($exception);
+            } catch (Throwable $e) {
+                report($e);
+                ChatTelemetry::breadcrumb('failed.persist_failed', ['exception' => $e->getMessage()]);
+            }
         }
 
         $this->broadcastSafely(new ChatStreamFailed(
@@ -551,6 +553,13 @@ final class ProcessChatMessage implements ShouldQueue
         // Last, after persistFailedTurn: a reload landing mid-failed() must
         // never find the marker gone AND the rows unpersisted at once.
         TurnPresence::clear($this->conversationId, $this->turnId);
+    }
+
+    // A row persisted for a dead greeting satisfies StartSetupGreeting's
+    // empty-thread guard forever, so the thread would never greet again.
+    private function opensTheThread(): bool
+    {
+        return $this->origin === MessageOrigin::Greeting;
     }
 
     private function failureMessage(?Throwable $exception): string
@@ -599,10 +608,17 @@ final class ProcessChatMessage implements ShouldQueue
      * behavior for that one edge case, never a duplicate or a false error
      * note, and are accepted rather than solved with more machinery.
      */
+    /** @return array<string, mixed> */
+    private function failedTurnUserMeta(): array
+    {
+        return $this->attachment === null ? [] : ['attachment' => $this->attachment];
+    }
+
     private function persistFailedTurn(?Throwable $exception): void
     {
         $now = now();
         $table = DB::table('agent_conversation_messages');
+        $content = $this->origin->opener() ?? $this->message;
 
         $lastTwo = $table->clone()
             ->where('conversation_id', $this->conversationId)->latest()
@@ -617,7 +633,7 @@ final class ProcessChatMessage implements ShouldQueue
             && $last->role === 'assistant'
             && $prev !== null
             && $prev->role === 'user'
-            && $prev->content === $this->message;
+            && $prev->content === $content;
 
         if ($turnAlreadyComplete) {
             return;
@@ -625,7 +641,7 @@ final class ProcessChatMessage implements ShouldQueue
 
         $storePersistedUser = $last !== null
             && $last->role === 'user'
-            && $last->content === $this->message;
+            && $last->content === $content;
 
         if (! $storePersistedUser) {
             $table->insert([
@@ -635,13 +651,14 @@ final class ProcessChatMessage implements ShouldQueue
                 'participant_id' => (string) $this->user->getKey(),
                 'agent' => CrmAssistant::class,
                 'role' => 'user',
-                'content' => $this->message,
+                'content' => $content,
                 'attachments' => '[]',
                 'tool_calls' => '[]',
                 'tool_results' => '[]',
                 'usage' => '[]',
-                'meta' => '[]',
+                'meta' => json_encode($this->failedTurnUserMeta(), JSON_THROW_ON_ERROR),
                 'document' => json_encode($this->document, JSON_THROW_ON_ERROR),
+                'origin' => $this->origin->value,
                 'created_at' => $now,
                 'updated_at' => $now,
             ]);
@@ -813,6 +830,27 @@ final class ProcessChatMessage implements ShouldQueue
             ->update(['document' => json_encode($this->document, JSON_THROW_ON_ERROR)]);
     }
 
+    private function persistUserAttachment(): void
+    {
+        if ($this->attachment === null) {
+            return;
+        }
+
+        $latestId = $this->latestMessageId('user');
+
+        if ($latestId === null) {
+            return;
+        }
+
+        $existing = json_decode((string) DB::table('agent_conversation_messages')->where('id', $latestId)->value('meta'), associative: true);
+        $meta = is_array($existing) ? $existing : [];
+        $meta['attachment'] = $this->attachment;
+
+        DB::table('agent_conversation_messages')
+            ->where('id', $latestId)
+            ->update(['meta' => json_encode($meta, JSON_THROW_ON_ERROR)]);
+    }
+
     /**
      * Materialize the assistant's response as a TipTap document on the
      * latest assistant message row. Runs after the agent's ConversationStore
@@ -936,7 +974,7 @@ final class ProcessChatMessage implements ShouldQueue
         dispatch(new SuggestNextSteps(
             conversationId: $this->conversationId,
             messageId: $messageId,
-            message: $this->isContinuation ? '' : $this->message,
+            message: $this->origin->isTyped() ? $this->message : '',
             reply: $reply,
             provider: $this->resolved['provider'],
             toolNames: array_values(array_unique(
@@ -996,5 +1034,17 @@ final class ProcessChatMessage implements ShouldQueue
     private function resolutionKey(): string
     {
         return 'resolve-'.$this->turnId;
+    }
+
+    private function isSetupConversation(): bool
+    {
+        if (! Feature::active(SetupConversation::class)) {
+            return false;
+        }
+
+        return AgentConversation::query()
+            ->whereKey($this->conversationId)
+            ->setup()
+            ->exists();
     }
 }

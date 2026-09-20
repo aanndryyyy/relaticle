@@ -18,6 +18,7 @@ use Filament\Tables\Columns\Column;
 use Filament\Tables\Table;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\View\View;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Database\Eloquent\Model;
@@ -27,14 +28,24 @@ use Illuminate\Session\Middleware\AuthenticateSession;
 use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Route;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
+use Livewire\Component;
+use Livewire\Livewire;
+use Livewire\Mechanisms\HandleComponents\ComponentContext;
 use Relaticle\Ink\InkPlugin;
 use Relaticle\Ink\Models\Category;
 use Relaticle\Ink\Models\Post;
+use Relaticle\SystemAdmin\Auth\RequiredAppAuthentication;
 use Relaticle\SystemAdmin\Filament\Pages\Auth\EditProfile;
 use Relaticle\SystemAdmin\Filament\Pages\Dashboard;
+use Relaticle\SystemAdmin\Http\Controllers\PasskeyLoginController;
+use Relaticle\SystemAdmin\Http\Controllers\PasskeyRegistrationController;
 use Relaticle\SystemAdmin\Http\Middleware\DenySearchIndexing;
+use Relaticle\SystemAdmin\Http\Middleware\IsolateAuthenticationSession;
+use Relaticle\SystemAdmin\Http\Middleware\RequireSecondFactor;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
+use Relaticle\SystemAdmin\Models\SystemAdministratorPasskey;
 use Relaticle\SystemAdmin\Policies\CategoryPolicy;
 use Relaticle\SystemAdmin\Policies\PostPolicy;
 
@@ -65,6 +76,23 @@ final class SystemAdminPanelProvider extends PanelProvider
      */
     private const string DATE_TIME_FORMAT = 'M j, Y H:i:s T';
 
+    public function register(): void
+    {
+        parent::register();
+
+        // Lazy mount-parameter snapshots bypass component lifecycle hooks.
+        Livewire::listen('dehydrate', function (Component $component, ComponentContext $context): void {
+            $context->addMemo('authContext', IsolateAuthenticationSession::context(request()));
+        });
+
+        Livewire::listen('snapshot-verified', function (array $snapshot): void {
+            abort_unless(
+                ($snapshot['memo']['authContext'] ?? null) === IsolateAuthenticationSession::context(request()),
+                419,
+            );
+        });
+    }
+
     public function boot(): void
     {
         $this->loadViewsFrom(__DIR__.'/../resources/views', 'system-admin');
@@ -91,20 +119,27 @@ final class SystemAdminPanelProvider extends PanelProvider
             ? $schema->defaultDateTimeDisplayFormat(self::DATE_TIME_FORMAT)
             : $schema);
 
-        // PostPolicy/CategoryPolicy type-hint SystemAdministrator, and Gate never
-        // checks a policy method's parameter type before calling it, so a caller of
-        // any other type (e.g. a customer's User model, or an MCP token minted for
-        // one) would hit an uncaught TypeError instead of a clean denial now that
-        // the policies above resolve globally. Intercept before Gate reaches them.
+        // Every policy in this package answers for staff only, but Gate never checks a
+        // policy method's parameter type, so a caller of any other type (a customer's
+        // User, or an MCP token minted for one) is answered by whatever the method
+        // returns. Deny those before Gate reaches the policy: while this panel is
+        // current for any of them, and always for the blog models, which resolve
+        // globally and so are reachable with no panel at all.
         Gate::before(function (Authenticatable $user, string $ability, array $arguments = []): ?bool {
-            $target = $arguments[0] ?? null;
-            $modelClass = is_string($target) ? $target : ($target instanceof Model ? $target::class : null);
+            if ($user instanceof SystemAdministrator) {
+                return null;
+            }
 
-            if ($modelClass !== null && array_key_exists($modelClass, self::BLOG_MODEL_POLICIES) && ! $user instanceof SystemAdministrator) {
+            if ($this->isCurrentPanel()) {
                 return false;
             }
 
-            return null;
+            $target = $arguments[0] ?? null;
+            $modelClass = is_string($target) ? $target : ($target instanceof Model ? $target::class : null);
+
+            return $modelClass !== null && array_key_exists($modelClass, self::BLOG_MODEL_POLICIES)
+                ? false
+                : null;
         });
     }
 
@@ -131,6 +166,13 @@ final class SystemAdminPanelProvider extends PanelProvider
             ->login()
             ->profile(EditProfile::class)
             ->emailVerification(isRequired: config('app.require_email_verification'))
+            // A SuperAdministrator password reaches every customer's data and, through
+            // impersonation, a signed-in session as any of them.
+            ->multiFactorAuthentication(
+                RequiredAppAuthentication::make()->recoverable(),
+                isRequired: true,
+            )
+            ->multiFactorAuthenticationRequiredMiddlewareName(RequireSecondFactor::class)
             ->authGuard('sysadmin')
             ->authPasswordBroker('system_administrators')
             ->strictAuthorization()
@@ -184,6 +226,7 @@ final class SystemAdminPanelProvider extends PanelProvider
                 EncryptCookies::class,
                 AddQueuedCookiesToResponse::class,
                 StartSession::class,
+                'auth.context',
                 AuthenticateSession::class,
                 ShareErrorsFromSession::class,
                 PreventRequestForgery::class,
@@ -194,7 +237,35 @@ final class SystemAdminPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 Authenticate::class,
-            ])
+                RequireSecondFactor::class,
+            ], isPersistent: true)
+            ->routes(function () use ($panel): void {
+                Route::prefix('passkeys')
+                    ->name('passkeys.')
+                    ->group(function () use ($panel): void {
+                        Route::get('/login/options', [PasskeyLoginController::class, 'index'])
+                            ->middleware(['guest:sysadmin', 'throttle:passkeys'])
+                            ->name('login-options');
+                        Route::post('/login', [PasskeyLoginController::class, 'store'])
+                            ->middleware(['guest:sysadmin', 'throttle:passkeys'])
+                            ->name('login');
+
+                        // Behind the panel's own stack, so registering a passkey is
+                        // reachable only once the required second factor is enrolled.
+                        Route::get('/options', [PasskeyRegistrationController::class, 'index'])
+                            ->middleware([...$panel->getAuthMiddleware(), 'throttle:passkeys'])
+                            ->name('options');
+                        Route::post('/', [PasskeyRegistrationController::class, 'store'])
+                            ->middleware([...$panel->getAuthMiddleware(), 'throttle:passkeys'])
+                            ->name('store');
+                    });
+            })
+            ->renderHook(
+                PanelsRenderHook::AUTH_LOGIN_FORM_AFTER,
+                fn (): View|string => SystemAdministratorPasskey::hasDedicatedRelyingParty()
+                    ? view('system-admin::auth.passkey-login')
+                    : '',
+            )
             ->renderHook(
                 PanelsRenderHook::AUTH_LOGIN_FORM_BEFORE,
                 fn (): string => Blade::render('@env(\'local\')<x-login-link email="sysadmin@relaticle.com" guard="sysadmin" user-model="'.SystemAdministrator::class.'" redirect-url="'.$this->sysadminHomeUrl().'" />@endenv'),

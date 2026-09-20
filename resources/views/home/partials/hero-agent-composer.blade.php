@@ -1,8 +1,8 @@
 {{-- Static twin of the real composer. Every control below mirrors
      packages/Chat/resources/views/livewire/chat/partials/_composer-bar.blade.php
-     and _composer.blade.php: rounded-2xl container, model picker with a
-     chevron-up-down, the push-to-talk mic, and a ROUND send button that reads
-     gray while the composer is empty. --}}
+     and _composer.blade.php: rounded-2xl container, attach on the lead side,
+     model picker with a chevron-up-down, the push-to-talk mic, and a ROUND
+     send button that reads gray while the composer is empty. --}}
 
 @php
     $heroDockIcons = [
@@ -73,7 +73,7 @@
                 </div>
 
                 <div class="flex min-w-0 items-center gap-2.5 px-4 pb-2.5 pt-1.5" data-proposal-record-chip data-record-type="people">
-                    <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary-600 text-white" aria-hidden="true">
+                    <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary-50 text-primary-600 dark:bg-primary-500/10 dark:text-primary-400" aria-hidden="true">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="h-3.5 w-3.5" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" d="{{ $heroDockIcons['people'] }}"/>
                         </svg>
@@ -131,9 +131,13 @@
                 <span id="hero-composer-cursor" class="hero-composer-cursor inline-block w-px h-4 align-middle bg-primary/60 dark:bg-primary/80 ml-px" aria-hidden="true"></span>
             </div>
 
-            {{-- Controls row: model picker, mic, send. Grouped at the end, same
-                 order and spacing as _composer-bar. --}}
+            {{-- Controls row: attach leads, model picker, mic and send trail,
+                 same order and spacing as _composer-bar. --}}
             <div class="flex items-center gap-2 px-3 pb-2">
+                <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-gray-500 dark:text-gray-400">
+                    <x-heroicon-o-paper-clip class="h-4 w-4" aria-hidden="true"/>
+                </span>
+
                 <div class="ms-auto flex items-center gap-1.5">
                     <span class="inline-flex h-7 items-center gap-1 rounded-md border border-transparent px-2 text-xs font-medium text-gray-600 dark:text-gray-300">
                         <span>Auto</span>

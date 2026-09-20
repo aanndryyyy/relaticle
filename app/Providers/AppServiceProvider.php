@@ -13,6 +13,7 @@ use App\Filament\CustomFields\DateTimeFieldType;
 use App\Filament\CustomFields\RichEditorFieldType;
 use App\Http\Responses\LoginResponse;
 use App\Listeners\Billing\SyncPlanOnStripeSubscriptionChange;
+use App\Listeners\CreateSetupConversationListener;
 use App\Listeners\Email\NewSubscriberListener;
 use App\Listeners\Email\RecordLoginTimestampListener;
 use App\Listeners\Email\WorkspaceCreatedTagListener;
@@ -37,6 +38,7 @@ use App\Policies\EmailPolicy;
 use App\Policies\EmailTemplatePolicy;
 use App\Policies\MeetingPolicy;
 use App\Services\Billing\HostedWorkspaceAccess;
+use App\Services\DiscordService;
 use App\Services\DockerHubService;
 use App\Services\GitHubService;
 use App\Services\WorkspaceActivationFacts;
@@ -45,8 +47,11 @@ use App\Support\ActivityLog\RequestActivityBatch;
 use App\Support\BrandColors;
 use App\Support\CustomFields\CustomFieldInput;
 use App\Support\CustomFields\RecordNameResolver;
+use App\Support\Impersonation\Impersonator;
 use App\Support\Markdown\TableAwareLeagueDriver;
+use App\Support\Media\MediaLookup;
 use App\Support\Migrations\TenantMigration;
+use App\Support\Passport\ClientRepository;
 use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
 use Filament\Auth\Notifications\NoticeOfEmailChangeRequest;
@@ -70,7 +75,10 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\DevCommands;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Request;
+use Illuminate\Log\Context\Repository as ContextRepository;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades;
+use Illuminate\Support\Facades\Context;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -81,6 +89,7 @@ use Knuckles\Scribe\Scribe;
 use Laravel\Cashier\Cashier;
 use Laravel\Cashier\Events\WebhookHandled;
 use Laravel\Jetstream\Events\TeamMemberAdded;
+use Laravel\Passport\ClientRepository as BaseClientRepository;
 use Laravel\Passport\Events\AccessTokenCreated;
 use Laravel\Passport\Passport;
 use Laravel\Sanctum\Sanctum;
@@ -104,7 +113,8 @@ use Relaticle\SystemAdmin\Models\SystemAdministrator;
 use SocialiteProviders\Azure\AzureExtendSocialite;
 use SocialiteProviders\Manager\SocialiteWasCalled;
 use SocialiteProviders\Microsoft\MicrosoftExtendSocialite;
-use Spatie\Activitylog\Facades\Activity as ActivityLogger;
+use Spatie\Activitylog\Contracts\Activity as ActivityContract;
+use Spatie\Activitylog\Support\PendingActivityLog;
 use Spatie\LaravelMarkdown\MarkdownRenderer;
 use Spatie\Onboard\OnboardingSteps;
 
@@ -148,6 +158,7 @@ final class AppServiceProvider extends ServiceProvider
         $this->app->scoped(WorkspaceActivationFacts::class);
 
         $this->app->scoped(RecordNameResolver::class);
+        $this->app->scoped(MediaLookup::class);
 
         // spatie/laravel-onboard binds OnboardingSteps as a SINGLETON, which
         // makes every workspace share one OnboardingStep instance. Its complete()
@@ -174,6 +185,10 @@ final class AppServiceProvider extends ServiceProvider
                 config('markdown-response.driver_options.league.options', []),
             ),
         );
+
+        // Passport self-binds this singleton, and every OAuth endpoint resolves the
+        // client it was handed through it.
+        $this->app->singleton(BaseClientRepository::class, ClientRepository::class);
 
         // The shared MarkdownRenderer always loads HeadingPermalinkExtension, which
         // stamps a docs-site anchor onto every heading regardless of add_anchors_to_headings.
@@ -210,6 +225,7 @@ final class AppServiceProvider extends ServiceProvider
         Event::listen(TeamMemberAdded::class, WorkspaceMemberAddedListener::class);
         Event::listen(WorkspaceCreated::class, WorkspaceCreatedTagListener::class);
         Event::listen(WorkspaceCreated::class, SeedWorkspaceCreditBalanceListener::class);
+        Event::listen(WorkspaceCreated::class, CreateSetupConversationListener::class);
         Event::listen(SocialiteWasCalled::class, MicrosoftExtendSocialite::class);
         Event::listen(SocialiteWasCalled::class, [AzureExtendSocialite::class, 'handle']);
 
@@ -261,7 +277,7 @@ final class AppServiceProvider extends ServiceProvider
         $this->configurePolicies();
         $this->configureModels();
         $this->configureFilament();
-        $this->configureGitHubStars();
+        $this->configureCommunityCounts();
         $this->configureLivewire();
         $this->configureMacros();
         $this->configureRateLimiting();
@@ -316,9 +332,31 @@ final class AppServiceProvider extends ServiceProvider
      */
     private function configureActivityLog(): void
     {
-        ActivityLogger::beforeLogging(function (ActivityModel $activity): void {
+        // The facade resolves authentication before hostname-specific sessions are configured.
+        PendingActivityLog::beforeLogging(function (ActivityContract $activity): void {
+            if (! $activity instanceof ActivityModel) {
+                return;
+            }
+
             if (blank($activity->getAttribute('batch_uuid'))) {
                 $activity->setAttribute('batch_uuid', $this->app->make(RequestActivityBatch::class)->id());
+            }
+
+            // The causer stays the impersonated user because the record is theirs.
+            $administratorId = $this->app->make(Impersonator::class)->administratorId(request())
+                ?? Context::getHidden('impersonated_by');
+
+            if (is_string($administratorId)) {
+                $activity->properties = ($activity->properties ?? new Collection)
+                    ->put('impersonated_by', $administratorId);
+            }
+        });
+
+        Context::dehydrating(function (ContextRepository $context): void {
+            $administratorId = $this->app->make(Impersonator::class)->administratorId(request());
+
+            if ($administratorId !== null) {
+                $context->addHidden('impersonated_by', $administratorId);
             }
         });
 
@@ -330,6 +368,11 @@ final class AppServiceProvider extends ServiceProvider
         Gate::policy(Email::class, EmailPolicy::class);
         Gate::policy(EmailTemplate::class, EmailTemplatePolicy::class);
         Gate::policy(Meeting::class, MeetingPolicy::class);
+
+        // The impersonation routes are plain web routes, so the panel-scoped policy
+        // discovery below never runs for them.
+        Gate::define('impersonate', fn (Authenticatable $account): bool => $account instanceof SystemAdministrator
+            && $account->role->canImpersonate());
 
         Gate::guessPolicyNamesUsing(function (string $modelClass): ?string {
             try {
@@ -480,7 +523,7 @@ final class AppServiceProvider extends ServiceProvider
             $workspace = new Workspace;
             $workspace->forceFill(['id' => 'scribe-workspace-id', 'name' => 'Scribe Workspace', 'user_id' => $user->id, 'personal_workspace' => true]);
             $workspace->setRelation('owner', $user);
-            $workspace->setRelation('users', collect());
+            $workspace->setRelation('users', $user->newCollection());
 
             $user->forceFill(['current_workspace_id' => $workspace->id]);
             $user->setRelation('currentWorkspace', $workspace);
@@ -644,12 +687,9 @@ final class AppServiceProvider extends ServiceProvider
         FilamentAsset::appVersion((string) filemtime(public_path('js/app/rich-editor-slash-menu.js')));
     }
 
-    /**
-     * Configure GitHub stars count.
-     */
-    private function configureGitHubStars(): void
+    private function configureCommunityCounts(): void
     {
-        Facades\View::composer(['components.layout.header', 'home.partials.hero'], function (View $view): void {
+        Facades\View::composer(['components.layout.community-links', 'home.partials.hero'], function (View $view): void {
             $gitHubService = resolve(GitHubService::class);
             $starsCount = $gitHubService->getStarsCount();
             $formattedStarsCount = $gitHubService->getFormattedStarsCount();
@@ -658,6 +698,10 @@ final class AppServiceProvider extends ServiceProvider
                 'githubStars' => $starsCount,
                 'formattedGithubStars' => $formattedStarsCount,
             ]);
+        });
+
+        Facades\View::composer('components.layout.community-links', function (View $view): void {
+            $view->with('formattedDiscordMembers', resolve(DiscordService::class)->getFormattedMemberCount());
         });
 
         Facades\View::composer('home.partials.works-with', function (View $view): void {

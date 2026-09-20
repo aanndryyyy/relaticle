@@ -9,10 +9,14 @@ use App\Enums\SubscriberTagEnum;
 use App\Models\User;
 use App\Models\UserSocialAccount;
 use App\Models\Workspace;
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\Hash;
+use Relaticle\SystemAdmin\Actions\UpdateCustomerRecord;
+use Relaticle\SystemAdmin\Enums\SystemAdministratorRole;
+use Relaticle\SystemAdmin\Filament\Pages\EditCustomerRecord;
 use Relaticle\SystemAdmin\Filament\Resources\UserResource;
 use Relaticle\SystemAdmin\Filament\Resources\UserResource\Pages\CreateUser;
 use Relaticle\SystemAdmin\Filament\Resources\UserResource\Pages\EditUser;
@@ -21,14 +25,109 @@ use Relaticle\SystemAdmin\Filament\Resources\UserResource\Pages\ViewUser;
 use Relaticle\SystemAdmin\Filament\Resources\UserResource\RelationManagers\OwnedWorkspacesRelationManager;
 use Relaticle\SystemAdmin\Filament\Resources\UserResource\RelationManagers\SocialAccountsRelationManager;
 use Relaticle\SystemAdmin\Filament\Resources\UserResource\RelationManagers\WorkspacesRelationManager;
+use Relaticle\SystemAdmin\Filament\Support\Impersonate;
 use Relaticle\SystemAdmin\Models\SystemAdministrator;
 
-mutates(UserResource::class);
+mutates(UpdateCustomerRecord::class, EditCustomerRecord::class, UserResource::class, Impersonate::class);
 
 beforeEach(function (): void {
     $this->actingAs(SystemAdministrator::factory()->create(), 'sysadmin');
     Filament::setCurrentPanel(Filament::getPanel('sysadmin'));
 });
+
+it('rejects administrator changes to customer authentication fields', function (string $field, string $value): void {
+    $this->actingAs(SystemAdministrator::factory()->administrator()->create(), 'sysadmin');
+    $user = User::factory()->unverified()->create();
+    $original = $user->getRawOriginal($field);
+
+    livewire(EditUser::class, ['record' => $user->getKey()])
+        ->set("data.{$field}", $value)
+        ->call('save')
+        ->assertForbidden();
+
+    expect($user->refresh()->getRawOriginal($field))->toBe($original);
+})->with([
+    'email' => ['email', 'controlled@example.test'],
+    'password' => ['password', 'controlled-password'],
+    'email verification' => ['email_verified_at', '2026-09-15 12:00:00'],
+]);
+
+it('lets administrators edit ordinary customer details', function (): void {
+    $this->actingAs(SystemAdministrator::factory()->administrator()->create(), 'sysadmin');
+    $user = User::factory()->create();
+    $originalPassword = $user->password;
+
+    livewire(EditUser::class, ['record' => $user->getKey()])
+        ->fillForm(['name' => 'Updated Customer'])
+        ->call('save')
+        ->assertHasNoFormErrors()
+        ->assertSet('record.name', 'Updated Customer');
+
+    expect($user->refresh()->name)->toBe('Updated Customer')
+        ->and($user->password)->toBe($originalPassword);
+});
+
+it('rejects customer authentication changes after the acting administrator is demoted', function (): void {
+    $actor = SystemAdministrator::factory()->create();
+    $this->actingAs($actor, 'sysadmin');
+    $user = User::factory()->create();
+    $email = $user->email;
+    $component = livewire(EditUser::class, ['record' => $user->getKey()]);
+    SystemAdministrator::query()->whereKey($actor->getKey())->update(['role' => SystemAdministratorRole::Administrator]);
+
+    $component
+        ->set('data.email', 'controlled@example.test')
+        ->call('save')
+        ->assertForbidden();
+
+    expect($user->refresh()->email)->toBe($email);
+});
+
+it('lets super administrators update customer email and verification', function (): void {
+    $user = User::factory()->unverified()->create();
+
+    livewire(EditUser::class, ['record' => $user->getKey()])
+        ->fillForm(['email' => 'updated@example.test', 'email_verified_at' => '2026-09-15 12:00:00'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($user->refresh()->email)->toBe('updated@example.test')
+        ->and($user->email_verified_at)->not->toBeNull();
+});
+
+it('lets administrators create customer accounts', function (): void {
+    $this->actingAs(SystemAdministrator::factory()->administrator()->create(), 'sysadmin');
+
+    livewire(CreateUser::class)
+        ->fillForm([
+            'name' => 'New Customer',
+            'email' => 'new-customer@example.test',
+            'password' => 'creation-password',
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $user = User::query()->where('email', 'new-customer@example.test')->firstOrFail();
+
+    expect(Hash::check('creation-password', $user->password))->toBeTrue();
+});
+
+it('rejects administrator account changes through edit actions', function (string $pageClass): void {
+    $this->actingAs(SystemAdministrator::factory()->administrator()->create(), 'sysadmin');
+    $user = User::factory()->create();
+    $email = $user->email;
+    $action = TestAction::make('edit');
+
+    if ($pageClass === ListUsers::class) {
+        $action->table($user);
+    }
+
+    livewire($pageClass, ['record' => $user->getKey()])
+        ->callAction($action, data: ['email' => 'controlled@example.test'])
+        ->assertHasNoActionErrors();
+
+    expect($user->refresh()->email)->toBe($email);
+})->with([ListUsers::class, ViewUser::class]);
 
 it('saves a user without touching the password when the field is left blank', function (): void {
     $user = User::factory()->create();
@@ -333,4 +432,36 @@ it('lists exactly the users whose engagement badge matches the selected filter',
             ->assertCanSeeTableRecords($matching->values())
             ->assertCanNotSeeTableRecords($users->diff($matching)->values());
     }
+});
+
+it('offers impersonation to super administrators only', function (): void {
+    $user = User::factory()->create();
+
+    livewire(ViewUser::class, ['record' => $user->getKey()])
+        ->assertActionVisible('impersonate');
+
+    livewire(ListUsers::class)
+        ->assertActionVisible(TestAction::make('impersonate')->table($user));
+
+    $this->actingAs(SystemAdministrator::factory()->administrator()->create(), 'sysadmin');
+
+    livewire(ViewUser::class, ['record' => $user->getKey()])
+        ->assertActionHidden('impersonate');
+
+    livewire(ListUsers::class)
+        ->assertActionHidden(TestAction::make('impersonate')->table($user));
+});
+
+it('mints a single-use impersonation link addressed to the app', function (): void {
+    $user = User::factory()->create();
+
+    $link = livewire(ViewUser::class, ['record' => $user->getKey()])
+        ->callAction('impersonate')
+        ->effects['redirect'];
+
+    parse_str((string) parse_url($link, PHP_URL_QUERY), $query);
+
+    expect($link)->toStartWith(url()->getPublicUrl("impersonate/{$user->getKey()}?"))
+        ->and($query)->toHaveKeys(['administrator', 'nonce', 'expires', 'signature'])
+        ->and($query['administrator'])->toBe(Auth::guard('sysadmin')->id());
 });

@@ -55,9 +55,8 @@
                      says how many and in what order they run. --}}
                 <div class="flex shrink-0 items-center gap-2.5 border-b border-gray-100 px-4 py-2.5 dark:border-white/5">
                     {{-- Neutral tile, matching the block headers (records_table,
-                         record_card): the coloured tiles belong to the STEP rows,
-                         where the tint actually distinguishes create from delete.
-                         A second colour on the header competed with them. --}}
+                         record_card): the soft accent belongs to the step rows,
+                         where it marks the record being written. --}}
                     <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gray-100 text-gray-500 dark:bg-white/10 dark:text-gray-400" aria-hidden="true">
                         <x-heroicon-o-queue-list class="h-3.5 w-3.5" />
                     </span>

@@ -11,7 +11,7 @@
         <div
             x-data="activationChecklist()"
             @if ($this->emailSyncProgress !== null) wire:poll.5s="refreshEmailSyncProgress" @endif
-            class="relative px-4 pb-2"
+            class="relative mb-2 border-b border-gray-200 px-4 pb-2 dark:border-white/10"
         >
             {{-- The expanded card floats above the pill rather than pushing the
                  sidebar taller, so opening it never scrolls the nav. --}}
@@ -57,8 +57,6 @@
                             <x-heroicon-m-arrow-down-left class="h-4 w-4" />
                         </button>
 
-                        {{-- Dismiss is the only item, so the menu is what makes it
-                             discoverable without spending a row on it. --}}
                         <div
                             x-show="menu"
                             x-cloak
@@ -73,6 +71,18 @@
                                 <x-heroicon-o-check-circle class="h-4 w-4 flex-shrink-0 text-gray-400" />
                                 <span>{{ __('filament/pages/dashboard.activation.dismiss') }}</span>
                             </button>
+
+                            @if($this->canRemoveSampleData)
+                                <button
+                                    type="button"
+                                    wire:click="removeSampleData"
+                                    wire:confirm="{{ __('filament/pages/dashboard.activation.remove_sample_data_confirm') }}"
+                                    class="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 transition hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-white/5"
+                                >
+                                    <x-heroicon-o-trash class="h-4 w-4 flex-shrink-0 text-gray-400" />
+                                    <span>{{ __('filament/pages/dashboard.activation.remove_sample_data') }}</span>
+                                </button>
+                            @endif
                         </div>
                     </div>
                 </div>

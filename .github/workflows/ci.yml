@@ -247,3 +247,13 @@ jobs:
 
       - name: Browser Tests
         run: vendor/bin/pest tests/Browser/ --configuration phpunit.ci.xml
+
+      - name: Upload browser failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: browser-failure
+          path: |
+            tests/Browser/Screenshots
+            storage/logs
+          if-no-files-found: ignore

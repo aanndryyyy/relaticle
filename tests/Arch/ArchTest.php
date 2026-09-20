@@ -130,10 +130,6 @@ arch('avoid mutation')
         // extension point; PHP forbids a readonly class extending a
         // non-readonly one.
         'App\Http\Controllers\Billing\StripeWebhookController',
-        // Media library resolves this class itself, so it must extend the
-        // generator it replaces; PHP forbids a readonly class extending a
-        // non-readonly one.
-        'App\Support\SameOriginUrlGenerator',
         'App\Http\Requests',
         'App\Http\Resources',
         'App\Jobs',
@@ -150,6 +146,9 @@ arch('avoid mutation')
         // Request-scoped batch_uuid holder, mutable by design (lazily caches the
         // per-request id), like a value cache rather than a service.
         'App\Support\ActivityLog\RequestActivityBatch',
+        // Request-scoped media lookup cache, same shape: filled as list endpoints
+        // prime it, reset per request via the scoped container binding.
+        'App\Support\Media\MediaLookup',
         // Request/job-scoped creation-source cache, same shape as
         // RequestActivityBatch above: mutable by design, reset per request/job
         // via the scoped container binding in AppServiceProvider.
@@ -160,6 +159,15 @@ arch('avoid mutation')
         // Same shape: laravel-markdown-response resolves its detector through an
         // is_a() check against its own class, so extending it is mandatory.
         'App\Support\DetectsPublicMarkdownRequest',
+        // Overrides medialibrary's DefaultPathGenerator, its documented
+        // extension point; PHP forbids a readonly class extending a
+        // non-readonly one.
+        'App\Support\Media\UploadPathGenerator',
+        // Same for DefaultUrlGenerator.
+        'App\Support\Media\MediaUrlGenerator',
+        // Stands in for Passport's own ClientRepository singleton; PHP forbids a
+        // readonly class extending a non-readonly one.
+        'App\Support\Passport\ClientRepository',
         'App\View',
         'App\Services\Favicon\Drivers',
         'App\Providers\Filament',
@@ -183,9 +191,6 @@ arch('avoid inheritance')
         // Overrides Cashier's subscription-created handler so an abandoned
         // checkout does not consume the workspace's generic trial.
         'App\Http\Controllers\Billing\StripeWebhookController',
-        // Overrides the media library's URL generator, the documented seam for
-        // rewriting a media URL, so it must extend the default it replaces.
-        'App\Support\SameOriginUrlGenerator',
         'App\Http\Requests',
         'App\Http\Resources',
         'App\Jobs',
@@ -206,6 +211,14 @@ arch('avoid inheritance')
         // laravel-markdown-response validates the configured detector with
         // is_a($class, DetectsMarkdownRequest::class), so it must extend it.
         'App\Support\DetectsPublicMarkdownRequest',
+        // Overrides medialibrary's DefaultPathGenerator, the package's
+        // documented extension point.
+        'App\Support\Media\UploadPathGenerator',
+        // Same for DefaultUrlGenerator.
+        'App\Support\Media\MediaUrlGenerator',
+        // Rebound over Passport's self-bound ClientRepository singleton, so it must
+        // extend the class every OAuth endpoint type-hints.
+        'App\Support\Passport\ClientRepository',
     ]);
 
 // Packages are kept final by pint (final_class, repo-wide) and strict-typed by

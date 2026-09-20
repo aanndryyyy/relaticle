@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Livewire\App\Onboarding;
 
 use App\Actions\Onboarding\DismissActivationChecklist;
+use App\Actions\Onboarding\RemoveSampleData;
 use App\Data\ActivationStepData;
 use App\Enums\ActivationStep;
 use App\Features\EmailIntegration;
+use App\Filament\Pages\Dashboard;
 use App\Filament\Pages\Workspace\Members;
 use App\Filament\Resources\PeopleResource;
 use App\Models\User;
@@ -50,6 +52,19 @@ final class ActivationChecklist extends Component
     public function refreshEmailSyncProgress(): void
     {
         unset($this->emailSyncProgress);
+    }
+
+    public function removeSampleData(): void
+    {
+        $workspace = $this->workspace();
+
+        if (! $workspace instanceof Workspace) {
+            return;
+        }
+
+        resolve(RemoveSampleData::class)->execute($this->user(), $workspace);
+
+        $this->redirect(request()->header('Referer') ?? Dashboard::getUrl(), navigate: true);
     }
 
     public function render(): View
@@ -229,6 +244,23 @@ final class ActivationChecklist extends Component
         $workspace = $this->workspace();
 
         return $workspace instanceof Workspace && resolve(WorkspaceActivationFacts::class)->hasSampleData($workspace);
+    }
+
+    /**
+     * Own record required: removing samples must never leave the workspace empty.
+     */
+    #[Computed]
+    public function canRemoveSampleData(): bool
+    {
+        $workspace = $this->workspace();
+
+        if (! $workspace instanceof Workspace || ! $this->user()->ownsWorkspace($workspace)) {
+            return false;
+        }
+
+        $facts = resolve(WorkspaceActivationFacts::class);
+
+        return $facts->hasSampleData($workspace) && $facts->hasOwnRecord($workspace);
     }
 
     private function workspace(): ?Workspace

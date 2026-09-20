@@ -6,7 +6,7 @@ use App\Filament\Pages\EditWorkspace;
 use App\Livewire\App\Workspaces\UpdateWorkspaceLogo;
 use App\Models\User;
 use App\Models\Workspace;
-use App\Support\SameOriginUrlGenerator;
+use App\Support\Media\MediaUrlGenerator;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\SpatieMediaLibraryFileUpload;
 use Illuminate\Http\Request;
@@ -14,7 +14,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 
-mutates(UpdateWorkspaceLogo::class, SameOriginUrlGenerator::class);
+mutates(UpdateWorkspaceLogo::class, MediaUrlGenerator::class);
 
 beforeEach(function (): void {
     Storage::fake('public');

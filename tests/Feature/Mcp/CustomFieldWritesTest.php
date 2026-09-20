@@ -2,17 +2,22 @@
 
 declare(strict_types=1);
 
+use App\Enums\MediaCollection;
 use App\Http\Resources\V1\Concerns\FormatsCustomFields;
 use App\Mcp\Servers\RelaticleServer;
 use App\Mcp\Tools\BaseCreateTool;
 use App\Mcp\Tools\BaseUpdateTool;
+use App\Mcp\Tools\Note\CreateNoteTool;
+use App\Mcp\Tools\Note\GetNoteTool;
 use App\Mcp\Tools\Task\CreateTaskTool;
 use App\Mcp\Tools\Task\GetTaskTool;
 use App\Mcp\Tools\Task\ListTasksTool;
 use App\Mcp\Tools\Task\UpdateTaskTool;
+use App\Mcp\Tools\UploadFileTool;
 use App\Models\Company;
 use App\Models\CustomField;
 use App\Models\CustomFieldOption;
+use App\Models\Note;
 use App\Models\Task;
 use App\Models\User;
 use App\Rules\OwnedLookupRecords;
@@ -23,7 +28,9 @@ use App\Support\CustomFields\RecordNameResolver;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Relaticle\CustomFields\Services\TenantContextService;
+use Spatie\MediaLibrary\MediaCollections\Models\Media;
 
 mutates(BaseCreateTool::class, BaseUpdateTool::class, CustomFieldInput::class, CustomFieldOptionMap::class, OwnedLookupRecords::class, ValidCustomFields::class, RecordNameResolver::class, FormatsCustomFields::class);
 
@@ -534,3 +541,67 @@ it('sets then clears a value for every writable custom field type', function (st
     'checkbox-list' => ['checkbox-list', null, 'OPTION_ID_LIST'],
     'record' => ['record', null, null],
 ]);
+
+describe('rich editor images', function (): void {
+    beforeEach(function (): void {
+        Storage::fake('local');
+        $this->body = CustomField::query()
+            ->where('tenant_id', $this->workspace->getKey())
+            ->where('entity_type', 'note')
+            ->where('code', 'body')
+            ->firstOrFail();
+    });
+
+    it('claims an image an agent embedded through the suggested markdown', function (): void {
+        RelaticleServer::actingAs($this->user)
+            ->tool(UploadFileTool::class, ['base64' => base64_encode(onePixelPng()), 'filename' => 'shot.png'])
+            ->assertOk();
+        $media = Media::query()->latest('id')->firstOrFail();
+        $markdown = '![shot]('.route('media.show', ['media' => $media->uuid]).')';
+
+        RelaticleServer::actingAs($this->user)
+            ->tool(CreateNoteTool::class, ['title' => 'Md image', 'custom_fields' => ['body' => "Look:\n\n{$markdown}"]])
+            ->assertOk();
+
+        $note = Note::query()->where('title', 'Md image')->firstOrFail();
+
+        expect($media->refresh()->model_id)->toBe($note->getKey())
+            ->and($media->collection_name)->toBe(MediaCollection::Attachments->value)
+            ->and((string) $note->getCustomFieldValue($this->body))->toContain("data-id=\"{$media->uuid}\"");
+    });
+
+    it('leaves an image another workspace owns untagged and unclaimed', function (): void {
+        $stranger = User::factory()->withPersonalWorkspace()->create()->personalWorkspace();
+        $foreign = $stranger->addMediaFromString(onePixelPng())->usingFileName('theirs.png')
+            ->withAttributes(['workspace_id' => $stranger->getKey()])
+            ->toMediaCollection(MediaCollection::PendingUploads->value);
+
+        RelaticleServer::actingAs($this->user)
+            ->tool(CreateNoteTool::class, ['title' => 'Foreign image', 'custom_fields' => ['body' => "![theirs]({$foreign->getUrl()})"]])
+            ->assertOk();
+
+        $note = Note::query()->where('title', 'Foreign image')->firstOrFail();
+
+        expect((string) $note->getCustomFieldValue($this->body))->not->toContain('data-id=')
+            ->and($foreign->refresh()->collection_name)->toBe(MediaCollection::PendingUploads->value);
+    });
+
+    it('rewrites rich editor image sources on read', function (): void {
+        $this->freezeTime();
+        $media = $this->workspace->addMediaFromString(onePixelPng())->usingFileName('a.png')
+            ->withAttributes(['workspace_id' => $this->workspace->getKey()])
+            ->toMediaCollection(MediaCollection::PendingUploads->value);
+
+        RelaticleServer::actingAs($this->user)
+            ->tool(CreateNoteTool::class, ['title' => 'Img', 'custom_fields' => ['body' => "<p><img src=\"stale\" data-id=\"{$media->uuid}\"></p>"]])
+            ->assertOk();
+        $note = Note::query()->where('title', 'Img')->firstOrFail();
+
+        RelaticleServer::actingAs($this->user)
+            ->tool(GetNoteTool::class, ['id' => $note->getKey()])
+            ->assertOk()
+            ->assertSee('/media/'.$media->uuid)
+            ->assertSee(signedUrlSignature($media->refresh()->getUrl()))
+            ->assertDontSee('stale');
+    });
+});

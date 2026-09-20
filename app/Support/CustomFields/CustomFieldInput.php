@@ -6,6 +6,7 @@ namespace App\Support\CustomFields;
 
 use App\Enums\CustomFieldType;
 use App\Models\CustomField;
+use App\Support\Media\RichContentAttachments;
 use Illuminate\Validation\ValidationException;
 use Relaticle\CustomFields\Facades\CustomFieldsType;
 use Spatie\LaravelMarkdown\MarkdownRenderer;
@@ -63,7 +64,7 @@ final readonly class CustomFieldInput
             CustomFieldType::TOGGLE_BUTTONS => $this->singleOption($field, $value, $entry),
             CustomFieldType::MULTI_SELECT,
             CustomFieldType::CHECKBOX_LIST => $this->optionList($field, $value, $entry),
-            CustomFieldType::RICH_EDITOR => $this->richText($value),
+            CustomFieldType::RICH_EDITOR => $this->richText($field, $value),
             CustomFieldType::TEXT,
             CustomFieldType::NUMBER,
             CustomFieldType::EMAIL,
@@ -153,17 +154,15 @@ final readonly class CustomFieldInput
         ]));
     }
 
-    private function richText(mixed $value): mixed
+    private function richText(CustomField $field, mixed $value): mixed
     {
         if (! is_string($value)) {
             return $value;
         }
 
-        if (str_starts_with(ltrim($value), '<')) {
-            return $value;
-        }
+        $html = str_starts_with(ltrim($value), '<') ? $value : $this->markdown->toHtml($value);
 
-        return $this->markdown->toHtml($value);
+        return RichContentAttachments::forWorkspace((string) $field->tenant_id)->canonicalize($html);
     }
 
     private function isBlankString(mixed $value): bool

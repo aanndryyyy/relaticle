@@ -133,29 +133,27 @@
         </div>
     </div>
 
-    {{-- Decided proposal, collapsed to one line: the dock's identity folded flat
-         (operation-tinted entity tile, bold record label), then the record link
-         and the Details disclosure. No record pill here -- chips are reserved
-         for inline clickable references. --}}
+    {{-- Decided proposal, collapsed to one line: record chip, outcome, and the
+         Details disclosure. No record pill here -- chips are reserved for
+         inline clickable references. --}}
     <div class="mcp-el mcp-audit-card my-3 w-full overflow-hidden rounded-xl border border-[var(--surface-block-border)] bg-[var(--surface-block-bg)]" aria-hidden="true">
-        <div class="group relative flex items-center gap-3 px-4 py-3.5">
-            <span class="relative flex min-w-0 flex-1 items-center gap-3">
-                <span class="flex min-w-0 items-center gap-2.5" data-proposal-record-chip data-record-type="task">
-                    <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-amber-500 text-white" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="h-3.5 w-3.5" aria-hidden="true">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="{{ $heroChipIcons['task'] }}"/>
-                        </svg>
-                    </span>
-                    <span class="min-w-0 truncate text-sm font-semibold leading-5 text-gray-900 dark:text-white">Schedule demo with Kovra Systems</span>
-                </span>
-                <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-400">
-                    <x-heroicon-o-arrow-top-right-on-square class="h-3.5 w-3.5"/>
+        <div class="group relative flex items-center gap-2.5 px-4 py-2.5">
+            <span class="relative flex min-w-0 flex-1 items-center gap-2">
+                <span class="chat-chip min-w-0" data-proposal-record-chip data-record-type="task">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="{{ $heroChipIcons['task'] }}"/>
+                    </svg>
+                    <span class="chat-chip-label">Schedule demo with Kovra Systems</span>
                 </span>
             </span>
 
-            <span class="relative inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-micro font-medium text-gray-400">
-                <span>Details</span>
-                <x-heroicon-o-chevron-down class="h-3 w-3"/>
+            <span class="relative inline-flex shrink-0 items-center gap-1.5 text-micro font-medium text-gray-500 dark:text-gray-400">
+                <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500"></span>
+                <span>Done</span>
+            </span>
+
+            <span class="relative inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-400">
+                <x-heroicon-o-chevron-down class="h-3.5 w-3.5"/>
             </span>
         </div>
     </div>
@@ -173,10 +171,9 @@
 </div>
 
 {{-- ── Exchange 3: create a contact, also gated by review ──
-     Creates are proposals too (see CreatePersonTool: "Propose creating a new
-     person/contact. Returns a proposal for user approval."), so this exchange
-     must NOT show a write landing unattended. It resolves into the same decided
-     row + record card the real transcript renders. --}}
+     Creates are proposals too (CreatePersonTool returns a proposal for
+     approval), so this exchange must NOT show a write landing unattended. It
+     resolves into the same decided row + record card the real transcript renders. --}}
 <div class="mcp-el mcp-user mcp-user-3 flex justify-end">
     <div class="max-w-[85%] [overflow-wrap:anywhere] break-words rounded-2xl rounded-br-md bg-gray-100 px-4 py-2.5 text-sm leading-relaxed text-gray-900 dark:bg-white/10 dark:text-gray-100">
         Add Sarah Chen as a contact at <span class="chat-chip" data-record-type="company"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="{{ $heroChipIcons['company'] }}"/></svg><span class="chat-chip-label">Kovra Systems</span></span>. She's VP of Engineering.
@@ -192,26 +189,24 @@
         </div>
     </div>
 
-    {{-- Decided create, same one-line shape as exchange 2 with the create tone. --}}
     <div class="mcp-el mcp-create-card my-3 w-full overflow-hidden rounded-xl border border-[var(--surface-block-border)] bg-[var(--surface-block-bg)]" aria-hidden="true">
-        <div class="group relative flex items-center gap-3 px-4 py-3.5">
-            <span class="relative flex min-w-0 flex-1 items-center gap-3">
-                <span class="flex min-w-0 items-center gap-2.5" data-proposal-record-chip data-record-type="people">
-                    <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary-600 text-white" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="h-3.5 w-3.5" aria-hidden="true">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="{{ $heroChipIcons['people'] }}"/>
-                        </svg>
-                    </span>
-                    <span class="min-w-0 truncate text-sm font-semibold leading-5 text-gray-900 dark:text-white">Sarah Chen</span>
-                </span>
-                <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-400">
-                    <x-heroicon-o-arrow-top-right-on-square class="h-3.5 w-3.5"/>
+        <div class="group relative flex items-center gap-2.5 px-4 py-2.5">
+            <span class="relative flex min-w-0 flex-1 items-center gap-2">
+                <span class="chat-chip min-w-0" data-proposal-record-chip data-record-type="people">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="{{ $heroChipIcons['people'] }}"/>
+                    </svg>
+                    <span class="chat-chip-label">Sarah Chen</span>
                 </span>
             </span>
 
-            <span class="relative inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-micro font-medium text-gray-400">
-                <span>Details</span>
-                <x-heroicon-o-chevron-down class="h-3 w-3"/>
+            <span class="relative inline-flex shrink-0 items-center gap-1.5 text-micro font-medium text-gray-500 dark:text-gray-400">
+                <span class="h-1.5 w-1.5 shrink-0 rounded-full bg-green-500"></span>
+                <span>Created</span>
+            </span>
+
+            <span class="relative inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-400">
+                <x-heroicon-o-chevron-down class="h-3.5 w-3.5"/>
             </span>
         </div>
     </div>

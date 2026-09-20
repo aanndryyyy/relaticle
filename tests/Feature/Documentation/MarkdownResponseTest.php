@@ -39,12 +39,12 @@ it('decodes html entities instead of leaking double-escaped ampersands', functio
         'api.github.com/*' => Http::response(['stargazers_count' => 42], 200),
     ]);
 
-    $markdown = $this->get('/', ['Accept' => 'text/markdown'])
+    $markdown = $this->get('/press', ['Accept' => 'text/markdown'])
         ->assertOk()
         ->getContent();
 
-    expect($markdown)->toContain('Import & Export')
-        ->and($markdown)->not->toContain('Import &amp; Export');
+    expect($markdown)->toContain('Press Kit & Facts')
+        ->and($markdown)->not->toContain('Press Kit &amp; Facts');
 });
 
 it('declares Vary: Accept on both variants of a content-negotiated route', function (): void {

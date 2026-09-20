@@ -40,12 +40,10 @@
     >
         @livewire(\App\Livewire\App\Onboarding\ActivationChecklist::class)
 
-        <div class="border-t border-gray-200 pt-2 dark:border-white/10">
-            <a href="{{ \App\Filament\Pages\Workspace\Members::getUrl() }}" class="{{ $rowClasses }}">
-                <x-heroicon-o-user-plus class="h-5 w-5 flex-shrink-0 text-gray-400 dark:text-gray-500" />
-                <span class="truncate">{{ __('filament/pages/dashboard.activation.invite_members') }}</span>
-            </a>
-        </div>
+        <a href="{{ \App\Filament\Pages\Workspace\Members::getUrl() }}" class="{{ $rowClasses }}">
+            <x-heroicon-o-user-plus class="h-5 w-5 flex-shrink-0 text-gray-400 dark:text-gray-500" />
+            <span class="truncate">{{ __('filament/pages/dashboard.activation.invite_members') }}</span>
+        </a>
 
         @if($billing !== null)
             {{-- The whole row is the target, not just a button at its end: the

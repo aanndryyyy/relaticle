@@ -47,6 +47,7 @@ use Relaticle\ImportWizard\Models\Import;
 use Relaticle\ImportWizard\Store\ImportRow;
 use Relaticle\ImportWizard\Store\ImportStore;
 use Relaticle\ImportWizard\Support\EntityLinkStorage\EntityLinkStorageInterface;
+use Spatie\Activitylog\Support\CauserResolver;
 
 #[Backoff([10, 30])]
 #[Timeout(300)]
@@ -144,21 +145,23 @@ final class ExecuteImportJob implements ShouldQueue
         ];
 
         try {
-            $store->query()
-                ->where('processed', false)
-                ->orderBy('row_number')
-                ->chunkById(500, function (Collection $rows) use ($importer, $fieldMappings, $allowedKeys, $customFieldDefs, $customFieldFormatMap, $matchField, $matchSourceColumn, $context, &$results, $store, $import): void {
-                    $existingRecords = $this->preloadExistingRecords($rows, $importer);
+            resolve(CauserResolver::class)->withCauser($import->user, function () use ($store, $importer, $fieldMappings, $allowedKeys, $customFieldDefs, $customFieldFormatMap, $matchField, $matchSourceColumn, $context, &$results, $import): void {
+                $store->query()
+                    ->where('processed', false)
+                    ->orderBy('row_number')
+                    ->chunkById(500, function (Collection $rows) use ($importer, $fieldMappings, $allowedKeys, $customFieldDefs, $customFieldFormatMap, $matchField, $matchSourceColumn, $context, &$results, $store, $import): void {
+                        $existingRecords = $this->preloadExistingRecords($rows, $importer);
 
-                    foreach ($rows as $row) {
-                        $this->processRow($row, $importer, $fieldMappings, $allowedKeys, $customFieldDefs, $customFieldFormatMap, $matchField, $matchSourceColumn, $context, $results, $existingRecords);
-                        $this->flushProcessedRows($store);
-                    }
-                    $this->flushCustomFieldValues();
-                    $this->flushTagOptions();
-                    $this->flushFailedRows($import);
-                    $this->persistResults($import, $results);
-                });
+                        foreach ($rows as $row) {
+                            $this->processRow($row, $importer, $fieldMappings, $allowedKeys, $customFieldDefs, $customFieldFormatMap, $matchField, $matchSourceColumn, $context, $results, $existingRecords);
+                            $this->flushProcessedRows($store);
+                        }
+                        $this->flushCustomFieldValues();
+                        $this->flushTagOptions();
+                        $this->flushFailedRows($import);
+                        $this->persistResults($import, $results);
+                    });
+            });
 
             $import->update([
                 'status' => ImportStatus::Completed,

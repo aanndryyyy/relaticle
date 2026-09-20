@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Enums\CreationSource;
+use App\Enums\MediaCollection;
 use App\Models\Concerns\BelongsToWorkspaceCreator;
 use App\Models\Concerns\HasActivityTimeline;
 use App\Models\Concerns\HasCreator;
 use App\Models\Concerns\HasNotes;
 use App\Models\Concerns\HasWorkspace;
 use App\Observers\OpportunityObserver;
+use App\Support\Media\UploadAllowlist;
 use Carbon\CarbonImmutable;
 use Database\Factories\OpportunityFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -29,6 +31,8 @@ use Relaticle\EmailIntegration\Models\Concerns\HasMeetings;
 use Spatie\Activitylog\Models\Concerns\LogsActivity;
 use Spatie\Activitylog\Support\LogOptions;
 use Spatie\EloquentSortable\SortableTrait;
+use Spatie\MediaLibrary\HasMedia;
+use Spatie\MediaLibrary\InteractsWithMedia;
 
 /**
  * @property CarbonImmutable|null $deleted_at
@@ -50,7 +54,7 @@ use Spatie\EloquentSortable\SortableTrait;
     'inbound_email_count',
     'outbound_email_count',
 ])]
-final class Opportunity extends Model implements HasCustomFields, HasTimeline
+final class Opportunity extends Model implements HasCustomFields, HasMedia, HasTimeline
 {
     use BelongsToWorkspaceCreator;
     use HasActivityTimeline;
@@ -64,6 +68,7 @@ final class Opportunity extends Model implements HasCustomFields, HasTimeline
     use HasNotes;
     use HasUlids;
     use HasWorkspace;
+    use InteractsWithMedia;
     use LogsActivity;
     use SoftDeletes;
     use SortableTrait;
@@ -113,6 +118,12 @@ final class Opportunity extends Model implements HasCustomFields, HasTimeline
     public function tasks(): MorphToMany
     {
         return $this->morphToMany(Task::class, 'taskable');
+    }
+
+    public function registerMediaCollections(): void
+    {
+        $this->addMediaCollection(MediaCollection::Attachments->value)
+            ->acceptsMimeTypes(UploadAllowlist::mimeTypes());
     }
 
     public function getActivitylogOptions(): LogOptions
