@@ -68,6 +68,7 @@ use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Http\Request;
 use Illuminate\Log\Context\Repository as ContextRepository;
 use Illuminate\Support\Collection;
@@ -113,6 +114,15 @@ final class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         Date::use(CarbonImmutable::class);
+
+        // bootstrap/app.php cannot set these: its middleware closure runs
+        // before the config is loaded. Until the TLS-terminating proxy is
+        // trusted, X-Forwarded-Proto is ignored and every generated route URL
+        // comes out as http on an https site.
+        /** @var string|list<string> $trustedProxies */
+        $trustedProxies = config('relaticle.trusted_proxies');
+
+        TrustProxies::at($trustedProxies);
 
         $this->app->bind(\Filament\Auth\Http\Responses\Contracts\LoginResponse::class, LoginResponse::class);
         $this->app->bind(\Filament\Actions\Exports\Models\Export::class, Export::class);

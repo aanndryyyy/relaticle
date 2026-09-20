@@ -167,6 +167,27 @@ seconds**, while `config/horizon.php` gives imports a 300-second timeout — so
 large imports need a Pro queue, available from the Growth plan up. On Starter,
 expect long imports to be cut off.
 
+## Trusted proxies
+
+Cloud terminates TLS on a proxy in front of the application, and the default
+trusted ranges only cover a reverse proxy on the same private network. Until
+that proxy is trusted, `X-Forwarded-Proto` is ignored and `$request->isSecure()`
+stays false, so every URL built from a route comes out as `http` on an `https`
+site. Assets still look right, because those are built from `APP_URL` — what
+breaks is Livewire's endpoint, which the browser then blocks as mixed content.
+The panels render and no request ever completes.
+
+```ini
+TRUSTED_PROXIES=*
+```
+
+`*` believes whatever `X-Forwarded-For` arrives, which is safe here only
+because the container cannot be reached except through Cloud's proxy, and that
+proxy sets the header itself. Somewhere the application is reachable directly,
+the same setting lets a client claim any address it likes, and Relaticle's
+pre-authentication throttling is keyed on the client address. List the proxies
+explicitly on such a platform.
+
 ## Broadcasting
 
 Relaticle broadcasts over Reverb, which needs a WebSockets cluster of its own on

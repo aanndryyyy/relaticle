@@ -73,16 +73,8 @@ return Application::configure(basePath: dirname(__DIR__))
             fn (Request $request): bool => $request->is('chat') || $request->is('chat/*'),
         ]);
 
-        $middleware->trustProxies(at: [
-            '127.0.0.0/8',
-            '10.0.0.0/8',
-            '172.16.0.0/12',
-            '192.168.0.0/16',
-            '169.254.0.0/16',
-            '::1/128',
-            'fc00::/7',
-            'fe80::/10',
-        ]);
+        // Trusted proxies are set from config in AppServiceProvider: this
+        // closure runs before the config is loaded, so it cannot read them.
 
         $middleware->prepend(SubdomainRootResponse::class);
 
