@@ -3,10 +3,8 @@ import Pusher from 'pusher-js';
 
 window.Pusher = Pusher;
 
-// A deployment without a Reverb server has no app key, and Pusher throws on
-// construction when it is missing -- an uncaught error early in the bundle,
-// which takes the rest of the page's scripts with it. Consumers already treat
-// a missing window.Echo as "no realtime", so leave it unset instead.
+// Pusher throws on construction when the key is missing, which would take the
+// rest of the bundle with it. Consumers already handle a missing window.Echo.
 const key = import.meta.env.VITE_REVERB_APP_KEY;
 
 if (key) {

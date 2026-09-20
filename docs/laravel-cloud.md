@@ -1,10 +1,10 @@
 # Deploying on Laravel Cloud
 
-Laravel Cloud runs Relaticle from this repository rather than from `compose.yml`.
-The Dockerfile, the five services it composes, and `bin/` are not used. Each one
-maps onto a Cloud resource instead, and the sections below go through that
-mapping, the environment variables it needs, and the two things it does not
-cover.
+Laravel Cloud runs Relaticle from this repository rather than from
+`compose.yml`. The Dockerfile, the five services it composes, and `bin/` are
+not used. Each one maps onto a Cloud resource instead, and the sections below
+go through that mapping, the environment variables it needs, and the two things
+it does not cover.
 
 Nothing here changes how Relaticle runs anywhere else. Every variable this
 document introduces defaults to the single-server behaviour when it is unset.
@@ -30,26 +30,26 @@ that were actually deployed and exercised, not an estimate.
 | Resource | Minimum | Notes |
 | --- | --- | --- |
 | Application compute | `flex-512mb`, 1 replica | Scheduler enabled on this instance. |
-| Serverless Postgres | dev preset, 0.25–0.25 CU | Version 17 or later. Suspends after 300s idle. |
+| Serverless Postgres | dev preset, 0.25 CU | Version 17 or later. Suspends after 300s idle. |
 | Laravel Valkey | `valkey-flex-250mb` | Eviction policy `noeviction`. See below. |
-| Private bucket | — | Attached as the environment's default disk. |
-| Public bucket | — | Separate bucket: one bucket carries one visibility. |
+| Private bucket | n/a | Attached as the environment's default disk. |
+| Public bucket | n/a | Separate bucket: one bucket carries one visibility. |
 | A queue worker | one of two shapes | Horizon on a worker, or a managed queue. |
 | WebSockets | optional | Only the chat assistant's live streaming needs it. |
 
 The self-hosting guide asks for 2 GB of RAM, but that figure covers the whole
 `compose.yml` stack. On Cloud the database and cache are separate resources, so
 the application container itself runs in 512 MiB. Node, PHP and the package
-manager are detected from the repository — PHP 8.5, Node 24 and pnpm — and need
-no configuration.
+manager are detected from the repository: PHP 8.5, Node 24 and pnpm. None of
+them need configuration.
 
 `noeviction` matters when Valkey is also backing the queue: any other policy
 lets Redis discard keys under memory pressure, and queued jobs are keys.
 
 **WebSockets are the one always-on resource.** Everything else here scales to
-zero — compute hibernates, Postgres suspends, a Flex queue worker idles at zero.
-A Reverb cluster is provisioned capacity billed on concurrent connections, and
-it keeps accruing charges until the cluster is deleted; detaching it is not
+zero: compute hibernates, Postgres suspends, and a Flex queue worker idles at
+zero. A Reverb cluster is provisioned capacity billed on concurrent connections,
+and it keeps accruing charges until the cluster is deleted. Detaching it is not
 enough. Broadcasting is used by seven events, all of them in `packages/Chat`, so
 an environment that does not need live assistant streaming can leave it out
 entirely and set `BROADCAST_CONNECTION=log`.
@@ -87,12 +87,12 @@ So attach two buckets.
 
 Attaching a bucket asks for a disk name, and Cloud then builds that disk itself,
 credentials and all, and adds it to `config/filesystems.php` at runtime. So both
-buckets are wired by attaching them and naming the two disks — no `AWS_*`
+buckets are wired by attaching them and naming the two disks. No `AWS_*`
 variables are set by hand, and the `s3`/`s3_public` disks in this repository are
 for S3 deployments off Cloud.
 
 **A private bucket, attached as the environment's default disk, disk name
-`private`.** It backs pending uploads and media library files — everything that
+`private`.** It backs pending uploads and media library files: everything that
 must not be reachable by URL. Signed `/media/{uuid}` routes serve these to the
 browser. Livewire's temporary uploads follow it too, because
 `LIVEWIRE_TEMPORARY_FILE_UPLOAD_DISK` is unset and Livewire then falls back to
@@ -115,10 +115,11 @@ FILAMENT_FILESYSTEM_DISK=public
 Do not set `AWS_ACCESS_KEY_ID`, `AWS_BUCKET`, `AWS_ENDPOINT` or their
 `AWS_PUBLIC_*` counterparts on Cloud. Variables you set yourself take precedence
 over the ones Cloud injects, so they override a working disk with a broken one.
-The trap is that a bucket's real name is the `fls-…` identifier, not the display
-name you typed when creating it — so `AWS_BUCKET=my-bucket-name` points at a
-bucket that does not exist, and R2 answers `AccessDenied` rather than a missing
-bucket. Confirm a disk end to end instead of trusting a write to report success:
+The trap is that a bucket's real name is the `fls-…` identifier, not the
+display name you typed when creating it. `AWS_BUCKET=my-bucket-name` therefore
+points at a bucket that does not exist, and R2 answers `AccessDenied` rather
+than a missing bucket. Confirm a disk end to end instead of trusting a write to
+report success:
 
 ```php
 Storage::disk('private')->put('smoke.txt', 'x');   // silent on failure
@@ -135,7 +136,7 @@ upload from a local machine; Cloud adds its own domains for you.
 
 Horizon only supervises Redis queues, so with Horizon `QUEUE_CONNECTION` must be
 `redis` against the attached Valkey cache. This mirrors what `compose.yml`
-already overrides — the `database` default in `.env.example` is for a bare local
+already overrides. The `database` default in `.env.example` is for a bare local
 setup, not for a deployment that runs a worker. With managed queues, Cloud sets
 `QUEUE_CONNECTION` itself; leave it alone.
 
@@ -161,7 +162,8 @@ The arrangement Relaticle is built for. Run the worker's process as
 `php artisan horizon`, not `queue:work`; `config/horizon.php` owns the
 supervisors, and all three queues keep their own memory ceilings, timeouts and
 autoscaling. Set `HORIZON_ADMIN_EMAILS` to reach the dashboard, which denies
-everyone by default outside local. Leave the `RELATICLE_QUEUE_*` variables alone.
+everyone by default outside local. Leave the `RELATICLE_QUEUE_*` variables
+alone.
 
 The catch is scale-to-zero: the App cluster stops when the sleep timeout
 elapses even if a job is still running, so an environment that hibernates will
@@ -170,7 +172,7 @@ cut long jobs short.
 ### Managed queues
 
 Cloud supervises the workers itself, and they scale independently of the App
-cluster — so background work survives the application sleeping. Horizon cannot
+cluster, so background work survives the application sleeping. Horizon cannot
 be used at all here: it does not support managed queues, and neither do
 `queue:failed`, `queue:retry` or `queue:clear`. Failed jobs are handled from the
 Queues dashboard.
@@ -178,8 +180,8 @@ Queues dashboard.
 Creating any managed queue makes Cloud set `QUEUE_CONNECTION=cloud`, and from
 that moment every job dispatched without an explicit connection goes to it. A
 job pinned to a queue that has no managed queue behind it is accepted and then
-never processed, with nothing raised — so the pins have to come off in the same
-breath:
+never processed, with nothing raised. The pins therefore have to come off at the
+same time:
 
 ```ini
 RELATICLE_QUEUE_HORIZON=false
@@ -195,9 +197,9 @@ would otherwise fail against a Horizon that is not running.
 Two limits decide whether this is viable for a given plan. The Starter plan
 allows **one** managed queue per environment, which is what forces the pins off
 rather than one managed queue per name. And Flex workers cap a job at **90
-seconds**, while `config/horizon.php` gives imports a 300-second timeout — so
-large imports need a Pro queue, available from the Growth plan up. On Starter,
-expect long imports to be cut off.
+seconds**, while `config/horizon.php` gives imports a 300-second timeout. Large
+imports therefore need a Pro queue, which the Growth plan and above offer. On
+Starter, expect long imports to be cut off.
 
 ## Trusted proxies
 
@@ -207,8 +209,8 @@ invisible until you try to log in.
 Cloud terminates TLS on a proxy in front of the application, well outside the
 private ranges a same-network reverse proxy arrives from. The framework already
 knows this: `TrustProxies` trusts the calling IP when it finds `LARAVEL_CLOUD`
-set in the environment — but only if the application has not named its own
-proxies, because an explicit list takes precedence over that detection.
+set in the environment. That fallback applies only when the application has not
+named its own proxies, because an explicit list takes precedence over it.
 
 So `bootstrap/app.php` passes the list only when it is not running on Cloud.
 Naming the private ranges there anyway would suppress the detection,
@@ -223,7 +225,7 @@ which is safe here only because the container cannot be reached except through
 Cloud's proxy, and that proxy sets the header itself. On a platform where the
 application is reachable directly, the same trust would let a client claim any
 address it likes, and Relaticle's pre-authentication throttling is keyed on the
-client address — so there, list the proxies explicitly instead.
+client address. List the proxies explicitly on such a platform.
 
 ## Broadcasting
 
@@ -236,7 +238,7 @@ are read at build time, which means the environment has to be redeployed after
 attaching before the front end knows about it.
 
 `BROADCAST_CONNECTION=reverb` without a cluster behind it does not degrade
-quietly — it fails the **build**, while `php artisan event:clear` boots the
+quietly. It fails the **build**: `php artisan event:clear` boots the
 application and reaches `Broadcast::channel()` in
 `packages/Chat/routes/channels.php`. Deleting a cluster therefore means setting
 `BROADCAST_CONNECTION` back to `log` in the same breath, or the next deploy
@@ -273,7 +275,7 @@ legacy files finds nothing to migrate. Run it before the move, or upload the old
    variables.
 4. Set the deploy command; the build command is already correct.
 5. Enable the scheduler on the application instance, and add either a worker
-   running `php artisan horizon` or a managed queue — not both.
+   running `php artisan horizon` or a managed queue, never both.
 6. Deploy. Migrations run as a deploy command, so the first deploy builds the
    schema.
 7. Create the first administrator with `php artisan sysadmin:create`, which
@@ -281,7 +283,7 @@ legacy files finds nothing to migrate. Run it before the move, or upload the old
    on its own guard and model.
 
 Confirm storage before trusting it. The `s3` disks carry `'throw' => false`, so
-a failed write returns `false` silently — read the file back:
+a failed write returns `false` silently. Read the file back:
 
 ```php
 Storage::disk('private')->put('smoke.txt', 'x');

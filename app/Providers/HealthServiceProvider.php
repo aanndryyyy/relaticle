@@ -31,9 +31,8 @@ final class HealthServiceProvider extends ServiceProvider
             return;
         }
 
-        // Both of these watch something a deployment may not have. Horizon is
-        // absent wherever the platform supervises the queues itself, and the
-        // imports queue only exists while the queue split is in effect.
+        // Horizon is absent wherever the platform supervises the queues, and
+        // the imports queue only exists while the split is in effect.
         $usesHorizon = config('relaticle.queues.horizon') === true;
         $importsQueue = config('relaticle.queues.imports');
 
