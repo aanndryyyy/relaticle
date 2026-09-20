@@ -30,7 +30,10 @@ final class ValidateColumnJob implements ShouldQueue
         private readonly string $importId,
         private readonly ColumnData $column,
     ) {
-        $this->onQueue('imports');
+        /** @var string|null $queue */
+        $queue = config('relaticle.queues.imports');
+
+        $this->onQueue($queue);
     }
 
     public function handle(): void

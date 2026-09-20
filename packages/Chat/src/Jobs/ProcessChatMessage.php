@@ -91,8 +91,13 @@ final class ProcessChatMessage implements ShouldQueue
         public readonly ?string $resumesTurnId = null,
         public readonly ?array $attachment = null,
     ) {
-        $this->onConnection('redis-chat');
-        $this->onQueue('chat');
+        /** @var string|null $connection */
+        $connection = config('relaticle.queues.chat_connection');
+        /** @var string|null $queue */
+        $queue = config('relaticle.queues.chat');
+
+        $this->onConnection($connection);
+        $this->onQueue($queue);
         $this->afterCommit = true;
     }
 

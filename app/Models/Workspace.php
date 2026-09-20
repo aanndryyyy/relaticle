@@ -399,7 +399,7 @@ final class Workspace extends Model implements HasAvatar, HasMedia, Onboardable
         $this->addMediaCollection(self::LOGO_MEDIA_COLLECTION)
             ->acceptsMimeTypes(self::LOGO_MIME_TYPES)
             ->singleFile()
-            ->useDisk('public');
+            ->useDisk((string) config('relaticle.storage.public_disk'));
 
         $this->addMediaCollection(MediaCollection::PendingUploads->value)
             ->acceptsMimeTypes(UploadAllowlist::mimeTypes());

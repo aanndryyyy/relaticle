@@ -73,7 +73,9 @@ return Application::configure(basePath: dirname(__DIR__))
             fn (Request $request): bool => $request->is('chat') || $request->is('chat/*'),
         ]);
 
-        $middleware->trustProxies(at: [
+        // Naming any proxy suppresses the framework's own Cloud detection:
+        // TrustProxies falls back to '*' only when no list is set at all.
+        $middleware->trustProxies(at: laravel_cloud() ? null : [
             '127.0.0.0/8',
             '10.0.0.0/8',
             '172.16.0.0/12',

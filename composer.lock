@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "f40fbdf86d45350965000974354863b2",
+    "content-hash": "63bc78fcebb8ecb603d35835070792d3",
     "packages": [
         {
             "name": "andreiio/blade-remix-icon",
@@ -316,16 +316,16 @@
         },
         {
             "name": "aws/aws-sdk-php",
-            "version": "3.395.3",
+            "version": "3.395.6",
             "source": {
                 "type": "git",
                 "url": "https://github.com/aws/aws-sdk-php.git",
-                "reference": "22f2bce297541ae41ca9e03207032ede4e805ad4"
+                "reference": "f88c98a1d678c8b26dab0385af485eb7e2a22bf6"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/aws/aws-sdk-php/zipball/22f2bce297541ae41ca9e03207032ede4e805ad4",
-                "reference": "22f2bce297541ae41ca9e03207032ede4e805ad4",
+                "url": "https://api.github.com/repos/aws/aws-sdk-php/zipball/f88c98a1d678c8b26dab0385af485eb7e2a22bf6",
+                "reference": "f88c98a1d678c8b26dab0385af485eb7e2a22bf6",
                 "shasum": ""
             },
             "require": {
@@ -407,9 +407,9 @@
             "support": {
                 "forum": "https://github.com/aws/aws-sdk-php/discussions",
                 "issues": "https://github.com/aws/aws-sdk-php/issues",
-                "source": "https://github.com/aws/aws-sdk-php/tree/3.395.3"
+                "source": "https://github.com/aws/aws-sdk-php/tree/3.395.6"
             },
-            "time": "2026-09-15T18:07:56+00:00"
+            "time": "2026-09-18T18:54:36+00:00"
         },
         {
             "name": "bacon/bacon-qr-code",
@@ -5336,6 +5336,61 @@
                 "source": "https://github.com/thephpleague/flysystem/tree/3.36.0"
             },
             "time": "2026-09-02T08:00:27+00:00"
+        },
+        {
+            "name": "league/flysystem-aws-s3-v3",
+            "version": "3.35.3",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/thephpleague/flysystem-aws-s3-v3.git",
+                "reference": "b03780cb97585ee7e48977f40ed599b33b751634"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/thephpleague/flysystem-aws-s3-v3/zipball/b03780cb97585ee7e48977f40ed599b33b751634",
+                "reference": "b03780cb97585ee7e48977f40ed599b33b751634",
+                "shasum": ""
+            },
+            "require": {
+                "aws/aws-sdk-php": "^3.371.5",
+                "league/flysystem": "^3.10.0",
+                "league/mime-type-detection": "^1.0.0",
+                "php": "^8.0.2"
+            },
+            "conflict": {
+                "guzzlehttp/guzzle": "<7.0",
+                "guzzlehttp/ringphp": "<1.1.1"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "League\\Flysystem\\AwsS3V3\\": ""
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Frank de Jonge",
+                    "email": "info@frankdejonge.nl"
+                }
+            ],
+            "description": "AWS S3 filesystem adapter for Flysystem.",
+            "keywords": [
+                "Flysystem",
+                "aws",
+                "file",
+                "files",
+                "filesystem",
+                "s3",
+                "storage"
+            ],
+            "support": {
+                "source": "https://github.com/thephpleague/flysystem-aws-s3-v3/tree/3.35.3"
+            },
+            "time": "2026-08-08T16:19:23+00:00"
         },
         {
             "name": "league/flysystem-local",

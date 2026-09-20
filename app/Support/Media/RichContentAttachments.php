@@ -50,7 +50,7 @@ final readonly class RichContentAttachments implements FileAttachmentProvider
             return null;
         }
 
-        $disk = Storage::disk('public');
+        $disk = Storage::disk((string) config('relaticle.storage.public_disk'));
 
         return $disk->exists($file) ? $disk->url($file) : null;
     }

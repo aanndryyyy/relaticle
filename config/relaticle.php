@@ -67,4 +67,52 @@ return [
         'setup_conversation' => (bool) env('RELATICLE_FEATURE_SETUP_CONVERSATION', true),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Storage Disks
+    |--------------------------------------------------------------------------
+    |
+    | Uploads split into two classes. Logos and legacy rich-editor images are
+    | served straight to the browser, so they live on the public disk. Pending
+    | uploads are staged before they become media and must never be reachable
+    | by URL, so they live on the private disk.
+    |
+    | The defaults reproduce the single-server layout. A deployment running
+    | more than one application replica, or one with an ephemeral filesystem
+    | such as Laravel Cloud, must point both at object storage: a request that
+    | stages an upload on one replica is finished by another, and a local disk
+    | does not survive a deploy. See docs/laravel-cloud.md.
+    |
+    */
+
+    'storage' => [
+        'public_disk' => (string) env('FILESYSTEM_PUBLIC_DISK', 'public'),
+        'private_disk' => (string) env('FILESYSTEM_PRIVATE_DISK', 'local'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Queue Routing
+    |--------------------------------------------------------------------------
+    |
+    | Imports and chat run on their own queues so that a long import cannot
+    | starve ordinary work, and config/horizon.php gives each its own
+    | supervisor, memory ceiling and timeout. Chat additionally runs on its own
+    | Redis connection.
+    |
+    | A platform that offers fewer queues than that cannot honour the split.
+    | Setting any of these to an empty value drops the pin, and the job falls
+    | back to the default connection and queue. Horizon is then no longer the
+    | thing running the queues either, so 'horizon' below turns off the health
+    | check that watches it. See docs/laravel-cloud.md.
+    |
+    */
+
+    'queues' => [
+        'horizon' => (bool) env('RELATICLE_QUEUE_HORIZON', true),
+        'imports' => env('RELATICLE_QUEUE_IMPORTS', 'imports') ?: null,
+        'chat' => env('RELATICLE_QUEUE_CHAT', 'chat') ?: null,
+        'chat_connection' => env('RELATICLE_QUEUE_CHAT_CONNECTION', 'redis-chat') ?: null,
+    ],
+
 ];

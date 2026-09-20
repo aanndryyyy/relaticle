@@ -4,6 +4,24 @@ declare(strict_types=1);
 
 use Illuminate\Support\Str;
 
+// The same names the jobs pin themselves to in config/relaticle.php: a
+// supervisor on a queue nothing dispatches to watches an empty queue.
+$importsQueue = env('RELATICLE_QUEUE_IMPORTS', 'imports') ?: 'default';
+$chatQueue = env('RELATICLE_QUEUE_CHAT', 'chat') ?: 'default';
+$chatConnection = env('RELATICLE_QUEUE_CHAT_CONNECTION', 'redis-chat') ?: 'redis';
+
+// Unpinning collapses these keys onto redis:default, so only add one that
+// names a queue of its own rather than overwriting the default's threshold.
+$waits = ['redis:default' => 60];
+
+if ($importsQueue !== 'default') {
+    $waits['redis:'.$importsQueue] = 120;
+}
+
+if ($chatConnection.':'.$chatQueue !== 'redis:default') {
+    $waits[$chatConnection.':'.$chatQueue] = 30;
+}
+
 return [
 
     /*
@@ -85,11 +103,7 @@ return [
     |
     */
 
-    'waits' => [
-        'redis:default' => 60,
-        'redis:imports' => 120,
-        'redis-chat:chat' => 30,
-    ],
+    'waits' => $waits,
 
     /*
     |--------------------------------------------------------------------------
@@ -225,7 +239,7 @@ return [
         ],
         'supervisor-imports' => [
             'connection' => 'redis',
-            'queue' => ['imports'],
+            'queue' => [$importsQueue],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             'maxProcesses' => 20,
@@ -279,7 +293,7 @@ return [
             ],
             'supervisor-imports' => [
                 'connection' => 'redis',
-                'queue' => ['imports'],
+                'queue' => [$importsQueue],
                 'balance' => 'auto',
                 'maxProcesses' => 15,
                 'minProcesses' => 3,
@@ -291,8 +305,8 @@ return [
                 'nice' => 0,
             ],
             'chat-supervisor' => [
-                'connection' => 'redis-chat',
-                'queue' => ['chat'],
+                'connection' => $chatConnection,
+                'queue' => [$chatQueue],
                 'balance' => 'auto',
                 'autoScalingStrategy' => 'time',
                 'minProcesses' => env('HORIZON_CHAT_MIN', 1),
@@ -321,8 +335,8 @@ return [
                 'maxProcesses' => 2,
             ],
             'chat-supervisor' => [
-                'connection' => 'redis-chat',
-                'queue' => ['chat'],
+                'connection' => $chatConnection,
+                'queue' => [$chatQueue],
                 'balance' => 'auto',
                 'autoScalingStrategy' => 'time',
                 'minProcesses' => env('HORIZON_CHAT_MIN', 1),

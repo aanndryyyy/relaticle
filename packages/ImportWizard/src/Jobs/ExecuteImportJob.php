@@ -91,7 +91,10 @@ final class ExecuteImportJob implements ShouldQueue
         private readonly string $importId,
         private readonly string $workspaceId,
     ) {
-        $this->onQueue('imports');
+        /** @var string|null $queue */
+        $queue = config('relaticle.queues.imports');
+
+        $this->onQueue($queue);
     }
 
     /** @return list<FailOnException> */
