@@ -46,15 +46,39 @@ return [
             'throw' => false,
         ],
 
+        // Laravel Cloud injects AWS_ENDPOINT_URL and AWS_REGION for the bucket it
+        // attaches as the default disk; the Laravel skeleton reads AWS_ENDPOINT and
+        // AWS_DEFAULT_REGION. Accept either so an attached bucket works untouched.
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),
             'secret' => env('AWS_SECRET_ACCESS_KEY'),
-            'region' => env('AWS_DEFAULT_REGION'),
+            'region' => env('AWS_DEFAULT_REGION', env('AWS_REGION')),
             'bucket' => env('AWS_BUCKET'),
             'url' => env('AWS_URL'),
-            'endpoint' => env('AWS_ENDPOINT'),
+            'endpoint' => env('AWS_ENDPOINT', env('AWS_ENDPOINT_URL')),
             'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+            'throw' => false,
+        ],
+
+        /*
+         * Second bucket for browser-readable uploads, kept separate because a
+         * Cloudflare R2 bucket carries one visibility for every object in it and
+         * cannot mix public and private files. Credentials are set by hand: only
+         * the default bucket is injected automatically.
+         *
+         * No 'visibility' key here. R2 rejects per-object ACL headers with a
+         * NotImplemented error; the bucket itself is what grants public reads.
+         */
+        's3_public' => [
+            'driver' => 's3',
+            'key' => env('AWS_PUBLIC_ACCESS_KEY_ID'),
+            'secret' => env('AWS_PUBLIC_SECRET_ACCESS_KEY'),
+            'region' => env('AWS_PUBLIC_DEFAULT_REGION', env('AWS_DEFAULT_REGION')),
+            'bucket' => env('AWS_PUBLIC_BUCKET'),
+            'url' => env('AWS_PUBLIC_URL'),
+            'endpoint' => env('AWS_PUBLIC_ENDPOINT'),
+            'use_path_style_endpoint' => env('AWS_PUBLIC_USE_PATH_STYLE_ENDPOINT', false),
             'throw' => false,
         ],
 

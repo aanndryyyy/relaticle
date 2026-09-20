@@ -59,7 +59,7 @@ final class BackfillRichEditorAttachmentsCommand extends Command
 
     private function migrateValue(CustomFieldValue $value, bool $write): int
     {
-        $public = Storage::disk('public');
+        $public = Storage::disk((string) config('relaticle.storage.public_disk'));
         $migrated = 0;
         $html = (string) $value->text_value;
 

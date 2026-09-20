@@ -103,7 +103,8 @@ final class Company extends Model implements HasAvatar, HasCustomFields, HasMedi
 
     public function registerMediaCollections(): void
     {
-        $this->addMediaCollection(self::LOGO_MEDIA_COLLECTION)->useDisk('public');
+        $this->addMediaCollection(self::LOGO_MEDIA_COLLECTION)
+            ->useDisk((string) config('relaticle.storage.public_disk'));
 
         $this->addMediaCollection(MediaCollection::Attachments->value)
             ->acceptsMimeTypes(UploadAllowlist::mimeTypes());
