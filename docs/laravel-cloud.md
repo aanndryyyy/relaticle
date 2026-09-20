@@ -88,8 +88,7 @@ So attach two buckets.
 Attaching a bucket asks for a disk name, and Cloud then builds that disk itself,
 credentials and all, and adds it to `config/filesystems.php` at runtime. So both
 buckets are wired by attaching them and naming the two disks. No `AWS_*`
-variables are set by hand, and the `s3`/`s3_public` disks in this repository are
-for S3 deployments off Cloud.
+variables are set by hand.
 
 **A private bucket, attached as the environment's default disk, disk name
 `private`.** It backs pending uploads and media library files: everything that
@@ -125,7 +124,7 @@ report success:
 Storage::disk('private')->put('smoke.txt', 'x');   // silent on failure
 ```
 
-Both `s3` disks set `'throw' => false`, so a failed write returns `false` rather
+Cloud's disks set `'throw' => false`, so a failed write returns `false` rather
 than raising. Read the file back, or build the disk with `'throw' => true`, when
 checking whether storage actually works.
 
@@ -282,8 +281,8 @@ legacy files finds nothing to migrate. Run it before the move, or upload the old
    reaches the `/sysadmin` panel. `make:filament-user` does not: that panel runs
    on its own guard and model.
 
-Confirm storage before trusting it. The `s3` disks carry `'throw' => false`, so
-a failed write returns `false` silently. Read the file back:
+Confirm storage before trusting it. These disks carry `'throw' => false`, so a
+failed write returns `false` silently. Read the file back:
 
 ```php
 Storage::disk('private')->put('smoke.txt', 'x');

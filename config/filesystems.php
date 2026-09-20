@@ -58,20 +58,6 @@ return [
             'throw' => false,
         ],
 
-        // A second bucket, because an S3 bucket carries one visibility for all
-        // of its objects. No 'visibility' key: R2 rejects per-object ACLs.
-        's3_public' => [
-            'driver' => 's3',
-            'key' => env('AWS_PUBLIC_ACCESS_KEY_ID'),
-            'secret' => env('AWS_PUBLIC_SECRET_ACCESS_KEY'),
-            'region' => env('AWS_PUBLIC_DEFAULT_REGION', env('AWS_DEFAULT_REGION')),
-            'bucket' => env('AWS_PUBLIC_BUCKET'),
-            'url' => env('AWS_PUBLIC_URL'),
-            'endpoint' => env('AWS_PUBLIC_ENDPOINT'),
-            'use_path_style_endpoint' => env('AWS_PUBLIC_USE_PATH_STYLE_ENDPOINT', false),
-            'throw' => false,
-        ],
-
     ],
 
     /*
