@@ -22,6 +22,38 @@ document introduces defaults to the single-server behaviour when it is unset.
 | `AUTORUN_LARAVEL_MIGRATION` | A deploy command. See [Commands](#commands). |
 | Reverse proxy TLS | Automatic, and required: passkeys do not work without it. |
 
+## Minimum infrastructure
+
+Six resources, and one of them is optional. The sizes below are the smallest
+that were actually deployed and exercised, not an estimate.
+
+| Resource | Minimum | Notes |
+| --- | --- | --- |
+| Application compute | `flex-512mb`, 1 replica | Scheduler enabled on this instance. |
+| Serverless Postgres | dev preset, 0.25–0.25 CU | Version 17 or later. Suspends after 300s idle. |
+| Laravel Valkey | `valkey-flex-250mb` | Eviction policy `noeviction`. See below. |
+| Private bucket | — | Attached as the environment's default disk. |
+| Public bucket | — | Separate bucket: one bucket carries one visibility. |
+| A queue worker | one of two shapes | Horizon on a worker, or a managed queue. |
+| WebSockets | optional | Only the chat assistant's live streaming needs it. |
+
+The self-hosting guide asks for 2 GB of RAM, but that figure covers the whole
+`compose.yml` stack. On Cloud the database and cache are separate resources, so
+the application container itself runs in 512 MiB. Node, PHP and the package
+manager are detected from the repository — PHP 8.5, Node 24 and pnpm — and need
+no configuration.
+
+`noeviction` matters when Valkey is also backing the queue: any other policy
+lets Redis discard keys under memory pressure, and queued jobs are keys.
+
+**WebSockets are the one always-on resource.** Everything else here scales to
+zero — compute hibernates, Postgres suspends, a Flex queue worker idles at zero.
+A Reverb cluster is provisioned capacity billed on concurrent connections, and
+it keeps accruing charges until the cluster is deleted; detaching it is not
+enough. Broadcasting is used by seven events, all of them in `packages/Chat`, so
+an environment that does not need live assistant streaming can leave it out
+entirely and set `BROADCAST_CONNECTION=log`.
+
 ## Commands
 
 Build:
@@ -216,11 +248,26 @@ legacy files finds nothing to migrate. Run it before the move, or upload the old
 
 ## First deploy
 
-1. Create the application from this repository and pick the branch.
-2. Attach Serverless Postgres, Valkey, and the two buckets.
-3. Set the variables above. Cloud generates `APP_KEY`; set `APP_ENV=production`,
-   `APP_DEBUG=false`, and `APP_URL` to the environment's URL.
-4. Set the build and deploy commands.
-5. Enable scheduled tasks and add the Horizon worker.
+1. Create the application from this repository and pick the branch. PHP, Node
+   and the package manager are detected; the build command is pre-filled.
+2. Attach Serverless Postgres and Valkey, and attach both buckets, naming their
+   disks `private` and `public`. The private one is the default disk.
+3. Set the variables above, plus `TRUSTED_PROXIES=*`, `APP_ENV=production`,
+   `APP_DEBUG=false` and `APP_URL`. Cloud generates `APP_KEY`. Set no `AWS_*`
+   variables.
+4. Set the deploy command; the build command is already correct.
+5. Enable the scheduler on the application instance, and add either a worker
+   running `php artisan horizon` or a managed queue — not both.
 6. Deploy. Migrations run as a deploy command, so the first deploy builds the
    schema.
+7. Create the first administrator with `php artisan sysadmin:create`, which
+   reaches the `/sysadmin` panel. `make:filament-user` does not: that panel runs
+   on its own guard and model.
+
+Confirm storage before trusting it. The `s3` disks carry `'throw' => false`, so
+a failed write returns `false` silently — read the file back:
+
+```php
+Storage::disk('private')->put('smoke.txt', 'x');
+Storage::disk('private')->get('smoke.txt');   // must return 'x'
+```
