@@ -73,8 +73,25 @@ return Application::configure(basePath: dirname(__DIR__))
             fn (Request $request): bool => $request->is('chat') || $request->is('chat/*'),
         ]);
 
-        // Trusted proxies are set from config in AppServiceProvider: this
-        // closure runs before the config is loaded, so it cannot read them.
+        // These ranges cover a reverse proxy on the same network, which is the
+        // compose.yml layout and the one the self-hosting guide describes.
+        //
+        // A managed platform terminates TLS further out, and naming any proxy
+        // here suppresses the framework's own detection of it: TrustProxies
+        // only falls back to trusting the calling IP when no list is set at
+        // all. Leaving the list unset there is what keeps X-Forwarded-Proto
+        // believed, and without it every generated route URL comes out as http
+        // on an https site.
+        $middleware->trustProxies(at: laravel_cloud() ? null : [
+            '127.0.0.0/8',
+            '10.0.0.0/8',
+            '172.16.0.0/12',
+            '192.168.0.0/16',
+            '169.254.0.0/16',
+            '::1/128',
+            'fc00::/7',
+            'fe80::/10',
+        ]);
 
         $middleware->prepend(SubdomainRootResponse::class);
 

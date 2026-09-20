@@ -201,34 +201,50 @@ expect long imports to be cut off.
 
 ## Trusted proxies
 
-Cloud terminates TLS on a proxy in front of the application, and the default
-trusted ranges only cover a reverse proxy on the same private network. Until
-that proxy is trusted, `X-Forwarded-Proto` is ignored and `$request->isSecure()`
-stays false, so every URL built from a route comes out as `http` on an `https`
-site. Assets still look right, because those are built from `APP_URL` — what
-breaks is Livewire's endpoint, which the browser then blocks as mixed content.
-The panels render and no request ever completes.
+Nothing to configure, but worth understanding, because getting it wrong is
+invisible until you try to log in.
 
-```ini
-TRUSTED_PROXIES=*
-```
+Cloud terminates TLS on a proxy in front of the application, well outside the
+private ranges a same-network reverse proxy arrives from. The framework already
+knows this: `TrustProxies` trusts the calling IP when it finds `LARAVEL_CLOUD`
+set in the environment — but only if the application has not named its own
+proxies, because an explicit list takes precedence over that detection.
 
-`*` believes whatever `X-Forwarded-For` arrives, which is safe here only
-because the container cannot be reached except through Cloud's proxy, and that
-proxy sets the header itself. Somewhere the application is reachable directly,
-the same setting lets a client claim any address it likes, and Relaticle's
-pre-authentication throttling is keyed on the client address. List the proxies
-explicitly on such a platform.
+So `bootstrap/app.php` passes the list only when it is not running on Cloud.
+Naming the private ranges there anyway would suppress the detection,
+`X-Forwarded-Proto` would be ignored, and `$request->isSecure()` would stay
+false. Assets would still look right, because those come from `APP_URL`. What
+breaks is Livewire's endpoint, which is then generated as `http` and blocked by
+the browser as mixed content: the panel renders and no request it makes ever
+completes. WebAuthn fails the same origin check, so passkeys stop working too.
+
+Trusting the calling IP means believing whatever `X-Forwarded-For` arrives,
+which is safe here only because the container cannot be reached except through
+Cloud's proxy, and that proxy sets the header itself. On a platform where the
+application is reachable directly, the same trust would let a client claim any
+address it likes, and Relaticle's pre-authentication throttling is keyed on the
+client address — so there, list the proxies explicitly instead.
 
 ## Broadcasting
 
 Relaticle broadcasts over Reverb, which needs a WebSockets cluster of its own on
-Cloud. Until one is attached, set `BROADCAST_CONNECTION=log`. Leaving it on
-`reverb` with no reachable host makes queued jobs throw when they broadcast.
+Cloud. Until one is attached, set `BROADCAST_CONNECTION=log`.
 
-With a cluster attached, set `REVERB_*` from its credentials and
-`REVERB_SCHEME=https`. Note that scale-to-zero and long-lived WebSocket
-connections work against each other: an environment that sleeps drops them.
+Attaching a cluster injects every `REVERB_*` variable, including the
+`VITE_REVERB_*` ones the browser client needs, so nothing is set by hand. Those
+are read at build time, which means the environment has to be redeployed after
+attaching before the front end knows about it.
+
+`BROADCAST_CONNECTION=reverb` without a cluster behind it does not degrade
+quietly — it fails the **build**, while `php artisan event:clear` boots the
+application and reaches `Broadcast::channel()` in
+`packages/Chat/routes/channels.php`. Deleting a cluster therefore means setting
+`BROADCAST_CONNECTION` back to `log` in the same breath, or the next deploy
+cannot complete. Detaching the WebSocket application on its own is not the
+problem; the stale connection name is.
+
+Scale-to-zero and long-lived WebSocket connections also work against each
+other: an environment that sleeps drops them.
 
 ## Known limitations
 
@@ -252,7 +268,7 @@ legacy files finds nothing to migrate. Run it before the move, or upload the old
    and the package manager are detected; the build command is pre-filled.
 2. Attach Serverless Postgres and Valkey, and attach both buckets, naming their
    disks `private` and `public`. The private one is the default disk.
-3. Set the variables above, plus `TRUSTED_PROXIES=*`, `APP_ENV=production`,
+3. Set the variables above, plus `APP_ENV=production`,
    `APP_DEBUG=false` and `APP_URL`. Cloud generates `APP_KEY`. Set no `AWS_*`
    variables.
 4. Set the deploy command; the build command is already correct.

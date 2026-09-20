@@ -2,44 +2,7 @@
 
 declare(strict_types=1);
 
-$trustedProxies = env('TRUSTED_PROXIES');
-
 return [
-
-    /*
-    |--------------------------------------------------------------------------
-    | Trusted Proxies
-    |--------------------------------------------------------------------------
-    |
-    | Which proxies may be believed about the original request. The default
-    | covers the private ranges a reverse proxy on the same network arrives
-    | from, which is the compose.yml layout.
-    |
-    | A managed platform terminates TLS on a proxy outside those ranges. Until
-    | it is trusted, X-Forwarded-Proto is ignored, every generated route URL
-    | comes out as http on an https site, and the browser blocks Livewire's
-    | endpoint as mixed content -- which locks you out of the panels while the
-    | page otherwise looks fine. Set TRUSTED_PROXIES to '*' there, or to a
-    | comma-separated list. See docs/laravel-cloud.md.
-    |
-    */
-
-    'trusted_proxies' => match (true) {
-        $trustedProxies === '*' => '*',
-        is_string($trustedProxies) && $trustedProxies !== '' => array_values(array_filter(
-            array_map(trim(...), explode(',', $trustedProxies)),
-        )),
-        default => [
-            '127.0.0.0/8',
-            '10.0.0.0/8',
-            '172.16.0.0/12',
-            '192.168.0.0/16',
-            '169.254.0.0/16',
-            '::1/128',
-            'fc00::/7',
-            'fe80::/10',
-        ],
-    },
 
     'contact' => [
         'email' => env('CONTACT_EMAIL', 'hello@relaticle.com'),
